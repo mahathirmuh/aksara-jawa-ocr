@@ -1,0 +1,133 @@
+@import 'tailwindcss';
+@import '../../vendor/livewire/flux/dist/flux.css';
+
+@source "../views";
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../vendor/livewire/flux-pro/stubs/**/*.blade.php';
+@source '../../vendor/livewire/flux/stubs/**/*.blade.php';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Font aksara disajikan sendiri (OFL, disalin dari fonts/ repo OCR) supaya tetap tampil tanpa internet.
+   Hanya Noto Sans Javanese: font training lain tidak boleh disebar. */
+@font-face {
+    font-family: 'Noto Sans Javanese';
+    src: url('/fonts/NotoSansJavanese-Regular.ttf') format('truetype');
+    font-display: swap;
+}
+
+@theme {
+    --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    --font-jv: 'Noto Sans Javanese', 'Javanese Text', serif;
+
+    --color-zinc-50: #f7f9f8;
+    --color-zinc-100: #eff2f1;
+    --color-zinc-200: #dde3e0;
+    --color-zinc-300: #c3ccc8;
+    --color-zinc-400: #9aa5a1;
+    --color-zinc-500: #6f7b77;
+    --color-zinc-600: #4d5854;
+    --color-zinc-700: #353d3a;
+    --color-zinc-800: #1d2221;
+    --color-zinc-900: #151918;
+    --color-zinc-950: #0d100f;
+
+    --color-accent: #2b4c8c;
+    --color-accent-content: #2b4c8c;
+    --color-accent-foreground: #ffffff;
+}
+
+@layer theme {
+    .dark {
+        --color-accent: #93acea;
+        --color-accent-content: #93acea;
+        --color-accent-foreground: #0d100f;
+    }
+}
+
+@layer base {
+    *,
+    ::after,
+    ::before,
+    ::backdrop,
+    ::file-selector-button {
+        border-color: var(--color-zinc-200, currentColor);
+    }
+    .dark *, .dark ::after, .dark ::before { border-color: var(--color-zinc-700); }
+}
+
+[data-flux-field] {
+    @apply grid gap-2;
+}
+
+[data-flux-label] {
+    @apply !mb-0 !leading-tight;
+}
+
+input:focus[data-flux-control],
+textarea:focus[data-flux-control],
+select:focus[data-flux-control] {
+    @apply outline-hidden ring-2 ring-accent ring-offset-2 ring-offset-accent-foreground;
+}
+
+/* ---------- token hasil: semantik & seri grafik (tervalidasi CVD untuk 2 seri) ---------- */
+:root {
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --good: #1d7443;  --good-wash: #dbeee2;
+    --bad: #ad342c;   --bad-wash: #f6dfdb;
+    --warn: #835400;  --warn-wash: #f8e9c4;
+    --del: #86908c;
+    --band: rgba(43, 76, 140, .10);
+    --hl: rgba(235, 104, 52, .28);
+    --hl-edge: #eb6834;
+    --grid: #e3e8e6;
+    --axis-text: #6f7b77;
+}
+.dark {
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --good: #56c585;  --good-wash: #14301f;
+    --bad: #f0827a;   --bad-wash: #3a1d1a;
+    --warn: #e2a843;  --warn-wash: #3a2c11;
+    --del: #7d8884;
+    --band: rgba(147, 172, 234, .14);
+    --hl: rgba(217, 89, 38, .34);
+    --hl-edge: #d95926;
+    --grid: #29302e;
+    --axis-text: #9aa5a1;
+}
+
+[x-cloak] { display: none !important; }
+.jv { font-family: var(--font-jv); }
+.num { font-variant-numeric: tabular-nums; }
+
+/* Beda per suku kata (dihitung di Python: src/align.py). */
+.sy { border-radius: 3px; padding: 0 1px; }
+.sy-sub { background: var(--warn-wash); box-shadow: inset 0 -2px 0 var(--warn); }
+.sy-ins { background: var(--bad-wash); box-shadow: inset 0 -2px 0 var(--bad); }
+.sy-del { color: var(--del); text-decoration: line-through; text-decoration-thickness: 2px; font-size: .72em; }
+.sy-sp { font-family: var(--font-sans); font-size: .55em; color: var(--bad); background: var(--bad-wash); padding: 0 3px; vertical-align: .35em; }
+.sy[data-x0] { cursor: crosshair; }
+.sy[data-x0]:hover, .sy.is-pinned { outline: 2px solid var(--hl-edge); outline-offset: 1px; }
+
+/* Sorotan kolom citra yang dibaca satu suku kata (alignment CTC). */
+.crop { position: relative; display: inline-block; line-height: 0; }
+.crop img { height: 76px; width: auto; max-width: none; display: block; border-radius: 2px; background: #fff; }
+.band { position: absolute; top: -6px; bottom: -6px; background: var(--hl); border-inline: 2px solid var(--hl-edge); border-radius: 3px; pointer-events: none; transition: left .08s, width .08s; }
+@media (prefers-reduced-motion: reduce) { .band { transition: none; } }
+
+.pill { display: inline-flex; align-items: center; gap: .3rem; border-radius: 999px; padding: .1rem .55rem; font-size: .75rem; font-weight: 600; white-space: nowrap; }
+.pill-ok { background: var(--good-wash); color: var(--good); }
+.pill-no { background: var(--bad-wash); color: var(--bad); }
+.pill-wait { background: var(--warn-wash); color: var(--warn); }
+.pill-plain { background: var(--color-zinc-100); color: var(--color-zinc-600); font-weight: 500; }
+.dark .pill-plain { background: var(--color-zinc-800); color: var(--color-zinc-300); }
+.pill-acc { background: color-mix(in srgb, var(--color-accent) 14%, transparent); color: var(--color-accent-content); }
+
+.eyebrow { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; font-weight: 600; color: var(--color-zinc-500); }
+.data-table th { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; font-weight: 600; color: var(--color-zinc-500); text-align: left; padding: .55rem .6rem; white-space: nowrap; }
+.data-table td { padding: .55rem .6rem; border-top: 1px solid var(--color-zinc-200); vertical-align: top; }
+.dark .data-table td { border-top-color: var(--color-zinc-700); }
+.data-table .r { text-align: right; }

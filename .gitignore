@@ -1,0 +1,30 @@
+# Kunci API (template: .env.example). Berkas .env berisi rahasia.
+.env
+
+# Lingkungan & cache Python
+.venv/
+.venv-xpu/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+node_modules/
+
+# Data & hasil: besar (korpus, split, LM, checkpoint), dan sebagian berlisensi non-komersial
+# (citra, label, anotasi NusaAksara: HANYA test, tidak disebar). data/tokenizer.json kecil dan dibutuhkan kode.
+data/*
+!data/tokenizer.json
+out/
+
+# Font: hanya font OFL (Noto Sans Javanese, Tuladha Jejeg OT) yang boleh disebar. Font tambahan hanya untuk
+# training riset lokal; sumbernya dicatat di fonts/extra/SOURCES.md.
+fonts/extra/*
+!fonts/extra/SOURCES.md
+fonts/extra_review/
+fonts/extra_rejected/
+
+# Notebook eksplorasi: keluarannya memuat citra NusaAksara.
+notebooks/
+
+# Fixture test web memuat potongan label & anotasi NusaAksara.
+web/tests/Fixtures/

@@ -1,0 +1,3 @@
+* text=auto
+# Skrip bash harus LF: dengan CRLF (core.autocrlf=true di Git for Windows) bash gagal membaca baris "set -u\r".
+*.sh text eol=lf

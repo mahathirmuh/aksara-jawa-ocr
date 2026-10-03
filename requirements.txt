@@ -1,0 +1,30 @@
+# Python 3.10-3.12.
+# Windows: python -m venv --system-site-packages .venv
+torch>=2.1
+Pillow>=10.2          # wheel resmi sudah membawa RAQM; cek dengan features.check("raqm")
+uharfbuzz>=0.39       # sumber urutan visual (tokenizer)
+numpy>=1.24
+pyarrow>=14           # membaca Wikipedia bahasa Jawa (parquet)
+jiwer>=3.0            # CER
+rapidfuzz>=3.6        # CER round-trip korpus
+tqdm
+pytest
+
+# Wadah API GPT untuk ablasi koreksi pasca-OCR (src/gpt.py); kunci di .env, template .env.example
+openai>=2.0
+python-dotenv>=1.0
+
+# Layanan model untuk web (src/serve.py); httpx untuk tests/test_serve.py
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9
+httpx>=0.27
+
+# notebooks/aksara_ocr.ipynb
+matplotlib
+ipykernel
+nbformat
+nbconvert
+
+# Node.js >= 18 untuk transliterasi korpus:
+#   cd scripts/translit && npm install
