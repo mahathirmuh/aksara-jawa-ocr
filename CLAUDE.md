@@ -301,8 +301,29 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     dan glyph-nya identik dengan angka nol di Noto & ARDemak, sehingga `fase6_rare` membaca nol tunggal
     sebagai pada windu di val; homoglif lain: E ↔ angka enam, pa murda ↔ angka delapan, nga lelet ↔ angka dua.
     **`fase6_rare` selesai 2026-10-03 05:24** (val bersih 0,197%): G3 745 baris **34,06%** (pad 0,06:
-    32,17%; spasi dibuang 22,70%), q100 G1 0,32%, G2 1,22%; dasar `fase5_fonts` 37,25%. `fase6_ctrl` dijalankan
-    ulang 2026-10-03 08:22 setelah laptop mati; perbandingan menyusul.
+    32,17%; spasi dibuang 22,70%), q100 G1 0,32%, G2 1,22%; dasar `fase5_fonts` 37,25%. **`fase6_ctrl` selesai
+    2026-10-03 13:31** (val bersih 0,216%): G3 **32,17%** (pad 0,06: 30,43%; spasi dibuang 22,89%), q100 G1 0,27%,
+    G2 0,95%.
+  - **Hasil `fase6_rare` − `fase6_ctrl` (2026-10-03; `out/compare/crnn_fase6_rare_vs_crnn_fase6_ctrl.md`,
+    `out/compare/rare_synthetic.md`).** Sisipan aksara langka **berhasil untuk tujuannya**: recall 44 codepoint di
+    745 baris nyata 42,8% vs 0% (SK halaman [+36,3; +50,3]), murda 20,8% vs 0%, adeg-adeg pembuka 103/112 (92,0%)
+    vs 0; sintetis javatext 2.000 baris: recall 73,7% (bersih) dan 59,3% (augmentasi `fase5`) vs 0%, pembuka
+    100% vs 0%, teks biasa tanpa efek samping (CER 0,33% vs 0,32%; `fase5_fonts` 0,42%). **Efek samping pada
+    cetakan nyata:** presisi aksara langka hanya 39,6% (536 dikeluarkan, 212 benar; 154 di baris yang tidak punya
+    aksara langka), adeg-adeg palsu 24/633 baris (3,8%), dan aksara umum ikut tertukar: dda → da mahaprana 70x
+    (recall dda 38,1% → 21,8%), ra → pada isen-isen 28x, taling/tarung → tolong 17x (recall tarung 86,6% → 75,6%),
+    sa murda → ba murda 11x. Lengan rare juga mengeluarkan lebih banyak spasi (2.636 vs 2.168; referensi hanya
+    110). Akibatnya G3 literal rare **lebih buruk 1,89 poin** dari kontrol (SK halaman [+1,06; +2,89]; 409 baris
+    tanpa aksara langka +2,79 poin), sedangkan tanpa spasi setara (−0,19 [−0,65; +0,35]). Satu run per lengan:
+    derau antar-run belum terukur. **Kesimpulan menurut aturan di bawah:** (1) terpenuhi, (2) ada efek samping
+    nyata di cetakan → sisipan dipertahankan untuk run berikutnya HANYA setelah diperbaiki: lewati codepoint yang
+    glyph-nya di font terpilih identik/nyaris identik dengan codepoint lain (cek bitmap), jangan menambah spasi di
+    sekitar sisipan/pembuka, dan setel peluangnya di evaluasi sintetis. Dasar run berikutnya = `fase6_ctrl`
+    (lebih baik dari `fase5_fonts` juga di sintetis berpasangan: teks biasa −0,10 poin [−0,14; −0,07]).
+  - **Spasi = galat terbesar yang tersisa di G3 (terukur 2026-10-03):** `fase6_ctrl` mengeluarkan 2.168 spasi,
+    referensi hanya 110; 91% di antara aksara (bukan di samping pada), jadi model membaca renggang antar-aksara
+    cetakan sebagai spasi kata. Itu ~9,3 poin dari 32,17%. Kandidat: augmentasi jarak antar-aksara (tracking)
+    dan lebar spasi yang lebih bervariasi; `--drop-space-prob 1.0` akan menggagalkan G1/G2 (teks sintetis berspasi).
   - **Aturan analisis, ditetapkan 2026-10-03 SEBELUM angka `fase6_ctrl` ada** (`compare_runs.py crnn_fase6_rare
     crnn_fase6_ctrl` + evaluasi sintetis tertarget font javatext): (1) "sisipan membantu aksara langka" hanya bila
     SK 95% bootstrap per halaman untuk selisih recall 44 codepoint (n=495) atau recall adeg-adeg pembuka (n=112)
@@ -383,7 +404,7 @@ Detail lengkap di PLAN.md §7.
 | 3 | `src/dataset.py` + test shape | assert `model(dummy).shape[1] == W // DOWNSAMPLE` | **lolos**: 0/300 melanggar T≥1.5L |
 | 4 | `src/model.py`, `train.py`, `decode.py`, `infer.py` | 4a: CER<1% @32 → 4b: **CER<2% synthetic bersih** | 4a **lolos**: CER inference satu baris 0,07% (31/32 persis) dalam 375 langkah; 4b: berhenti di langkah 1500 karena val CER 0,376% < `--target-cer 0.005` (val = teks baru, font training); checkpoint tetap `out/checkpoints/base/best_4b_step1500.pt`; evaluasi test/G1–G3: `out/eval/base_*.json` |
 | 5 | `src/augment.py`, `scripts/ablation.py` | CER<5% synthetic augmentasi berat | tes cepat 100 baris (bukan angka resmi) `fase5_quick` langkah 500: G1 0,79%, G2 2,88%, G3 76,0% (spasi dibuang 57,5%); run 1500 langkah crash OOM di ~950; `fase5_fonts` (10 font: 2 inti + 8 tambahan) dilanjutkan dari langkah 500, berhenti di 1298 (batas 3 jam): G1 0,41%, G2 1,44%, **G3 39,1%** (margin 0,06: 35,2%; spasi dibuang 22,9%); **G3 resmi 745 baris: 37,2%** (margin 0,06: 34,9%; spasi dibuang 25,2% / 23,1%); pembanding font inti `fase5_core` (init, augmentasi, jadwal LR & langkah sama lewat `--steps 1500 --stop-step 1298`): G1 1,64%, G2 1,82%, G3 745 baris 66,6% (margin 0,06: 63,3%) → **font tambahan menurunkan G3 ~29 poin**, langkah tambahan saja ~8 poin (G3 q100 76,0% → 67,7%); **evaluasi resmi `fase5_fonts` 10.000 baris javatext: G1 0,34%, G2 2,01% → gerbang Fase 5 (G2 < 5%) LOLOS** (`out/eval/fonts_G1_10k.json`, `fonts_G2_10k.json`); **ablasi selesai 2026-09-15** (`out/ablation.md`; 12 run kumulatif dari 4b, 600 langkah, 10 font, drop-space 0,5, satu seed): val berat 65,1% → 12,0% lewat 7 op preset (blur −21, noise −10, rotate −7,5), lalu naik ke 19,3% dengan op pindaian; **G3 745 baris 75,1% → 44,1%** (tanpa spasi 69,8% → 30,0%): op preset hampir datar kecuali contrast −14,8; op pindaian **tight −14,6, stroke −10,5**, binarize −2,4, speckle −1,2; val bersih 0,34% → 0,43%. Batasan: G3 = test set (bias seleksi), satu seed (rotate +12,8 menunjukkan fluktuasi antar-run bisa besar), urutan kumulatif mencampur interaksi |
-| 6 | `src/real.py`, `--real-train` | CER<8% pada ≥200 baris nyata | test: `data/real/nusaaksara/labels.tsv` 745 baris (lisensi **non-komersial**, HANYA test); fine-tune: 43 baris papan Commons menunggu verifikasi pembaca aksara (`out/verifikasi_aksara.html` → `scripts/import_review.py`); **belum lolos**: terbaik sejauh ini `fase6_rare` (masih sintetis saja, + aksara langka) G3 34,06%, beam+LM atas `fase5_fonts` 33,83% |
+| 6 | `src/real.py`, `--real-train` | CER<8% pada ≥200 baris nyata | test: `data/real/nusaaksara/labels.tsv` 745 baris (lisensi **non-komersial**, HANYA test); fine-tune: 43 baris papan Commons menunggu verifikasi pembaca aksara (`out/verifikasi_aksara.html` → `scripts/import_review.py`); **belum lolos**: terbaik sejauh ini `fase6_ctrl` (masih sintetis saja; `fase5_fonts` + 1.500 langkah) G3 **32,17%** (pad 0,06: 30,43%; spasi dibuang 22,89%); `fase6_rare` 34,06%; beam+LM atas `fase5_fonts` 33,83%. Angka "resmi" di web masih `fase5_fonts` 37,25% sampai user memutuskan checkpoint resmi baru |
 
 **Fase 0 tidak bisa diotomatiskan.** Render PNG-nya, lalu **minta user membuka dan
 memeriksa sendiri**. Jangan menyatakan Fase 0 lulus berdasarkan "tidak ada error".

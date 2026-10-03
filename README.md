@@ -16,9 +16,11 @@ Proyek pribadi dan tugas kuliah; masih berjalan.
 | G3 | 745 baris cetak nyata (NusaAksara), checkpoint resmi `fase5_fonts` | 37,25% | < 8% |
 | G4 | round-trip tokenizer (1.034.357 baris) | 100% lolos | 100% |
 
-G3 belum tercapai. Terbaik sejauh ini: 33,83% (beam search + LM karakter) dan 34,06% (`fase6_rare`, sisipan aksara
-langka); eksperimen pembandingnya sedang berjalan. Rincian, keputusan desain, dan riwayat eksperimen ada di
-[`CLAUDE.md`](CLAUDE.md); rencana fase di [`PLAN.md`](PLAN.md).
+G3 belum tercapai. Terbaik sejauh ini 32,17% (`fase6_ctrl`: `fase5_fonts` + 1.500 langkah training sintetis).
+Sisipan aksara langka (`fase6_rare`, 34,06%) membuat murda dan adeg-adeg mulai terbaca (recall 0% → 43% pada
+baris nyata) tetapi menambah keluaran palsu dan spasi. Galat terbesar yang tersisa adalah spasi berlebih: sekitar
+9 poin dari 32%. Rincian, keputusan desain, dan riwayat eksperimen ada di [`CLAUDE.md`](CLAUDE.md); rencana fase
+di [`PLAN.md`](PLAN.md).
 
 ## Isi
 
