@@ -65,3 +65,14 @@ def test_weighted_chunk_losses_equal_full_batch_loss():
         logits = per_sample[rows, : int(c_in.max())]
         total = total + ctc_loss(ctc, logits, cy, c_in, c_tgt, cpu) * (cx.shape[0] / X.shape[0])
     assert torch.allclose(total, full, atol=1e-5)
+
+
+def test_new_data_options_default_to_off():
+    # Opsi fase7 mati secara bawaan, supaya perintah run lama (fase5, fase6) menghasilkan data yang sama.
+    from src.train import parse_args
+
+    args = parse_args(["--run", "x"])
+    assert (args.track_prob, args.rare_max_similarity, args.rare_attach) == (0.0, 0.0, False)
+    args = parse_args(["--run", "x", "--track-prob", "0.5", "--track-max", "0.25", "--rare-max-similarity", "0.9",
+                       "--rare-attach"])
+    assert (args.track_prob, args.track_max, args.rare_max_similarity, args.rare_attach) == (0.5, 0.25, 0.9, True)

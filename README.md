@@ -11,10 +11,13 @@ Proyek pribadi dan tugas kuliah; masih berjalan.
 
 | Gerbang | Data | CER | Target |
 |---|---|---:|---:|
-| G1 | render bersih, font held-out (10.000 baris) | 0,34% | < 2% |
-| G2 | render + augmentasi berat (10.000 baris) | 2,01% | < 5% |
+| G1 | render bersih, font Javanese Text (10.000 baris) | 0,34% | < 2% |
+| G2 | render + augmentasi berat, font yang sama (10.000 baris) | 2,01% | < 5% |
 | G3 | 745 baris cetak nyata (NusaAksara), checkpoint resmi `fase5_fonts` | 37,25% | < 8% |
 | G4 | round-trip tokenizer (1.034.357 baris) | 100% lolos | 100% |
+
+Catatan G1/G2: Javanese Text tidak dipakai merender data training, tetapi salah satu font training tambahan
+(CarakanJawa) ternyata satu keluarga huruf dengannya, jadi angka ini bukan lagi uji font yang belum pernah dilihat.
 
 G3 belum tercapai. Terbaik sejauh ini 32,17% (`fase6_ctrl`: `fase5_fonts` + 1.500 langkah training sintetis).
 Sisipan aksara langka (`fase6_rare`, 34,06%) membuat murda dan adeg-adeg mulai terbaca (recall 0% → 43% pada

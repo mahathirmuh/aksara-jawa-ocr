@@ -12,6 +12,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps, features
 
+from src.tokenizer import logical_syllables
+
 DEFAULT_SIZE = 64
 DEFAULT_PAD = 8
 
@@ -48,25 +50,52 @@ def load_font(font_path: str | Path, size: int = DEFAULT_SIZE) -> ImageFont.Free
     return _load_font(str(font_path), size)
 
 
+def syllable_origins(text: str, font: ImageFont.FreeTypeFont) -> list[tuple[str, float]]:
+    """Suku kata ortografis beserta posisi awalnya (piksel) dalam tata letak baris utuh.
+
+    Posisi diambil dari panjang awalan baris, bukan dari jumlah advance tiap suku kata, supaya kerning
+    kontekstual antar suku kata tetap ikut (Noto & Tuladha merenggangkan suku + pasangan, GumregahNew
+    merapatkan lebih dari separuh pasangan suku kata). Menggambar tiap suku kata di posisi ini menghasilkan
+    citra yang sama dengan menggambar barisnya sekaligus.
+    """
+    origins, prefix = [], ""
+    for syllable in logical_syllables(text):
+        prefix += syllable
+        origins.append((syllable, font.getlength(prefix) - font.getlength(syllable)))
+    return origins
+
+
 def render_with_font(
-    text: str, font: ImageFont.FreeTypeFont, pad: int = DEFAULT_PAD
+    text: str, font: ImageFont.FreeTypeFont, pad: int = DEFAULT_PAD, tracking: float = 0.0
 ) -> Image.Image:
     """Render `text` dengan objek font apa adanya, TANPA memeriksa layout engine.
 
     Pakai `render_line` untuk semua keperluan normal. Fungsi ini terbuka hanya
     supaya verify_shaping bisa membuat pembanding tanpa shaping (BASIC).
+
+    `tracking` (em) = jarak tambahan sesudah tiap suku kata, termasuk spasi: cetakan Jawa tanpa spasi
+    diratakan dengan merenggangkan aksara, dan model yang hanya melihat jarak bawaan font membaca
+    renggang itu sebagai spasi kata. 0 = satu panggilan gambar seperti semula.
     """
     text = unicodedata.normalize("NFC", text)
     size = font.size
+    if tracking > 0:
+        step = tracking * size
+        parts = [(syllable, x + i * step) for i, (syllable, x) in enumerate(syllable_origins(text, font))]
+        extra = step * max(0, len(parts) - 1)
+    else:
+        parts, extra = [(text, 0)], 0
     # Tumpukan pasangan turun jauh di bawah baseline dan sandhangan naik di atasnya.
     # Kata serapan di korpus bisa menghasilkan rantai 5-6 pasangan, jadi kanvas
     # diperbesar bertahap sampai tinta tidak menyentuh tepi, lalu dipotong ke tinta.
     for margin_em in (3, 6, 12):
         margin = margin_em * size
-        width = int(font.getlength(text)) + 2 * margin
+        width = int(font.getlength(text) + extra) + 2 * margin
         height = 2 * margin
         canvas = Image.new("L", (width, height), 0)
-        ImageDraw.Draw(canvas).text((margin, margin), text, font=font, fill=255, anchor="ls")
+        draw = ImageDraw.Draw(canvas)
+        for part, x in parts:
+            draw.text((margin + x, margin), part, font=font, fill=255, anchor="ls")
 
         bbox = canvas.getbbox()
         if bbox is None:
@@ -88,10 +117,11 @@ def render_line(
     font_path: str | Path,
     size: int = DEFAULT_SIZE,
     pad: int = DEFAULT_PAD,
+    tracking: float = 0.0,
 ) -> Image.Image:
     """Render satu baris teks jadi citra grayscale mode "L", hitam di atas putih.
 
     Citra dipotong ketat ke batas tinta lalu diberi `pad` piksel di tiap sisi.
     Tinggi belum dinormalisasi ke H=96 — itu tugas dataset (Fase 3).
     """
-    return render_with_font(text, load_font(font_path, size), pad)
+    return render_with_font(text, load_font(font_path, size), pad, tracking)

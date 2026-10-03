@@ -251,3 +251,70 @@ def test_inactive_rare_text_leaves_deterministic_renders_unchanged(tok):
     for i in range(len(SAMPLE_LINES)):
         assert plain.sample(i)[1] == inactive.sample(i)[1]
         assert torch.equal(plain[i][0], inactive[i][0])
+
+
+def test_syllable_origins_reproduce_the_whole_line_layout():
+    # Tracking menggambar per suku kata. Tanpa jarak tambahan, hasilnya harus sama dengan menggambar baris
+    # sekaligus, termasuk kerning kontekstual antar suku kata (Noto & Tuladha: suku + pasangan).
+    import numpy as np
+    from PIL import ImageDraw
+
+    from src.render import load_font, syllable_origins
+
+    kerned = "ꦥꦸꦤ꧀ꦧꦶ ꦒꦸꦱ꧀ꦠꦸ"  # pa+suku lalu na+pangkon+ba: advance berubah bila suku kata dirender terpisah
+    for path in TRAIN_FONTS:
+        font = load_font(path, 64)
+        for text in [*SAMPLE_LINES, kerned]:
+            size = (int(font.getlength(text)) + 400, 400)
+            whole, parts = Image.new("L", size, 0), Image.new("L", size, 0)
+            ImageDraw.Draw(whole).text((200, 200), text, font=font, fill=255, anchor="ls")
+            draw = ImageDraw.Draw(parts)
+            origins = syllable_origins(text, font)
+            assert "".join(syllable for syllable, _ in origins) == text
+            for syllable, x in origins:
+                draw.text((200 + x, 200), syllable, font=font, fill=255, anchor="ls")
+            a, b = np.asarray(whole, dtype=np.int16), np.asarray(parts, dtype=np.int16)
+            assert (np.abs(a - b) > 127).sum() <= 0.005 * (a > 127).sum(), (path.name, text)
+
+
+def test_tracking_widens_gaps_without_changing_glyphs():
+    import numpy as np
+
+    from src.render import render_line
+
+    text = SAMPLE_LINES[1]
+    font = TRAIN_FONTS[0]
+    plain = render_line(text, font, 64)
+    assert list(render_line(text, font, 64, tracking=0.0).getdata()) == list(plain.getdata())
+    widths = [render_line(text, font, 64, tracking=t).width for t in (0.0, 0.1, 0.3)]
+    assert widths[0] < widths[1] < widths[2]
+    # Tinta hanya bergeser: jumlah piksel gelap nyaris sama (suku kata yang tadinya bersinggungan kini terpisah).
+    ink = [int((np.asarray(render_line(text, font, 64, tracking=t)) < 128).sum()) for t in (0.0, 0.3)]
+    assert abs(ink[1] - ink[0]) <= 0.05 * ink[0]
+    # Kolom kosong di antara tinta bertambah: jarak antar suku kata benar-benar merenggang.
+    gaps = [int((np.asarray(render_line(text, font, 64, tracking=t)).min(axis=0) > 127).sum()) for t in (0.0, 0.3)]
+    assert gaps[1] > gaps[0] + 0.5 * (widths[2] - widths[0])
+
+
+def test_track_prob_zero_leaves_deterministic_renders_unchanged(tok):
+    # Sama seperti drop_space dan rare_text: opsi yang mati tidak boleh mengubah render val/test lama.
+    plain = SyntheticLines(SAMPLE_LINES, tok, TRAIN_FONTS, deterministic=True, seed=3, drop_space_prob=0.5)
+    off = SyntheticLines(SAMPLE_LINES, tok, TRAIN_FONTS, deterministic=True, seed=3, drop_space_prob=0.5,
+                         track_prob=0.0, track_max=0.3)
+    for i in range(len(SAMPLE_LINES)):
+        assert plain.sample(i)[1] == off.sample(i)[1]
+        assert torch.equal(plain[i][0], off[i][0])
+
+
+def test_tracked_samples_are_wider_and_keep_their_labels(tok):
+    plain = SyntheticLines(SAMPLE_LINES, tok, TRAIN_FONTS, deterministic=True, seed=3)
+    tracked = SyntheticLines(SAMPLE_LINES, tok, TRAIN_FONTS, deterministic=True, seed=3, track_prob=1.0, track_max=0.3)
+    wider = 0
+    for i in range(len(SAMPLE_LINES)):
+        (img_plain, text_plain), (img_tracked, text_tracked) = plain.sample(i), tracked.sample(i)
+        assert text_tracked == text_plain  # label tidak berubah: spasi hanya ada bila ada di teks
+        assert img_tracked.width >= img_plain.width
+        wider += img_tracked.width > img_plain.width
+        assert torch.equal(tracked[i][1], plain[i][1])
+        assert torch.equal(tracked[i][0], tracked[i][0])  # deterministik
+    assert wider >= len(SAMPLE_LINES) - 1

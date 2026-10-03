@@ -64,6 +64,15 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="peluang menyisipkan satu aksara langka (murda, swara, pa cerek, ...) ke baris sintetis")
     p.add_argument("--rare-opener-prob", type=float, default=0.0,
                    help="peluang membuka baris sintetis dengan pada adeg-adeg (pembuka paragraf cetakan)")
+    p.add_argument("--rare-max-similarity", type=float, default=0.0,
+                   help="lewati aksara langka yang glyph-nya di font terpilih mirip glyph lain (IoU >= nilai ini); "
+                        "0 = sisipkan semua, seperti fase6_rare")
+    p.add_argument("--rare-attach", action="store_true",
+                   help="tempelkan pada/pangrangkep sisipan ke kata sebelumnya, tanpa menambah spasi")
+    p.add_argument("--track-prob", type=float, default=0.0,
+                   help="peluang baris sintetis dirender dengan jarak tambahan antar suku kata")
+    p.add_argument("--track-max", type=float, default=0.3,
+                   help="jarak tambahan terbesar (em), diundi seragam dari 0 per baris")
     p.add_argument("--real-train", default="", help="labels_train.tsv citra nyata (Fase 6)")
     p.add_argument("--real-val", default="", help="labels_val.tsv untuk memilih checkpoint (Fase 6)")
     p.add_argument("--real-repeat", type=int, default=10, help="berapa kali data nyata diulang per epoch")
@@ -248,13 +257,18 @@ def build_datasets(args, tokenizer: Tokenizer):
     if train_lines:
         rare_text = None
         if args.rare_insert_prob or args.rare_opener_prob:
-            rare_text = RareText.from_lines(train_lines, tokenizer.charset, args.rare_insert_prob, args.rare_opener_prob)
+            rare_text = RareText.from_lines(train_lines, tokenizer.charset, args.rare_insert_prob, args.rare_opener_prob,
+                                            max_similarity=args.rare_max_similarity, attach=args.rare_attach)
             print(f"aksara langka: {len(rare_text.rare)} codepoint, sisip p={args.rare_insert_prob}, "
-                  f"pembuka p={args.rare_opener_prob}")
+                  f"pembuka p={args.rare_opener_prob}"
+                  + (f", lewati glyph mirip (IoU >= {args.rare_max_similarity})" if args.rare_max_similarity else "")
+                  + (", tanpa spasi tambahan" if args.rare_attach else ""))
+        if args.track_prob:
+            print(f"jarak antar suku kata: p={args.track_prob}, 0-{args.track_max} em")
         synthetic = SyntheticLines(
             train_lines, tokenizer, train_fonts, augment=build_augment(args.augment),
             deterministic=bool(args.overfit), seed=args.seed, drop_space_prob=args.drop_space_prob,
-            rare_text=rare_text,
+            rare_text=rare_text, track_prob=args.track_prob, track_max=args.track_max,
         )
         parts.append((synthetic, 1))
     if args.real_train:

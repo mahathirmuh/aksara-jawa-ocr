@@ -17,7 +17,7 @@ Terverifikasi 2026-09-13. Berbeda dari asumsi PLAN.md §4.1 — perhatikan.
 | CPU | Intel Core Ultra 7 165U, 14 thread, 32 GB RAM | training CPU ~300 ms/sampel (model 4.6M, lebar 1200) |
 | GPU | **tanpa NVIDIA**; Intel iGPU dipakai lewat PyTorch **XPU** | ~140 ms/sampel pada batch 32 — ~2x CPU |
 | `.venv` | Python 3.12, `--system-site-packages` (torch 2.10 **cpu**), Pillow 11.3 RAQM=True, uharfbuzz | korpus, tokenizer, test |
-| `.venv-xpu` | torch 2.14 **xpu** + dependensi proyek, RAQM=True | training & evaluasi |
+| `.venv-xpu` | torch 2.14 **xpu** + dependensi proyek, RAQM=True; **Pillow 12.3.0 / HarfBuzz 14.2.1, beda dari `.venv` (11.3.0 / 11.2.1)** | training. Render BasaJan berbeda antar lingkungan (lihat catatan font); cek shaping harus dijalankan dengan interpreter ini juga |
 | Node.js 24 | `scripts/translit/` (honocoroko) | hanya untuk membangun korpus |
 | `fonts/` | `NotoSansJavanese-Regular.ttf`, `TuladhaJejegOT-Regular.ttf` | font training |
 | `C:/Windows/Fonts/javatext.ttf` | Javanese Text (Microsoft) | **held-out** untuk G1; ikut konsensus urutan visual; tidak dipakai merender data training; lisensinya tidak mengizinkan redistribusi |
@@ -54,6 +54,23 @@ melindungi dari environment lain dan dari regresi saat upgrade.
   `out/shaping_extra/contact_sheet_*.png`, `out/shaping_review/contact_sheet.png`.
   Dipakai lewat `src.train --extra-fonts fonts/extra` (hanya data training; val tetap font inti).
   `verify_shaping.py --fonts-dir DIR --out DIR`.
+- **Tiga cacat data training yang ditemukan 2026-10-03 (tinjauan independen, diverifikasi ulang), berlaku untuk
+  SEMUA run `--extra-fonts` sejak `fase5_fonts`; belum diperbaiki supaya run fase7 tetap sebanding:**
+  1. **BasaJan dirender TANPA shaping di lingkungan training.** `.venv-xpu` memakai Pillow 12.3.0 / HarfBuzz
+     14.2.1, `.venv` Pillow 11.3.0 / HarfBuzz 11.2.1. Di `.venv-xpu` GSUB BasaJan tidak diterapkan: `ꦏ꧀ꦏꦏ`
+     @64 px = 163x69 (pangkon terlihat, aksara berjajar) vs 100x71 di `.venv` (pasangan menumpuk). Sembilan font
+     training lain dan javatext identik di kedua lingkungan. `verify_shaping.py`, lembar kontak, dan pytest
+     berjalan di `.venv`, jadi kegagalan senyap ini tidak pernah terlihat. ~10% sampel sintetis menampilkan
+     "C + pangkon + C" berjajar; label tetap cocok dengan citra (cacat tipografi, bukan derau label).
+     Perbaikan nanti: keluarkan BasaJan atau samakan versi Pillow, dan jalankan cek shaping tiap font training
+     dengan interpreter training di awal `src.train` (raise bila gagal).
+  2. **javatext bukan lagi font di luar data training.** CarakanJawa (di `fonts/extra`) dan javatext punya
+     advance yang sama pada 72 dari 73 aksara/angka/pada dan bentuk yang nyaris sama (IoU median 0,86): satu
+     keluarga huruf. G1/G2 sejak `fase5_fonts` mengukur generalisasi di dalam keluarga itu, bukan ke font yang
+     belum pernah dilihat. Sebut batasan ini saat melaporkan G1/G2; metrik sintetis baru sebaiknya memakai juga
+     satu font di luar keluarga ini.
+  3. **NewKramawirya:** pada lungsi sesudah pangkon digambar dengan glyph pada lingsa (substitusi kontekstual),
+     jadi dua label untuk gambar yang sama di font itu (pangkon+lungsi ada di 12% baris train).
 - **Lebar spasi font tambahan tidak seragam (terukur 2026-09-14, spasi/lebar ka @64px):** Noto 0,21,
   Tuladha OT 0,18, javatext 0,21; **GumregahNew 0,00** (celah kata hasil shaping 0,09),
   **abmAksaJawa Regular & Bold 0,10**, ARDemak 0,14, BasaJan 0,35. Pada font berspasi sempit, label
@@ -324,6 +341,48 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     referensi hanya 110; 91% di antara aksara (bukan di samping pada), jadi model membaca renggang antar-aksara
     cetakan sebagai spasi kata. Itu ~9,3 poin dari 32,17%. Kandidat: augmentasi jarak antar-aksara (tracking)
     dan lebar spasi yang lebih bervariasi; `--drop-space-prob 1.0` akan menggagalkan G1/G2 (teks sintetis berspasi).
+  - **Fase 7 (dijalankan 2026-10-03 22:12, `scripts/run_fase7.sh`, log `out/fase7_chain.log`):** dua run 1.500
+    langkah dari `fase6_ctrl` (lr 3e-4, augmentasi `fase5`, drop-space 0,5, 10 font).
+    `fase7_track` = `--track-prob 0.5 --track-max 0.3`: baris dirender per suku kata dengan jarak tambahan
+    seragam per baris (0–0,3 em; `src/render.py::syllable_origins` mengambil posisi dari tata letak baris utuh,
+    jadi tanpa jarak tambahan citranya identik dengan render biasa di 9 dari 11 font, beda < 0,2% tinta di
+    GumregahNew & NewKramawirya). Spasi kata menjadi lebar spasi + 2x jarak, antar-aksara = jarak.
+    `fase7_track_rare` = sama + `--rare-insert-prob 0.3 --rare-opener-prob 0.15 --rare-max-similarity 0.9
+    --rare-attach`: aksara langka yang glyph-nya di font terpilih punya IoU ≥ 0,9 dengan glyph codepoint
+    SEJENIS dilewati, dan pada/pangrangkep sisipan ditempel ke kata sebelumnya tanpa spasi tambahan (attach
+    hanya mengubah ~2,6% baris). Run kedua meniru titik lanjut run pertama. Saringan diperbaiki 2026-10-03
+    23:20, sebelum run kedua mulai, setelah tinjauan independen (`src/text_augment.py::glyph_similarity`):
+    (i) codepoint dipilih dulu baru disaring, jadi jatah yang dilewati tidak pindah ke codepoint lain
+    (versi pertama menaikkan 21 codepoint lain 22%); (ii) sandhangan dibandingkan tanpa tinta ka (versi pertama
+    menganggap cecak mirip "tanpa tanda"); (iii) pasangan aksara-angka tidak disaring (E = angka enam, pa murda
+    = angka delapan, ga/la/ya = angka 1/7/9 kembar di banyak font termasuk javatext, dan model membedakannya
+    dari konteks; pada windu = angka nol tetap disaring karena keduanya token lepas). Hasil di lingkungan
+    training: 38 dari 439 pasangan (font, codepoint langka) tersaring, 0–12 per font, tidak ada codepoint yang
+    tersisa di ≤ 3 font, adeg-adeg selalu ikut (IoU terbesar 0,50). Da mahaprana ~ dda hanya tersaring di 3 font
+    (abmAksaJawa Regular/Bold, GumregahNew: 0,94; CarakanJawa 0,897, Tuladha 0,87, nyk 0,86 lolos), jadi
+    jangan berharap kebingungan dda → da mahaprana hilang. Batasan: ambang 0,9 dipilih SETELAH melihat
+    kebingungan di test set dan tidak punya celah alami (dataran baru di ≥ 0,97 = kembar persis); keputusan di
+    tepi ambang berubah menurut ukuran render (18 dari 439 pada 56–72 px); saringan dan attach tidak terpisah.
+    G3 run ini bersifat eksploratif; titik akhir utamanya `scripts/eval_rare.py`.
+    **Run ketiga `fase7_ctrl`** (`scripts/run_fase7_ctrl.sh`, menunggu rantai selesai): sama dengan
+    `fase7_track` tanpa tracking, titik lanjut ditiru, supaya efek tracking terpisah dari efek +1.500 langkah.
+  - **Aturan analisis fase 7, ditetapkan 2026-10-03 SEBELUM ada angka:** (a) *Tracking*: titik akhir utama =
+    spasi berlebih di 745 baris (jumlah spasi keluaran; `fase6_ctrl` 2.168 vs 110 di referensi) dan CER
+    literal `fase7_track` − `fase6_ctrl` dengan SK halaman; "membantu" hanya bila SK tidak memuat 0, CER tanpa
+    spasi tidak memburuk, dan evaluasi sintetis teks berjarak (javatext, belum dibuat) searah; G1/G2 dan teks
+    biasa sintetis tidak boleh memburuk. Perbedaan `fase7_track` vs `fase6_ctrl` memuat tracking, +1.500
+    langkah, siklus LR baru, dan teks baru sekaligus, jadi efek tracking pada G3 dibaca dari `fase7_track` −
+    `fase7_ctrl` (SK halaman). Titik akhir utama tracking = **dosis-respons sintetis**: spasi palsu per 100
+    batas suku kata pada baris val tanpa spasi yang dirender berjarak. Dasar terukur 2026-10-03 (8 baris,
+    javatext; model tanpa tracking): 0 / 54–64 / 91–93 pada jarak 0 / 0,15 / 0,30 em untuk `fase5_fonts`,
+    `fase6_ctrl`, `fase6_rare` (+1.500 langkah tanpa tracking tidak mengubahnya); pada 150 citra bersih
+    `fase6_ctrl`: CER 0,29% → 15,2% → 37,1% sedangkan CER tanpa spasi datar 0,32%. Gejala G3 tereproduksi di
+    sintetis. Skrip evaluasinya (≥ 300 baris, berspasi & tanpa spasi, 0–0,6 em, + recall spasi asli) dibuat
+    sebelum membaca hasil. (b) *Aksara langka diperbaiki*:
+    `fase7_track_rare` − `fase7_track` pada recall 44 codepoint & adeg-adeg pembuka (harus tetap > 0, SK
+    halaman), presisi keluaran aksara langka (fase6_rare 39,6%), recall dda (fase6: 38,1% → 21,8%), pembuka
+    palsu (3,8%), dan CER 409 baris tanpa aksara langka. (c) G3 keseluruhan dilaporkan dengan SK sebagai arah;
+    checkpoint dasar berikutnya dipilih dari (a)–(b) dan sintetis, bukan dari G3.
   - **Aturan analisis, ditetapkan 2026-10-03 SEBELUM angka `fase6_ctrl` ada** (`compare_runs.py crnn_fase6_rare
     crnn_fase6_ctrl` + evaluasi sintetis tertarget font javatext): (1) "sisipan membantu aksara langka" hanya bila
     SK 95% bootstrap per halaman untuk selisih recall 44 codepoint (n=495) atau recall adeg-adeg pembuka (n=112)

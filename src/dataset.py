@@ -94,10 +94,14 @@ class SyntheticLines(Dataset):
         seed: int = 0,
         drop_space_prob: float = 0.0,
         rare_text: "RareText | None" = None,
+        track_prob: float = 0.0,
+        track_max: float = 0.0,
     ):
         if not font_paths:
             raise ValueError("Butuh minimal satu font")
         self.rare_text = rare_text
+        self.track_prob = track_prob
+        self.track_max = track_max
         self.lines = list(lines)
         self.tokenizer = tokenizer
         self.font_paths = [str(p) for p in font_paths]
@@ -143,7 +147,13 @@ class SyntheticLines(Dataset):
             # spasinya nyaris tak tampak selalu begini, supaya label tidak memuat spasi
             # yang tidak ada di citra.
             text = text.replace(" ", "")
-        img = render_line(text, font, size)
+        # Jarak antar suku kata acak per baris (em). Diundi paling akhir dan hanya bila aktif, jadi
+        # render val/test deterministik (tanpa tracking) tidak berubah.
+        tracking = 0.0
+        track_prob = getattr(self, "track_prob", 0.0)
+        if track_prob and rng.random() < track_prob:
+            tracking = rng.uniform(0.0, self.track_max)
+        img = render_line(text, font, size, tracking=tracking) if tracking else render_line(text, font, size)
         return (self.augment(img, rng) if self.augment else img), text
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor] | None:
