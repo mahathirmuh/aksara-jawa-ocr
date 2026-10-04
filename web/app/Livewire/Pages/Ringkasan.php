@@ -23,10 +23,12 @@ class Ringkasan extends Component
         // toBase(): only() pada Eloquent Collection menyaring primary key model, bukan kunci "pipeline".
         $g3 = Metric::where('scope', 'nusaaksara_745')->get()->keyBy('pipeline')->toBase();
         $labels = Pipeline::pluck('label', 'key');
-        // Nilai bisa berdekatan (fonts, beam, fase6 di 33–38%) dan lebar sumbu ikut layar, jadi label tidak ditaruh
+        // Nilai bisa berdekatan (fonts, beam, fase6 di 32–38%) dan lebar sumbu ikut layar, jadi label tidak ditaruh
         // di samping setiap titik: hanya titik resmi yang berlabel, semua nilai ada di daftar urut CER (terbaik dulu,
-        // sama dengan arah sumbu). x = posisi di sumbu, dipotong ke 0–100% (CRNN 4b > 100%).
-        $points = collect(['crnn_4b', 'crnn_core', 'crnn_fonts', 'crnn_fonts_beam', 'crnn_fase6_rare', 'crnn_fase6_ctrl'])
+        // sama dengan arah sumbu). x = posisi di sumbu, dipotong ke 0–100% (CRNN 4b > 100%). Run lanjutan (fase6,
+        // fase7) ikut bila sudah diekspor; daftarnya satu sumber dengan catatan di halaman Perbandingan.
+        $points = collect(['crnn_4b', 'crnn_core', 'crnn_fonts', 'crnn_fonts_beam'])
+            ->merge(array_keys(Perbandingan::FOLLOWUP_RUNS))
             ->filter(fn ($k) => $g3->has($k))
             ->map(fn ($k) => ['key' => $k, 'label' => $labels[$k] ?? $k, 'value' => $g3[$k]->cer,
                 'x' => round(min(100, max(0, $g3[$k]->cer * 100)), 2), 'official' => $k === 'crnn_fonts'])

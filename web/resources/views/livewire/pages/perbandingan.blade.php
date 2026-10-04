@@ -21,8 +21,7 @@
                                 <td class="r num">{{ pct($m->exact, 1) }}</td>
                                 <td class="text-zinc-500">
                                     @if ($m->pipeline === 'crnn_fonts') angka G3 resmi
-                                    @elseif ($m->pipeline === 'crnn_fase6_rare') fase5_fonts + 1.500 langkah dengan sisipan aksara langka
-                                    @elseif ($m->pipeline === 'crnn_fase6_ctrl') pembanding: langkah dan titik lanjut sama, tanpa aksara langka
+                                    @elseif (isset($runNotes[$m->pipeline])) {{ $runNotes[$m->pipeline] }}
                                     @elseif ($m->better !== null) {{ $m->better }} baris membaik, {{ $m->worse }} memburuk dibanding greedy
                                     @elseif ($m->pipeline === 'crnn_core') tanpa 8 font tambahan
                                     @elseif ($m->pipeline === 'crnn_4b') tanpa augmentasi, 2 font
@@ -33,12 +32,10 @@
                     </tbody>
                 </table>
             </div>
-            {{-- Hanya run fase6 yang ada di tabel yang disebut (bisa satu saja, mis. fase6_ctrl belum diekspor). Sengaja
-                 satu baris, bukan blok: Blade mencocokkan blok php dari kemunculan php pertama, yaitu baris di tabel atas. --}}
-            @php($fase6 = $full->whereIn('pipeline', ['crnn_fase6_rare', 'crnn_fase6_ctrl'])->map(fn ($m) => $pipelines[$m->pipeline]->label ?? $m->pipeline)->values())
-            @if ($fase6->isNotEmpty())
+            {{-- Run lanjutan (fase6, fase7; daftar dan catatannya di Perbandingan::FOLLOWUP_RUNS) yang ada di tabel. --}}
+            @if ($followups->isNotEmpty())
                 <p class="mt-3 max-w-prose rounded-lg bg-[var(--warn-wash)] px-3 py-2 text-xs text-[var(--warn)]">
-                    {{ $fase6->join(' dan ') }}: satu run per kondisi, diukur lagi pada test set yang sama. Baca selisihnya
+                    {{ $followups->join(', ', ' dan ') }}: satu run per kondisi, diukur lagi pada test set yang sama. Baca selisihnya
                     sebagai arah, bukan angka resmi; angka G3 resmi tetap CRNN fase5_fonts (greedy).
                 </p>
             @endif
@@ -73,7 +70,9 @@
             <section class="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
                 <flux:heading size="lg">50 baris uji buta</flux:heading>
                 <p class="mt-1 text-sm text-zinc-500">Satu-satunya subset yang juga dibaca VLM. CER, makin pendek makin baik.</p>
-                <div class="relative mt-3 h-64" x-data="chart('bars', @js($blindChart))" wire:ignore>
+                {{-- Tinggi ikut jumlah batang supaya kerapatannya tetap: tiap run lanjutan yang diekspor menambah satu
+                     batang. Paling kecil 16rem (h-64 semula, cukup untuk 7 batang). --}}
+                <div class="relative mt-3" style="height: {{ max(16, 3 + 1.75 * $blind->count()) }}rem" x-data="chart('bars', @js($blindChart))" wire:ignore>
                     <canvas x-ref="canvas" role="img" aria-label="CER per pipeline pada 50 baris uji buta"></canvas>
                 </div>
                 <table class="data-table mt-2 w-full text-sm">

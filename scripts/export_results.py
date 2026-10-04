@@ -1,8 +1,11 @@
 """Ekspor hasil eksperimen untuk web `aksara-ocr-web` (kontrak data, skema 1).
 
-  .venv/Scripts/python scripts/export_results.py            # ~14 menit di CPU (5 checkpoint + beam, 745 baris)
+  .venv/Scripts/python scripts/export_results.py            # ~12 menit di CPU (5 checkpoint + beam, 745 baris)
 
-Tanpa run fase6 (3 checkpoint + beam) ~9 menit; tiap run fase6 yang ikut menambah satu lintasan inferensi 745 baris.
+Terukur 2026-10-03 dengan dua run fase6, tanpa training yang berjalan (out/after_fase6.log): 741 dtk; tiga checkpoint
+dasar + beam 568 dtk, lalu tiap run lanjutan (fase6, fase7) yang ikut menambah satu lintasan inferensi 745 baris,
+~86 dtk. Dengan kelima run lanjutan (8 checkpoint + beam) kira-kira 17 menit: perkiraan, belum diukur, dan lebih
+lama bila training sedang berjalan.
 
 Keluaran di out/results/ (ditimpa):
   manifest.json      skema, waktu, pipeline, gerbang G1-G4, metrik agregat, ablasi, kesalahan aksara
@@ -10,9 +13,11 @@ Keluaran di out/results/ (ditimpa):
   predictions.jsonl  satu prediksi per (baris, pipeline): teks, CER, segmen beda per suku kata, kolom citra
 
 Semua angka dihitung di sini; web hanya menampilkan. Angka 745 baris dicocokkan dengan laporan resmi
-(out/eval/*_G3_full.json, termasuk run fase6 yang ikut, dan out/beam/fonts_o5.json) dan skrip berhenti kalau
-berbeda atau laporannya tidak ada. Run fase6 ikut bila last_snapshot.pt-nya ada; snapshot dari run yang belum
-selesai (langkah != args.steps) atau yang flag aksara langkanya tidak cocok dengan nama run menghentikan skrip.
+(out/eval/*_G3_full.json, termasuk run lanjutan yang ikut, dan out/beam/fonts_o5.json) dan skrip berhenti kalau
+berbeda atau laporannya tidak ada. Run lanjutan (OPTIONAL_CHECKPOINTS: fase6_rare, fase6_ctrl, fase7_track,
+fase7_track_rare, fase7_ctrl) ikut satu per satu bila last_snapshot.pt-nya ada; yang belum punya snapshot dilewati
+tanpa galat. Snapshot dari run yang belum selesai (langkah != args.steps) atau yang argumen training-nya (jarak
+antar-aksara, aksara langka, saringan) tidak cocok dengan jenis run menghentikan skrip sebelum inferensi.
 """
 
 import argparse
@@ -69,19 +74,38 @@ PIPELINES = [
      "config": "llm:gemma2-9b-cpt-sahabatai"},
 ]
 # Run lanjutan: ikut diekspor hanya bila out/checkpoints/<run>/last_snapshot.pt ada (greedy saja; beam tetap dari
-# fase5_fonts), disisipkan dengan urutan daftar ini tepat setelah crnn_fonts_beam (`add_optional`). Run yang ikut
-# wajib selesai dan flag aksara langkanya cocok dengan `rare`; tanpa --limit, CER 745 barisnya wajib sama dengan
-# out/eval/<run>_G3_full.json. Langkah, titik awal, augmentasi, dan peluang aksara langka di config dibaca dari
-# checkpoint.
+# fase5_fonts), disisipkan dengan urutan daftar ini tepat setelah crnn_fonts_beam (`add_optional`). Kunci = "crnn_" +
+# nama run (scripts/compare_runs.py mencari laporan resminya dengan membuang awalan itu). Run yang ikut wajib selesai
+# dan argumen training di checkpoint-nya wajib cocok dengan jenis run (`check_optional_run`):
+#   track     jarak tambahan antar-aksara (--track-prob > 0, --track-max > 0); False = track_prob harus 0
+#   rare      sisipan aksara langka (--rare-insert-prob > 0); False = tanpa sisipan dan tanpa adeg-adeg pembuka
+#   filtered  sisipan tersaring (--rare-max-similarity > 0 dan --rare-attach); False = keduanya mati. Hanya untuk rare
+# Tanpa --limit, CER 745 barisnya wajib sama dengan out/eval/<run>_G3_full.json. Langkah, titik awal, augmentasi,
+# peluang, dan ambang di config dibaca dari checkpoint; `detail` diisi `optional_pipeline`.
 OPTIONAL_CHECKPOINTS = [
-    {"key": "crnn_fase6_rare", "run": "fase6_rare", "label": "CRNN fase6_rare", "rare": True,
+    {"key": "crnn_fase6_rare", "run": "fase6_rare", "label": "CRNN fase6_rare",
+     "track": False, "rare": True, "filtered": False,
      "detail": "10 font · aug {augment} · + aksara langka (sisip {insert} · adeg-adeg {opener}) · greedy"},
-    {"key": "crnn_fase6_ctrl", "run": "fase6_ctrl", "label": "CRNN fase6_ctrl", "rare": False,
+    {"key": "crnn_fase6_ctrl", "run": "fase6_ctrl", "label": "CRNN fase6_ctrl",
+     "track": False, "rare": False, "filtered": False,
      "detail": "10 font · aug {augment} · tanpa aksara langka (pembanding) · greedy"},
+    {"key": "crnn_fase7_track", "run": "fase7_track", "label": "CRNN fase7_track",
+     "track": True, "rare": False, "filtered": False,
+     "detail": "10 font · aug {augment} · jarak antar-aksara p {track} hingga {track_max} em · greedy"},
+    {"key": "crnn_fase7_track_rare", "run": "fase7_track_rare", "label": "CRNN fase7_track_rare",
+     "track": True, "rare": True, "filtered": True,
+     "detail": "10 font · aug {augment} · jarak antar-aksara p {track} hingga {track_max} em · + aksara langka "
+               "tersaring (sisip {insert} · adeg-adeg {opener} · mirip >= {similarity} · tempel) · greedy"},
+    {"key": "crnn_fase7_ctrl", "run": "fase7_ctrl", "label": "CRNN fase7_ctrl",
+     "track": False, "rare": False, "filtered": False,
+     "detail": "10 font · aug {augment} · tanpa jarak tambahan (pembanding) · greedy"},
 ]
 CHECKPOINT_DIR = ROOT / "out/checkpoints"
 EVAL_DIR = ROOT / "out/eval"
 TOL = 1e-9  # selisih CER terhadap laporan resmi yang masih dianggap sama
+# Kolom pipelines.config di web bertipe string = varchar(255) di PostgreSQL: config yang lebih panjang menggagalkan
+# `php artisan aksara:import` (SQLite, yang dipakai test web, tidak membatasi panjang).
+MAX_CONFIG = 255
 
 CLASSIC = set("ꦯꦉꦟꦡꦑꦣꦦꦊꦽꦨꦓꦄꦆꦎꦌꦈꦍꦇ꧅꧄ꦬꦋꦰꦜꦞꦙꦘꦖꦐꦅ")
 
@@ -110,20 +134,43 @@ def checkpoint_meta(path: Path) -> tuple[int, dict]:
     return ckpt["step"], ckpt["args"]
 
 
+def run_options(args: dict) -> dict:
+    """Opsi training yang menentukan jenis run lanjutan, dari vars(args) src.train di checkpoint.
+
+    Opsi yang belum ada saat checkpoint dibuat dianggap mati (0/False): checkpoint fase6 tidak punya track_prob,
+    track_max, rare_max_similarity, maupun rare_attach.
+    """
+    return {"track": args.get("track_prob") or 0, "track_max": args.get("track_max") or 0,
+            "insert": args.get("rare_insert_prob") or 0, "opener": args.get("rare_opener_prob") or 0,
+            "similarity": args.get("rare_max_similarity") or 0, "attach": bool(args.get("rare_attach"))}
+
+
 def check_optional_run(spec: dict, step: int, args: dict) -> None:
-    """Berhenti bila run lanjutan belum selesai atau flag aksara langkanya tidak cocok dengan nama run."""
-    key = spec["key"]
-    insert, opener = args.get("rare_insert_prob") or 0, args.get("rare_opener_prob") or 0
+    """Berhenti bila run lanjutan belum selesai atau argumen training-nya tidak cocok dengan jenis run di `spec`."""
+    key, o = spec["key"], run_options(args)
     if args.get("run") != spec["run"]:
         raise SystemExit(f"{key}: last_snapshot.pt milik run {args.get('run')!r}, bukan {spec['run']!r}")
     if not args.get("steps") or step != args["steps"]:
         raise SystemExit(f"{key}: last_snapshot.pt di langkah {step}, padahal run dijadwalkan {args.get('steps')} "
                          "langkah (run belum selesai); ekspor dihentikan")
-    if spec["rare"] and not insert > 0:
-        raise SystemExit(f"{key}: run aksara langka, tetapi rare_insert_prob = {insert}")
-    if not spec["rare"] and (insert != 0 or opener != 0):
-        raise SystemExit(f"{key}: run pembanding harus tanpa aksara langka, tetapi rare_insert_prob = {insert}, "
-                         f"rare_opener_prob = {opener}")
+    if spec["track"] and not (o["track"] > 0 and o["track_max"] > 0):
+        raise SystemExit(f"{key}: run jarak antar-aksara, tetapi track_prob = {o['track']}, "
+                         f"track_max = {o['track_max']}")
+    if not spec["track"] and o["track"] != 0:
+        raise SystemExit(f"{key}: run tanpa jarak tambahan, tetapi track_prob = {o['track']}")
+    if spec["rare"] and not o["insert"] > 0:
+        raise SystemExit(f"{key}: run aksara langka, tetapi rare_insert_prob = {o['insert']}")
+    if not spec["rare"] and (o["insert"] != 0 or o["opener"] != 0):
+        kind = "run jarak antar-aksara" if spec["track"] else "run pembanding"
+        raise SystemExit(f"{key}: {kind} harus tanpa aksara langka, tetapi rare_insert_prob = {o['insert']}, "
+                         f"rare_opener_prob = {o['opener']}")
+    # Saringan hanya berarti bila ada sisipan: pada run tanpa aksara langka kedua opsi itu tidak dipakai training.
+    if spec["rare"] and spec["filtered"] and not (o["similarity"] > 0 and o["attach"]):
+        raise SystemExit(f"{key}: run aksara langka tersaring, tetapi rare_max_similarity = {o['similarity']}, "
+                         f"rare_attach = {o['attach']}")
+    if spec["rare"] and not spec["filtered"] and (o["similarity"] != 0 or o["attach"]):
+        raise SystemExit(f"{key}: run aksara langka tanpa saringan, tetapi rare_max_similarity = {o['similarity']}, "
+                         f"rare_attach = {o['attach']}")
 
 
 def decimal(x: float) -> str:
@@ -133,11 +180,15 @@ def decimal(x: float) -> str:
 
 def optional_pipeline(spec: dict, step: int, args: dict, start: str) -> dict:
     """Entri pipeline run lanjutan; config memuat langkahnya, mis. crnn:fase6_rare@1500 (lanjutan fase5_fonts@1298)."""
-    detail = spec["detail"].format(augment=args.get("augment"), insert=decimal(args.get("rare_insert_prob") or 0),
-                                   opener=decimal(args.get("rare_opener_prob") or 0))
+    o = run_options(args)
+    detail = spec["detail"].format(augment=args.get("augment"), track=decimal(o["track"]),
+                                   track_max=decimal(o["track_max"]), insert=decimal(o["insert"]),
+                                   opener=decimal(o["opener"]), similarity=decimal(o["similarity"]))
     head = f"crnn:{spec['run']}@{step}" + (f" (lanjutan {start})" if start else "")
-    return {"key": spec["key"], "label": spec["label"], "kind": "crnn", "status": "done",
-            "config": f"{head} · {detail}"}
+    config = f"{head} · {detail}"
+    if len(config) > MAX_CONFIG:
+        raise SystemExit(f"{spec['key']}: config {len(config)} karakter, batas kolom di web {MAX_CONFIG}: {config}")
+    return {"key": spec["key"], "label": spec["label"], "kind": "crnn", "status": "done", "config": config}
 
 
 def insert_after(pipelines: list[dict], entries: list[dict], after: str = "crnn_fonts_beam") -> list[dict]:
@@ -207,6 +258,9 @@ def main(argv=None) -> None:
     for p in pipelines:
         if p["key"] in optional_keys:
             print(f"run lanjutan ikut: {p['key']} = {p['config']}", flush=True)
+    skipped = [spec["run"] for spec in OPTIONAL_CHECKPOINTS if spec["key"] not in optional_keys]
+    if skipped:  # snapshot baru dibuat setelah run selesai (`evaluate` di scripts/fase6_common.sh)
+        print(f"run lanjutan dilewati (last_snapshot.pt belum ada): {', '.join(skipped)}", flush=True)
     official: dict[str, tuple[float, str]] = {}
     if not args.limit:  # laporan resmi dibaca SEBELUM inferensi panjang supaya laporan yang hilang langsung ketahuan
         fonts_json, core_json = EVAL_DIR / "fonts_G3_full.json", EVAL_DIR / "core_G3_full.json"

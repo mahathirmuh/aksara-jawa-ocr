@@ -19,11 +19,12 @@ Proyek pribadi dan tugas kuliah; masih berjalan.
 Catatan G1/G2: Javanese Text tidak dipakai merender data training, tetapi salah satu font training tambahan
 (CarakanJawa) ternyata satu keluarga huruf dengannya, jadi angka ini bukan lagi uji font yang belum pernah dilihat.
 
-G3 belum tercapai. Terbaik sejauh ini 32,17% (`fase6_ctrl`: `fase5_fonts` + 1.500 langkah training sintetis).
-Sisipan aksara langka (`fase6_rare`, 34,06%) membuat murda dan adeg-adeg mulai terbaca (recall 0% → 43% pada
-baris nyata) tetapi menambah keluaran palsu dan spasi. Galat terbesar yang tersisa adalah spasi berlebih: sekitar
-9 poin dari 32%. Rincian, keputusan desain, dan riwayat eksperimen ada di [`CLAUDE.md`](CLAUDE.md); rencana fase
-di [`PLAN.md`](PLAN.md).
+G3 belum tercapai. Terbaik sejauh ini **21,46%** (`fase7_track`): baris sintetis dirender dengan jarak antar suku
+kata acak, sehingga model berhenti membaca renggang antar-aksara di cetakan sebagai spasi kata (spasi keluaran
+2.168 → 145; referensi 110). Sisipan aksara langka membuat murda dan adeg-adeg mulai terbaca (recall 0% → 50% pada
+baris nyata) tetapi juga menambah keluaran palsu, sehingga tidak mengubah G3 (21,18%). Sisa galat sekarang hampir
+seluruhnya salah baca bentuk aksara cetak. Rincian, keputusan desain, dan riwayat eksperimen ada di
+[`CLAUDE.md`](CLAUDE.md); rencana fase di [`PLAN.md`](PLAN.md).
 
 ## Isi
 

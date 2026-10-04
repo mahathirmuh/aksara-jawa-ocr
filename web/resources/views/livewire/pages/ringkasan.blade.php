@@ -30,9 +30,9 @@
             @endforeach
         </div>
 
-        {{-- Jarak G3 ke target: titik pada satu sumbu CER. Titik berdekatan (fonts, beam, fase6) membuat label di
-             samping titik bertumpuk, apalagi di layar sempit: hanya titik resmi yang berlabel (di bawah sumbu, karena
-             label target di atas), semua nilai ada di daftar di bawah sumbu. --}}
+        {{-- Jarak G3 ke target: titik pada satu sumbu CER. Titik berdekatan (fonts, beam, run lanjutan fase6/fase7)
+             membuat label di samping titik bertumpuk, apalagi di layar sempit: hanya titik resmi yang berlabel (di
+             bawah sumbu, karena label target di atas), semua nilai ada di daftar di bawah sumbu. --}}
         @php
             $marker = fn ($p) => $p['official'] ? 'border-white bg-[var(--series-1)] dark:border-zinc-900' : 'border-[var(--series-1)] bg-white dark:bg-zinc-900';
         @endphp

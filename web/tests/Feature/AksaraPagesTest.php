@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Livewire\Pages\Penjelajah;
+use App\Livewire\Pages\Perbandingan;
 use App\Models\Line;
 use App\Models\Metric;
 use App\Models\Pipeline;
@@ -47,8 +48,10 @@ class AksaraPagesTest extends TestCase
             ->assertSee('G3')->assertSee('37,2%')->assertSee('target 8%')
             ->assertSee('Tingkat tutur')->assertSee('10/10 baris punya arti manusia')
             ->assertSee('CER draf')->assertSee('(greedy)');
+        // Grafik uji buta: 5 batang di fixture, jadi tingginya yang paling kecil (16rem).
         $this->get('/perbandingan')->assertOk()->assertSee('CRNN fase5_fonts')->assertSee('VLM zero-shot')->assertSee('Sahabat-AI')
-            ->assertDontSee('satu run per kondisi');
+            ->assertDontSee('satu run per kondisi')
+            ->assertSee('height: 16rem', false);
         $this->get('/ablasi')->assertOk()->assertSee('tight')->assertSee('speckle');
         $this->get('/kesalahan')->assertOk()->assertSee('Tertukar')->assertSee('Hilang');
 
@@ -89,6 +92,90 @@ class AksaraPagesTest extends TestCase
         $this->get('/perbandingan')->assertOk()
             ->assertSee('CRNN fase6_rare: satu run per kondisi')
             ->assertDontSee('fase6_ctrl');
+    }
+
+    /** Run lanjutan seperti hasil export_results.py: pipeline selesai dengan metrik 745 baris dan uji buta. */
+    private function addFollowupRun(string $key, float $cer, int $sort, string $config): void
+    {
+        Pipeline::create(['key' => $key, 'label' => 'CRNN '.substr($key, 5), 'config' => $config, 'kind' => 'crnn',
+            'status' => 'done', 'sort' => $sort]);
+        foreach (['nusaaksara_745' => 10, 'blind_50' => 5] as $scope => $lines) {
+            Metric::create(['scope' => $scope, 'pipeline' => $key, 'lines' => $lines, 'cer' => $cer,
+                'cer_no_space' => $cer - 0.05, 'exact' => 0.0]);
+        }
+    }
+
+    public function test_fase7_runs_are_shown_as_comparators_not_official(): void
+    {
+        $this->importFixture();
+        // Urutan seperti export_results.py: fase6 (rare, ctrl) lalu fase7 (track, track_rare, ctrl), tepat setelah
+        // beam (sort 3); pipeline sesudahnya bergeser. Config fase7 = teks yang dibangun ekspor dari checkpoint.
+        Pipeline::where('sort', '>', 3)->increment('sort', 5);
+        $this->addFollowupRun('crnn_fase6_rare', 0.30, 4, 'crnn:fase6_rare@1500 (lanjutan fase5_fonts@1298) · 10 font · '
+            .'aug fase5 · + aksara langka (sisip 0,3 · adeg-adeg 0,15) · greedy');
+        $this->addFollowupRun('crnn_fase6_ctrl', 0.31, 5, 'crnn:fase6_ctrl@1500 (lanjutan fase5_fonts@1298) · 10 font · '
+            .'aug fase5 · tanpa aksara langka (pembanding) · greedy');
+        $this->addFollowupRun('crnn_fase7_track', 0.27, 6, 'crnn:fase7_track@1500 (lanjutan fase6_ctrl@1500) · 10 font · '
+            .'aug fase5 · jarak antar-aksara p 0,5 hingga 0,3 em · greedy');
+        $this->addFollowupRun('crnn_fase7_track_rare', 0.28, 7, 'crnn:fase7_track_rare@1500 (lanjutan fase6_ctrl@1500) · '
+            .'10 font · aug fase5 · jarak antar-aksara p 0,5 hingga 0,3 em · + aksara langka tersaring (sisip 0,3 · '
+            .'adeg-adeg 0,15 · mirip >= 0,9 · tempel) · greedy');
+        $this->addFollowupRun('crnn_fase7_ctrl', 0.32, 8, 'crnn:fase7_ctrl@1500 (lanjutan fase6_ctrl@1500) · 10 font · '
+            .'aug fase5 · tanpa jarak tambahan (pembanding) · greedy');
+        $this->actingAs(User::factory()->create());
+
+        // Baris tabel 745 baris urut sort, tiap run fase7 dengan catatannya; angka resmi tetap fase5_fonts walaupun
+        // run fase7 di sini lebih rendah. Grafik uji buta meninggi mengikuti 10 batangnya (5 fixture + 5 run).
+        $this->get('/perbandingan')->assertOk()->assertSee('height: 20.5rem', false)->assertSeeInOrder(['745 baris nyata',
+            'CRNN fase5_fonts', '34,92%', 'angka G3 resmi', 'Beam + LM',
+            'CRNN fase6_rare', 'fase5_fonts + 1.500 langkah dengan sisipan aksara langka',
+            'CRNN fase6_ctrl', 'pembanding: langkah dan titik lanjut sama, tanpa aksara langka',
+            'CRNN fase7_track', 'jarak antar-aksara p 0,5 hingga 0,3 em', '27,00%',
+            'fase6_ctrl + 1.500 langkah dengan jarak antar-aksara acak',
+            'CRNN fase7_track_rare', 'mirip >= 0,9 · tempel', '28,00%',
+            'sama dengan fase7_track + sisipan aksara langka yang disaring',
+            'CRNN fase7_ctrl', 'tanpa jarak tambahan (pembanding)', '32,00%',
+            'pembanding: langkah sama tanpa jarak tambahan',
+            'CRNN fase6_rare, CRNN fase6_ctrl, CRNN fase7_track, CRNN fase7_track_rare dan CRNN fase7_ctrl: satu run per kondisi',
+            'angka G3 resmi tetap CRNN fase5_fonts (greedy)']);
+        // Sembilan titik pada sumbu; daftar di bawahnya urut CER. Kartu gerbang G3 dan tahap 1 tetap fase5_fonts.
+        $this->get('/ringkasan')->assertOk()
+            ->assertSee('37,2%')->assertSee('CER 34,9% (greedy)')
+            ->assertSeeInOrder(['CER G3 per pipeline, terbaik dulu',
+                'CRNN fase7_track', '27,0%', 'CRNN fase7_track_rare', '28,0%', 'Beam + LM', '29,5%',
+                'CRNN fase6_rare', '30,0%', 'CRNN fase6_ctrl', '31,0%', 'CRNN fase7_ctrl', '32,0%',
+                'CRNN fase5_fonts', '34,9%', 'CRNN fase5_core', '54,4%', 'CRNN 4b', '93,3%']);
+
+        // Rantai fase7 baru menyelesaikan run pertama: ekspor melewati run tanpa last_snapshot.pt, jadi pipeline
+        // dan metriknya tidak ada. Halaman hanya menyebut run yang ada.
+        Pipeline::whereIn('key', ['crnn_fase7_track_rare', 'crnn_fase7_ctrl'])->delete();
+        Metric::whereIn('pipeline', ['crnn_fase7_track_rare', 'crnn_fase7_ctrl'])->delete();
+        $this->get('/perbandingan')->assertOk()
+            ->assertSee('CRNN fase6_rare, CRNN fase6_ctrl dan CRNN fase7_track: satu run per kondisi')
+            ->assertSee('fase6_ctrl + 1.500 langkah dengan jarak antar-aksara acak')
+            ->assertDontSee('fase7_track_rare')->assertDontSee('fase7_ctrl')
+            ->assertDontSee('pembanding: langkah sama tanpa jarak tambahan')
+            ->assertSee('height: 17rem', false);
+        $this->get('/ringkasan')->assertOk()
+            ->assertSeeInOrder(['CER G3 per pipeline, terbaik dulu', 'CRNN fase7_track', '27,0%', 'Beam + LM', '29,5%'])
+            ->assertDontSee('fase7_track_rare')->assertDontSee('fase7_ctrl');
+    }
+
+    public function test_followup_runs_match_the_export_script(): void
+    {
+        // Web mengenali run lanjutan lewat kuncinya. Run yang ditambahkan ke ekspor tanpa ditambahkan di sini akan
+        // tampil tanpa catatan, tanpa peringatan "satu run per kondisi", dan tanpa titik di Ringkasan.
+        $script = dirname(base_path()).'/scripts/export_results.py';
+        if (! is_file($script)) {
+            $this->markTestSkipped('scripts/export_results.py tidak ada di samping web/.');
+        }
+        $source = str_replace("\r\n", "\n", file_get_contents($script));
+        $this->assertSame(1, preg_match('/^OPTIONAL_CHECKPOINTS = \[\n(.*?)^\]/ms', $source, $block),
+            'daftar OPTIONAL_CHECKPOINTS tidak ditemukan di scripts/export_results.py');
+        preg_match_all('/"key": "([a-z0-9_]+)"/', $block[1], $keys);
+
+        $this->assertNotEmpty($keys[1]);
+        $this->assertSame($keys[1], array_keys(Perbandingan::FOLLOWUP_RUNS));
     }
 
     public function test_explorer_filters_and_toggles_pipelines(): void

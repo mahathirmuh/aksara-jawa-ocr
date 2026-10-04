@@ -11,6 +11,7 @@ from rapidfuzz.distance import Levenshtein
 
 from src.align import line_cer
 from src.decode import cer
+from src.tokenizer import nfc
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "scripts"))  # scripts/ bukan paket
 
@@ -448,3 +449,16 @@ def test_main_writes_report_and_stops_on_manifest_mismatch(tmp_path, monkeypatch
     dump("manifest.json", manifest)
     with pytest.raises(SystemExit, match="galat: 'p_a': cer .* berbeda dari manifest.json"):
         compare_runs.main(argv)
+
+
+def test_no_space_edits_are_normalized_like_the_official_path():
+    # "pangkon + spasi + cecak telu" adalah NFC, tetapi tanpa spasinya NFC menukar urutan kedua tanda. summarize
+    # menormalkan sesudah membuang spasi; hitungan per baris harus sama, kalau tidak compare() berhenti dengan
+    # CompareError (tanpa NFC: 2 edit, dengan NFC: 0).
+    pangkon, cecak_telu = "꧀", "꦳"
+    reference = nfc(KA + NA + cecak_telu + pangkon)
+    hypothesis = KA + NA + pangkon + " " + cecak_telu
+    assert nfc(hypothesis) == hypothesis and nfc(hypothesis.replace(" ", "")) == reference
+    report = compare(rows_of((reference, hypothesis, reference)), RARE, resamples=0)
+    assert report["cer_hyp_no_space"]["a"] == 0.0 and report["cer_hyp_no_space"]["b"] == 0.0
+    assert report["cer"]["a"] > 0

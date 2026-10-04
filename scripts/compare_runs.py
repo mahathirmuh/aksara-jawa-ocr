@@ -240,7 +240,9 @@ def score(reference: str, hypothesis: str, codepoints: frozenset[str]) -> dict:
     return {
         "edits": edits,
         # Sama dengan cer_hyp_no_space di src/evaluate.py: spasi dibuang dari keluaran saja, label apa adanya.
-        "edits_no_space": Levenshtein.distance(reference, hypothesis.replace(" ", "")),
+        # NFC sesudah spasi dibuang, seperti summarize: "pangkon + spasi + cecak telu" bertukar urutan begitu
+        # spasinya hilang, dan tanpa ini jumlah per baris tidak mereproduksi angka resmi.
+        "edits_no_space": Levenshtein.distance(reference, nfc(hypothesis.replace(" ", ""))),
         "hits": Counter(ch for ch, ok in zip(reference, mask) if ok and ch in codepoints),
         "emitted": Counter(ch for ch in hypothesis if ch in codepoints),
         "first_ok": bool(mask) and mask[0],
