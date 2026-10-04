@@ -7,24 +7,27 @@ Folder `web/` berisi aplikasi Laravel lokal untuk melihat hasil dan alur lanjuta
 
 Proyek pribadi dan tugas kuliah; masih berjalan.
 
-## Status (2026-10-03)
+## Status (2026-10-04)
+
+Angka resmi = checkpoint `fase7_track` (greedy).
 
 | Gerbang | Data | CER | Target |
 |---|---|---:|---:|
-| G1 | render bersih, font Javanese Text (10.000 baris) | 0,34% | < 2% |
-| G2 | render + augmentasi berat, font yang sama (10.000 baris) | 2,01% | < 5% |
-| G3 | 745 baris cetak nyata (NusaAksara), checkpoint resmi `fase5_fonts` | 37,25% | < 8% |
+| G1 | render bersih, font Javanese Text (10.000 baris) | 0,27% | < 2% |
+| G2 | render + augmentasi berat, font yang sama (10.000 baris) | 1,20% | < 5% |
+| G3 | 745 baris cetak nyata (NusaAksara) | 21,46% | < 8% |
 | G4 | round-trip tokenizer (1.034.357 baris) | 100% lolos | 100% |
 
 Catatan G1/G2: Javanese Text tidak dipakai merender data training, tetapi salah satu font training tambahan
 (CarakanJawa) ternyata satu keluarga huruf dengannya, jadi angka ini bukan lagi uji font yang belum pernah dilihat.
 
-G3 belum tercapai. Terbaik sejauh ini **21,46%** (`fase7_track`): baris sintetis dirender dengan jarak antar suku
-kata acak, sehingga model berhenti membaca renggang antar-aksara di cetakan sebagai spasi kata (spasi keluaran
-2.168 → 145; referensi 110). Sisipan aksara langka membuat murda dan adeg-adeg mulai terbaca (recall 0% → 50% pada
-baris nyata) tetapi juga menambah keluaran palsu, sehingga tidak mengubah G3 (21,18%). Sisa galat sekarang hampir
-seluruhnya salah baca bentuk aksara cetak. Rincian, keputusan desain, dan riwayat eksperimen ada di
-[`CLAUDE.md`](CLAUDE.md); rencana fase di [`PLAN.md`](PLAN.md).
+G3 belum tercapai. `fase7_track` melatih model pada baris sintetis yang dirender dengan jarak antar suku kata
+acak, sehingga model berhenti membaca renggang antar-aksara di cetakan sebagai spasi kata (spasi keluaran
+2.201 → 145; referensi 110). Terhadap run kontrol dengan jumlah langkah yang sama tanpa jarak (`fase7_ctrl`,
+30,75%), selisihnya −9,3 poin (selang kepercayaan 95% per halaman −11,9 sampai −6,8). Sisipan aksara langka
+membuat murda dan adeg-adeg mulai terbaca (recall 0% → 50% pada baris nyata) tetapi juga menambah keluaran palsu,
+sehingga tidak mengubah G3 (21,18%). Sisa galat sekarang hampir seluruhnya salah baca bentuk aksara cetak. Rincian,
+keputusan desain, dan riwayat eksperimen ada di [`CLAUDE.md`](CLAUDE.md); rencana fase di [`PLAN.md`](PLAN.md).
 
 ## Isi
 

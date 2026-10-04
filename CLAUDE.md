@@ -20,7 +20,7 @@ Terverifikasi 2026-09-13. Berbeda dari asumsi PLAN.md §4.1 — perhatikan.
 | `.venv-xpu` | torch 2.14 **xpu** + dependensi proyek, RAQM=True; **Pillow 12.3.0 / HarfBuzz 14.2.1, beda dari `.venv` (11.3.0 / 11.2.1)** | training. Render BasaJan berbeda antar lingkungan (lihat catatan font); cek shaping harus dijalankan dengan interpreter ini juga |
 | Node.js 24 | `scripts/translit/` (honocoroko) | hanya untuk membangun korpus |
 | `fonts/` | `NotoSansJavanese-Regular.ttf`, `TuladhaJejegOT-Regular.ttf` | font training |
-| `C:/Windows/Fonts/javatext.ttf` | Javanese Text (Microsoft) | **held-out** untuk G1; ikut konsensus urutan visual; tidak dipakai merender data training; lisensinya tidak mengizinkan redistribusi |
+| `C:/Windows/Fonts/javatext.ttf` | Javanese Text (Microsoft) | font uji G1/G2; ikut konsensus urutan visual; tidak dipakai merender data training, tetapi **sekeluarga dengan font training CarakanJawa** (lihat catatan font), jadi bukan lagi font yang belum pernah dilihat; lisensinya tidak mengizinkan redistribusi |
 
 > **JANGAN jalankan `pip install --no-binary :all: Pillow`** yang ada di PLAN.md §4.4.
 > Instruksi itu untuk kasus RAQM mati di Linux. Di mesin ini RAQM sudah aktif lewat
@@ -398,8 +398,27 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     halaman), presisi keluaran aksara langka (fase6_rare 39,6%), recall dda (fase6: 38,1% → 21,8%), pembuka
     palsu (3,8%), dan CER 409 baris tanpa aksara langka. (c) G3 keseluruhan dilaporkan dengan SK sebagai arah;
     checkpoint dasar berikutnya dipilih dari (a)–(b) dan sintetis, bukan dari G3.
+  - **Run kontrol `fase7_ctrl` selesai 2026-10-04 14:13** (val bersih 0,183%; terbaik 0,164% di langkah 1000):
+    G3 **30,75%** (pad 0,06: 29,32%; spasi dibuang 21,28%), q100 G1 0,27%, G2 0,81%. Jadi +1.500 langkah tanpa
+    tracking hanya menurunkan G3 1,42 poin dari `fase6_ctrl` (32,17%), sedangkan `fase7_track` 21,46%: **efek
+    tracking ≈ −9,3 poin** (`fase7_track` − `fase7_ctrl`), hampir seluruhnya dari spasi (CER spasi dibuang 20,99%
+    vs 21,28%). `out/compare/crnn_fase7_track_vs_crnn_fase7_ctrl.md`: CER **−9,29 poin, SK halaman [−11,92;
+    −6,83]** (baris [−10,20; −8,40]); CER spasi dibuang −0,28 [−0,81; +0,21] (tidak berbeda); 484 baris membaik,
+    123 memburuk, 138 sama; halaman 73 / 14 / 5; spasi keluaran 145 vs 2.201 (referensi 110).
+    `crnn_fase7_ctrl_vs_crnn_fase6_ctrl.md`: −1,42 [−2,36; −0,40], CER spasi dibuang −1,61 [−2,27; −0,92].
+    Aturan (a) terpenuhi: SK tidak memuat 0, CER tanpa spasi tidak memburuk, dosis-respons sintetis searah,
+    G1/G2 tidak memburuk. Satu run per lengan; derau antar-run tetap belum terukur.
+  - **Angka resmi = `fase7_track` (keputusan user 2026-10-04, menggantikan `fase5_fonts`).** Evaluasi resmi
+    10.000 baris javatext (`out/eval/fase7_track_G1_10k.json`, `_G2_10k.json`): **G1 0,27%** (0,2686%; sebelumnya
+    0,34%), **G2 1,20%** (1,1965%; sebelumnya 2,01%), **G3 21,46%** (sebelumnya 37,25%; target < 8% belum
+    tercapai). Diimpor ke web 2026-10-04 15:47 (14 pipeline, 6.755 prediksi); kesalahan aksara `fase7_track`:
+    2.165 tertukar, 1.302 hilang, 711 tambahan (`fase5_fonts`: 2.266 / 2.143 / 626). Dipilih di antara
+    `fase7_track` (21,46%) dan `fase7_track_rare` (21,18%, tidak berbeda nyata) berdasarkan efek samping sisipan
+    aksara langka (aturan (b)), bukan G3 terendah; tetap satu run yang dibandingkan pada test set, jadi angkanya
+    sedikit optimistis. Beam + LM (33,83%) dan terjemahan "dari keluaran OCR" (chrF 19,4) masih milik checkpoint
+    `fase5_fonts`: beam + LM belum dievaluasi di atas `fase7_track`.
   - **Hasil fase 7 di 745 baris nyata (2026-10-04; `out/compare/crnn_fase7_track_vs_crnn_fase6_ctrl.md`,
-    `crnn_fase7_track_rare_vs_crnn_fase7_track.md`; `fase7_ctrl` dan evaluasi sintetis menyusul).**
+    `crnn_fase7_track_rare_vs_crnn_fase7_track.md`).**
     `fase7_track`: G3 **21,46%** (pad 0,06: 19,99%; spasi dibuang 20,99%; baris persis 5,6%), q100 G1 0,29%,
     G2 1,17%, val bersih 0,234%. Terhadap `fase6_ctrl`: −10,71 poin (SK halaman [−13,55; −8,16]), CER tanpa
     spasi −1,89 [−2,63; −1,12], spasi keluaran 2.168 → **145** (referensi 110), 542 baris membaik dan 81
@@ -512,7 +531,7 @@ Detail lengkap di PLAN.md §7.
 | 3 | `src/dataset.py` + test shape | assert `model(dummy).shape[1] == W // DOWNSAMPLE` | **lolos**: 0/300 melanggar T≥1.5L |
 | 4 | `src/model.py`, `train.py`, `decode.py`, `infer.py` | 4a: CER<1% @32 → 4b: **CER<2% synthetic bersih** | 4a **lolos**: CER inference satu baris 0,07% (31/32 persis) dalam 375 langkah; 4b: berhenti di langkah 1500 karena val CER 0,376% < `--target-cer 0.005` (val = teks baru, font training); checkpoint tetap `out/checkpoints/base/best_4b_step1500.pt`; evaluasi test/G1–G3: `out/eval/base_*.json` |
 | 5 | `src/augment.py`, `scripts/ablation.py` | CER<5% synthetic augmentasi berat | tes cepat 100 baris (bukan angka resmi) `fase5_quick` langkah 500: G1 0,79%, G2 2,88%, G3 76,0% (spasi dibuang 57,5%); run 1500 langkah crash OOM di ~950; `fase5_fonts` (10 font: 2 inti + 8 tambahan) dilanjutkan dari langkah 500, berhenti di 1298 (batas 3 jam): G1 0,41%, G2 1,44%, **G3 39,1%** (margin 0,06: 35,2%; spasi dibuang 22,9%); **G3 resmi 745 baris: 37,2%** (margin 0,06: 34,9%; spasi dibuang 25,2% / 23,1%); pembanding font inti `fase5_core` (init, augmentasi, jadwal LR & langkah sama lewat `--steps 1500 --stop-step 1298`): G1 1,64%, G2 1,82%, G3 745 baris 66,6% (margin 0,06: 63,3%) → **font tambahan menurunkan G3 ~29 poin**, langkah tambahan saja ~8 poin (G3 q100 76,0% → 67,7%); **evaluasi resmi `fase5_fonts` 10.000 baris javatext: G1 0,34%, G2 2,01% → gerbang Fase 5 (G2 < 5%) LOLOS** (`out/eval/fonts_G1_10k.json`, `fonts_G2_10k.json`); **ablasi selesai 2026-09-15** (`out/ablation.md`; 12 run kumulatif dari 4b, 600 langkah, 10 font, drop-space 0,5, satu seed): val berat 65,1% → 12,0% lewat 7 op preset (blur −21, noise −10, rotate −7,5), lalu naik ke 19,3% dengan op pindaian; **G3 745 baris 75,1% → 44,1%** (tanpa spasi 69,8% → 30,0%): op preset hampir datar kecuali contrast −14,8; op pindaian **tight −14,6, stroke −10,5**, binarize −2,4, speckle −1,2; val bersih 0,34% → 0,43%. Batasan: G3 = test set (bias seleksi), satu seed (rotate +12,8 menunjukkan fluktuasi antar-run bisa besar), urutan kumulatif mencampur interaksi |
-| 6 | `src/real.py`, `--real-train` | CER<8% pada ≥200 baris nyata | test: `data/real/nusaaksara/labels.tsv` 745 baris (lisensi **non-komersial**, HANYA test); fine-tune: 43 baris papan Commons menunggu verifikasi pembaca aksara (`out/verifikasi_aksara.html` → `scripts/import_review.py`); **belum lolos**: terbaik sejauh ini `fase7_track` (masih sintetis saja; `fase6_ctrl` + 1.500 langkah dengan jarak antar suku kata acak) G3 **21,46%** (pad 0,06: 19,99%; spasi dibuang 20,99%) dan `fase7_track_rare` 21,18% (tidak berbeda nyata); sebelumnya `fase6_ctrl` 32,17%, `fase6_rare` 34,06%, beam+LM atas `fase5_fonts` 33,83%. Angka "resmi" di web masih `fase5_fonts` 37,25% sampai user memutuskan checkpoint resmi baru |
+| 6 | `src/real.py`, `--real-train` | CER<8% pada ≥200 baris nyata | test: `data/real/nusaaksara/labels.tsv` 745 baris (lisensi **non-komersial**, HANYA test); fine-tune: 43 baris papan Commons menunggu verifikasi pembaca aksara (`out/verifikasi_aksara.html` → `scripts/import_review.py`); **belum lolos**: terbaik sejauh ini `fase7_track` (masih sintetis saja; `fase6_ctrl` + 1.500 langkah dengan jarak antar suku kata acak) G3 **21,46%** (pad 0,06: 19,99%; spasi dibuang 20,99%) dan `fase7_track_rare` 21,18% (tidak berbeda nyata); kontrol `fase7_ctrl` (langkah sama tanpa jarak) 30,75% → efek jarak −9,29 poin (SK halaman [−11,92; −6,83]); sebelumnya `fase6_ctrl` 32,17%, `fase6_rare` 34,06%, beam+LM atas `fase5_fonts` 33,83%. **Angka resmi sejak 2026-10-04 = `fase7_track`** (keputusan user): G1 0,27%, G2 1,20% (10.000 baris javatext), G3 21,46%; sebelumnya `fase5_fonts` 0,34% / 2,01% / 37,25% |
 
 **Fase 0 tidak bisa diotomatiskan.** Render PNG-nya, lalu **minta user membuka dan
 memeriksa sendiri**. Jangan menyatakan Fase 0 lulus berdasarkan "tidak ada error".
