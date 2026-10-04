@@ -31,11 +31,22 @@ class ResultImporter
         $lines = iterator_to_array($this->readJsonl($dir.'/lines.jsonl'), false);
         $predictions = iterator_to_array($this->readJsonl($dir.'/predictions.jsonl'), false);
 
-        return DB::transaction(function () use ($dir, $manifest, $lines, $predictions) {
+        // Pipeline resmi: kunci "official" di manifest; ekspor lama tidak punya kunci itu dan berarti crnn_fonts.
+        $official = $manifest['official'] ?? Pipeline::DEFAULT_OFFICIAL;
+        if (! in_array($official, array_column($manifest['pipelines'], 'key'), true)) {
+            throw new RuntimeException("Pipeline resmi {$official} tidak ada di daftar pipeline manifest.");
+        }
+        // Halaman Kesalahan aksara menampilkan tabel ini atas nama pipeline resmi.
+        $confused = $manifest['confusion']['pipeline'] ?? $official;
+        if ($confused !== $official) {
+            throw new RuntimeException("Kesalahan aksara di manifest dihitung dari {$confused}, bukan pipeline resmi {$official}.");
+        }
+
+        return DB::transaction(function () use ($dir, $manifest, $lines, $predictions, $official) {
             foreach ($manifest['pipelines'] as $p) {
                 Pipeline::updateOrCreate(['key' => $p['key']], [
                     'label' => $p['label'], 'config' => $p['config'], 'kind' => $p['kind'],
-                    'status' => $p['status'], 'sort' => $p['sort'] ?? 0,
+                    'status' => $p['status'], 'sort' => $p['sort'] ?? 0, 'official' => $p['key'] === $official,
                 ]);
             }
             Pipeline::whereNotIn('key', array_column($manifest['pipelines'], 'key'))->delete();

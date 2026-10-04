@@ -38,7 +38,7 @@
         @endphp
         <section class="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
             <flux:heading size="lg">Jarak G3 ke target</flux:heading>
-            <p class="mt-1 text-sm text-zinc-500">CER pada 745 baris NusaAksara. Makin ke kiri makin baik; titik penuh = angka G3 resmi (fase5_fonts, greedy), titik berongga = pembanding, nilainya di daftar bawah.</p>
+            <p class="mt-1 text-sm text-zinc-500">CER pada 745 baris NusaAksara. Makin ke kiri makin baik; titik penuh = angka G3 resmi ({{ $official?->label ?? 'belum ditetapkan' }}, greedy), titik berongga = pembanding, nilainya di daftar bawah.</p>
             <div class="relative mx-2 mt-10 mb-12 h-2 rounded-full bg-zinc-100 dark:bg-zinc-800" role="img"
                  aria-label="CER G3: {{ $points->map(fn ($p) => $p['label'].' '.pct($p['value']))->join(', ') }}; target 8%">
                 <div class="absolute inset-y-0 left-0 rounded-l-full bg-[var(--good-wash)]" style="width: 8%"></div>
@@ -75,15 +75,16 @@
             <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 @php
                     $stages = [
-                        ['1', 'OCR aksara', 'Citra baris → Unicode aksara Jawa', $best->has('crnn_fonts') ? 'CER '.pct($best['crnn_fonts']->cer).' (greedy)' : '–',
-                            $best->has('crnn_fonts_beam') ? 'beam + LM '.pct($best['crnn_fonts_beam']->cer).' · target < 8%' : 'target < 8%', 'wait', 'Berjalan, belum capai target'],
+                        ['1', 'OCR aksara', 'Citra baris → Unicode aksara Jawa', $officialMetric ? 'CER '.pct($officialMetric->cer).' (greedy)' : '–',
+                            ($officialMetric ? $official->label.' · ' : '').($officialBeam ? 'beam + LM '.pct($officialBeam->cer).' · ' : '').'target < 8%',
+                            'wait', 'Berjalan, belum capai target'],
                         ['2', 'Transliterasi', 'Aksara → Latin', $translit ? 'CER draf '.pct($translit->cer).' vs manusia' : 'belum dinilai',
                             "transliterasi manusia: {$humanTranslit}/{$lines} baris · draf aturan di web", 'wait', 'Draf aturan'],
                         ['3', 'Arti', 'Jawa → bahasa Indonesia',
                             $mtRuns->has('label') ? 'chrF '.number_format($mtRuns['label']->chrf, 1, ',', '.').' (NLLB, dari transliterasi manusia)' : "{$humanTranslation}/{$lines} baris punya arti manusia",
                             $mtRuns->has('label')
                                 ? "{$humanTranslation}/{$lines} baris punya arti manusia"
-                                    .($mtRuns->has('crnn_fonts_beam') ? ' · dari keluaran OCR chrF '.number_format($mtRuns['crnn_fonts_beam']->chrf, 1, ',', '.') : '')
+                                    .($ocrRun ? ' · dari keluaran OCR ('.$ocrRunLabel.') chrF '.number_format($ocrRun->chrf, 1, ',', '.') : '')
                                 : 'model terjemahan belum dijalankan (php artisan aksara:translate)',
                             $mtRuns->has('label') ? 'wait' : 'no', $mtRuns->has('label') ? 'Model dasar' : 'Belum dijalankan'],
                         ['4', 'Tingkat tutur', 'ngoko · madya · krama · campur',

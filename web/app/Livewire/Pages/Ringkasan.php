@@ -23,6 +23,9 @@ class Ringkasan extends Component
         // toBase(): only() pada Eloquent Collection menyaring primary key model, bukan kunci "pipeline".
         $g3 = Metric::where('scope', 'nusaaksara_745')->get()->keyBy('pipeline')->toBase();
         $labels = Pipeline::pluck('label', 'key');
+        // Pipeline resmi ditetapkan ekspor (kunci "official" di manifest), bukan dipilih di sini.
+        $official = Pipeline::official();
+        $officialKey = $official?->key ?? '';
         // Nilai bisa berdekatan (fonts, beam, fase6 di 32–38%) dan lebar sumbu ikut layar, jadi label tidak ditaruh
         // di samping setiap titik: hanya titik resmi yang berlabel, semua nilai ada di daftar urut CER (terbaik dulu,
         // sama dengan arah sumbu). x = posisi di sumbu, dipotong ke 0–100% (CRNN 4b > 100%). Run lanjutan (fase6,
@@ -31,9 +34,14 @@ class Ringkasan extends Component
             ->merge(array_keys(Perbandingan::FOLLOWUP_RUNS))
             ->filter(fn ($k) => $g3->has($k))
             ->map(fn ($k) => ['key' => $k, 'label' => $labels[$k] ?? $k, 'value' => $g3[$k]->cer,
-                'x' => round(min(100, max(0, $g3[$k]->cer * 100)), 2), 'official' => $k === 'crnn_fonts'])
+                'x' => round(min(100, max(0, $g3[$k]->cer * 100)), 2), 'official' => $k === $officialKey])
             ->sortBy('value')
             ->values();
+
+        // Tahap 3 dari keluaran OCR: terjemahan atas keluaran pipeline resmi bila sudah dijalankan, kalau belum
+        // terjemahan terbaru atas keluaran pipeline lain; nama pipelinenya selalu ditampilkan.
+        $mtRuns = TranslationRun::latest('id')->get()->unique('source')->keyBy('source');
+        $ocrRun = $mtRuns->get($officialKey) ?? $mtRuns->get($officialKey.'_beam') ?? $mtRuns->first(fn ($r) => $r->source !== 'label');
 
         $lines = Line::count();
 
@@ -52,12 +60,17 @@ class Ringkasan extends Component
             'import' => ResultImport::latest('id')->first(),
             'gates' => Gate::orderBy('code')->get(),
             'points' => $points,
-            'best' => $g3->only(['crnn_fonts', 'crnn_fonts_beam']),
+            'official' => $official,
+            'officialMetric' => $g3->get($officialKey),
+            // Beam + LM hanya disebut bila membaca checkpoint yang sama dengan angka resmi (kunci <resmi>_beam).
+            'officialBeam' => $g3->get($officialKey.'_beam'),
             'translit' => Metric::where('scope', 'translit_draft')->first(),
             'lines' => $lines,
             'humanTranslit' => LineAnnotation::whereNotNull('transliteration')->count(),
             'humanTranslation' => LineAnnotation::whereNotNull('translation')->count(),
-            'mtRuns' => TranslationRun::latest('id')->get()->unique('source')->keyBy('source'),
+            'mtRuns' => $mtRuns,
+            'ocrRun' => $ocrRun,
+            'ocrRunLabel' => $ocrRun ? ($labels[$ocrRun->source] ?? $ocrRun->source) : null,
             'speechAuto' => $auto->countBy()->sortDesc(),
             'speechPages' => $perPage->countBy()->sortDesc(),
             'speechEval' => $speechEval,

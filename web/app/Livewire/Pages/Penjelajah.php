@@ -26,9 +26,13 @@ class Penjelajah extends Component
     /** Saringan untuk pemberi label tingkat tutur. */
     public const UNLABELED = 'tutur belum dilabel';
 
+    /**
+     * Kunci = nilai di URL (?urut=). "fonts_*" bertahan dari saat pipeline resmi masih fase5_fonts; urutannya kini
+     * memakai CER pipeline resmi, dan ":resmi" diganti labelnya. Beam selalu dibandingkan dengan greedy fase5_fonts.
+     */
     public const SORTS = [
-        'fonts_desc' => 'CER fase5_fonts, terburuk dulu',
-        'fonts_asc' => 'CER fase5_fonts, terbaik dulu',
+        'fonts_desc' => 'CER :resmi, terburuk dulu',
+        'fonts_asc' => 'CER :resmi, terbaik dulu',
         'gain' => 'Perbaikan beam terbesar',
         'loss' => 'Kerusakan beam terbesar',
         'name' => 'Nama berkas',
@@ -48,6 +52,15 @@ class Penjelajah extends Component
 
     #[Url]
     public bool $latin = false;
+
+    public function mount(): void
+    {
+        // Tanpa pilihan di URL, pipeline resmi ikut tampil (menggantikan crnn_core supaya tetap empat baris).
+        $official = Pipeline::official()?->key;
+        if ($official !== null && ! request()->has('p') && ! in_array($official, $this->pipes, true)) {
+            $this->pipes = [$official, 'crnn_fonts', 'crnn_fonts_beam', 'vlm_zeroshot'];
+        }
+    }
 
     public function updatedTag(): void
     {
@@ -96,6 +109,7 @@ class Penjelajah extends Component
     private function lines(): Builder
     {
         $inner = Line::query()->select('lines.*')
+            ->selectSub($this->cerOf(Pipeline::official()?->key ?? Pipeline::DEFAULT_OFFICIAL), 'official_cer')
             ->selectSub($this->cerOf('crnn_fonts'), 'fonts_cer')
             ->selectSub($this->cerOf('crnn_fonts_beam'), 'beam_cer')
             ->selectSub($this->cerOf('vlm_zeroshot'), 'vlm_cer');
@@ -108,11 +122,11 @@ class Penjelajah extends Component
         $query = Line::query()->fromSub($inner, 'lines');
 
         return match ($this->sort) {
-            'fonts_asc' => $query->orderBy('fonts_cer')->orderBy('external_id'),
+            'fonts_asc' => $query->orderBy('official_cer')->orderBy('external_id'),
             'gain' => $query->orderByRaw('(fonts_cer - beam_cer) desc')->orderBy('external_id'),
             'loss' => $query->orderByRaw('(beam_cer - fonts_cer) desc')->orderBy('external_id'),
             'name' => $query->orderBy('external_id'),
-            default => $query->orderByDesc('fonts_cer')->orderBy('external_id'),
+            default => $query->orderByDesc('official_cer')->orderBy('external_id'),
         };
     }
 
@@ -123,6 +137,8 @@ class Penjelajah extends Component
         $current ??= $page->first()?->load('annotation.labeler');
         $pipelines = Pipeline::orderBy('sort')->get();
         $done = $pipelines->where('status', 'done');
+        $official = $pipelines->firstWhere('official', true) ?? $pipelines->firstWhere('key', Pipeline::DEFAULT_OFFICIAL);
+        $officialName = $official ? preg_replace('/^CRNN /', '', $official->label) : 'pipeline resmi';
         $predictions = $current
             ? $current->predictions()->whereIn('pipeline', $this->pipes)->get()->keyBy('pipeline')
             : collect();
@@ -134,6 +150,7 @@ class Penjelajah extends Component
                 ? MachineTranslation::where('dataset', $current->dataset)->where('external_id', $current->external_id)->get()->keyBy('source')
                 : collect(),
             'pipelines' => $pipelines,
+            'sorts' => array_map(fn ($name) => str_replace(':resmi', $officialName, $name), self::SORTS),
             'shown' => $done->filter(fn ($p) => $predictions->has($p->key))->values(),
             'missing' => $done->filter(fn ($p) => in_array($p->key, $this->pipes, true) && ! $predictions->has($p->key))->values(),
             'predictions' => $predictions,

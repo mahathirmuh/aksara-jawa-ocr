@@ -4,9 +4,10 @@
 
 Model dan LM dimuat sekali saat permintaan pertama. Jalan di CPU; hanya mendengarkan 127.0.0.1.
 Konfigurasi lewat environment variable:
-  OCR_CHECKPOINT  default out/checkpoints/fase5_fonts/last_snapshot.pt
+  OCR_CHECKPOINT  default DEFAULT_CHECKPOINT = checkpoint run resmi (OFFICIAL_RUN di scripts/export_results.py)
   OCR_LM          default data/charlm/o5_n300000_ds0.5.pkl
-Setelan beam (alpha 0,25, beta 1,0, lebar 16) sama dengan `scripts/beam_eval.py` yang dipilih di dev.
+Setelan beam (alpha 0,25, beta 1,0, lebar 16) dipilih di dev dengan checkpoint fase5_fonts (`scripts/beam_eval.py`)
+dan belum disetel ulang untuk checkpoint lain; jalur resmi adalah greedy.
 """
 
 import io
@@ -26,6 +27,9 @@ from src.tokenizer import logical_syllables
 
 ROOT = Path(__file__).resolve().parents[1]
 ALPHA, BETA, WIDTH = 0.25, 1.0, 16
+# Harus sama dengan run resmi di scripts/export_results.py (dijaga tests/test_export_results.py).
+DEFAULT_CHECKPOINT = "out/checkpoints/fase7_track/last_snapshot.pt"
+DEFAULT_LM = "data/charlm/o5_n300000_ds0.5.pkl"
 PIPELINES = ("crnn_greedy", "crnn_beam_lm")
 MAX_BYTES = 8 * 1024 * 1024
 
@@ -39,8 +43,8 @@ def _path(env: str, default: str) -> Path:
 
 @lru_cache(maxsize=1)
 def resources():
-    checkpoint = _path("OCR_CHECKPOINT", "out/checkpoints/fase5_fonts/last_snapshot.pt")
-    lm_path = _path("OCR_LM", "data/charlm/o5_n300000_ds0.5.pkl")
+    checkpoint = _path("OCR_CHECKPOINT", DEFAULT_CHECKPOINT)
+    lm_path = _path("OCR_LM", DEFAULT_LM)
     model, tokenizer = load_checkpoint(str(checkpoint), "cpu")
     return model, tokenizer, CharLM.load(lm_path), checkpoint, lm_path
 

@@ -83,8 +83,15 @@ Hanya akun dan label tingkat tutur yang tidak bisa dibangun ulang dari file. Cad
 
 ## Kontrak data (skema 1)
 
-`../out/results/` dari `scripts/export_results.py`: `manifest.json` (pipeline, gerbang, metrik, ablasi,
-kesalahan aksara), `lines.jsonl`, `predictions.jsonl`. `aksara:import` menolak skema lain.
+`../out/results/` dari `scripts/export_results.py`: `manifest.json` (pipeline, pipeline resmi, gerbang, metrik,
+ablasi, kesalahan aksara), `lines.jsonl`, `predictions.jsonl`. `aksara:import` menolak skema lain.
+
+**Pipeline resmi** ditetapkan ekspor, bukan web: kunci `official` di manifest (`OFFICIAL_RUN` di
+`scripts/export_results.py`; manifest lama tanpa kunci itu berarti `crnn_fonts`). Impor menandainya di kolom
+`pipelines.official`, dan semua halaman membacanya lewat `Pipeline::official()`: tanda "angka G3 resmi", titik penuh
+dan kartu tahap 1 di Ringkasan, judul Kesalahan aksara (tabelnya dihitung ekspor dari pipeline itu), serta urutan
+dan angka CER di daftar Penjelajah. Gerbang G1–G3 di manifest berasal dari laporan resmi run yang sama. Demo
+menampilkan nama checkpoint yang dimuat layanan model (`/health`); bawaannya di `src/serve.py` = checkpoint resmi.
 
 ## Lisensi data
 

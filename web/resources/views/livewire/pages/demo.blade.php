@@ -21,7 +21,7 @@
         <flux:heading size="lg">Pipeline</flux:heading>
         @php($beam = $pipeline === 'crnn_beam_lm')
         <div class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            @foreach ([['Praproses', 'polaritas · margin 0', false], ['Pembaca', 'CRNN fase5_fonts'.($beam ? ' · beam 16' : ' · greedy'), true],
+            @foreach ([['Praproses', 'polaritas · margin 0', false], ['Pembaca', $reader.($beam ? ' · beam 16' : ' · greedy'), true],
                 ['Penggabung', $beam ? 'LM karakter o5 · α 0,25 · β 1,0' : 'tidak ada', $beam], ['Pascaproses', 'NFC · urutan logis', false]] as [$name, $opt, $active])
                 <div @class(['flex flex-col gap-1 rounded-lg border p-3', 'border-accent bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]' => $active,
                         'border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800' => ! $active])>

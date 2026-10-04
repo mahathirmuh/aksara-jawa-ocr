@@ -10,10 +10,23 @@ use RuntimeException;
 /** Klien layanan model FastAPI (src/serve.py di repo OCR). */
 class OcrService
 {
+    /**
+     * Cara membaca yang disediakan layanan (kunci = PIPELINES di src/serve.py). Greedy = jalur resmi; bobot LM untuk
+     * beam (alpha 0,25, beta 1,0) disetel di dev sintetis dengan checkpoint fase5_fonts dan belum diuji ulang untuk
+     * checkpoint lain. Nama checkpoint ditambahkan halaman Demo dari /health layanan.
+     */
     public const PIPELINES = [
-        'crnn_beam_lm' => 'CRNN fase5_fonts + beam + LM',
-        'crnn_greedy' => 'CRNN fase5_fonts · greedy',
+        'crnn_greedy' => 'greedy (jalur resmi)',
+        'crnn_beam_lm' => 'beam + LM (bobot LM disetel pada fase5_fonts)',
     ];
+
+    /** "out/checkpoints/fase7_track/last_snapshot.pt" -> "fase7_track"; null bila layanan tidak berjalan. */
+    public static function checkpointName(?array $health): ?string
+    {
+        $path = $health['checkpoint'] ?? null;
+
+        return $path ? basename(dirname($path)) : null;
+    }
 
     public function url(): string
     {

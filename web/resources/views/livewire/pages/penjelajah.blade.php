@@ -29,7 +29,7 @@
                 @endforeach
                 <label class="ml-auto inline-flex items-center gap-2 text-xs text-zinc-500" for="sort">Urutkan
                     <select id="sort" wire:model.live="sort" class="rounded-md border border-zinc-300 bg-transparent px-2 py-1 text-sm dark:border-zinc-600">
-                        @foreach (\App\Livewire\Pages\Penjelajah::SORTS as $key => $name)
+                        @foreach ($sorts as $key => $name)
                             <option value="{{ $key }}">{{ $name }}</option>
                         @endforeach
                     </select>
@@ -58,7 +58,7 @@
                                     'border-l-accent bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]' => $current?->id === $l->id,
                                     'border-l-transparent hover:bg-zinc-50 dark:hover:bg-zinc-800' => $current?->id !== $l->id])>
                             <span class="font-mono text-xs">{{ $l->label() }}</span>
-                            <span class="num text-right text-xs text-zinc-500">CRNN {{ pct($l->fonts_cer, 0) }}@if ($l->vlm_cer !== null) · VLM {{ pct($l->vlm_cer, 0) }}@endif</span>
+                            <span class="num text-right text-xs text-zinc-500">CRNN {{ pct($l->official_cer, 0) }}@if ($l->vlm_cer !== null) · VLM {{ pct($l->vlm_cer, 0) }}@endif</span>
                             <span class="col-span-2 truncate text-[11px] text-zinc-500">{{ collect($l->tags)->reject(fn ($t) => $t === 'label tanpa spasi')->join(' · ') ?: ' ' }}</span>
                         </button>
                     @empty

@@ -7,6 +7,7 @@ use App\Livewire\Pages\Perbandingan;
 use App\Models\Line;
 use App\Models\Metric;
 use App\Models\Pipeline;
+use App\Models\Prediction;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -47,13 +48,16 @@ class AksaraPagesTest extends TestCase
         $this->get('/ringkasan')->assertOk()
             ->assertSee('G3')->assertSee('37,2%')->assertSee('target 8%')
             ->assertSee('Tingkat tutur')->assertSee('10/10 baris punya arti manusia')
-            ->assertSee('CER draf')->assertSee('(greedy)');
+            ->assertSee('CER draf')->assertSee('(greedy)')
+            ->assertSee('titik penuh = angka G3 resmi (CRNN fase5_fonts, greedy)')
+            ->assertSee('CRNN fase5_fonts · beam + LM');
         // Grafik uji buta: 5 batang di fixture, jadi tingginya yang paling kecil (16rem).
         $this->get('/perbandingan')->assertOk()->assertSee('CRNN fase5_fonts')->assertSee('VLM zero-shot')->assertSee('Sahabat-AI')
             ->assertDontSee('satu run per kondisi')
             ->assertSee('height: 16rem', false);
         $this->get('/ablasi')->assertOk()->assertSee('tight')->assertSee('speckle');
-        $this->get('/kesalahan')->assertOk()->assertSee('Tertukar')->assertSee('Hilang');
+        $this->get('/kesalahan')->assertOk()->assertSee('Tertukar')->assertSee('Hilang')
+            ->assertSee('CRNN fase5_fonts · greedy · 745 baris');
 
         $line = Line::orderBy('external_id')->first();
         $this->get('/penjelajah?baris='.$line->external_id)->assertOk()
@@ -159,6 +163,47 @@ class AksaraPagesTest extends TestCase
         $this->get('/ringkasan')->assertOk()
             ->assertSeeInOrder(['CER G3 per pipeline, terbaik dulu', 'CRNN fase7_track', '27,0%', 'Beam + LM', '29,5%'])
             ->assertDontSee('fase7_track_rare')->assertDontSee('fase7_ctrl');
+    }
+
+    public function test_official_pipeline_can_be_a_followup_run(): void
+    {
+        $this->importFixture();
+        Pipeline::where('sort', '>', 3)->increment('sort', 5);
+        $this->addFollowupRun('crnn_fase6_ctrl', 0.31, 5, 'crnn:fase6_ctrl@1500 · greedy');
+        $this->addFollowupRun('crnn_fase7_track', 0.27, 6, 'crnn:fase7_track@1500 · greedy');
+        $this->addFollowupRun('crnn_fase7_ctrl', 0.32, 8, 'crnn:fase7_ctrl@1500 · greedy');
+        // Seperti impor manifest dengan "official": "crnn_fase7_track".
+        Pipeline::query()->update(['official' => false]);
+        Pipeline::where('key', 'crnn_fase7_track')->update(['official' => true]);
+        foreach (Line::all() as $line) {
+            Prediction::create(['line_id' => $line->id, 'pipeline' => 'crnn_fase7_track', 'text' => $line->reference,
+                'cer' => 0.05, 'segments' => [['t' => $line->reference, 's' => 'ok']], 'spans' => null]);
+        }
+        $this->actingAs(User::factory()->create());
+
+        // Tanda resmi pindah ke run fase7 (catatannya tetap), fase5_fonts menjadi angka resmi sebelumnya, dan
+        // peringatan menyebut run lain sebagai pembanding angka resmi yang baru.
+        $this->get('/perbandingan')->assertOk()->assertSeeInOrder(['745 baris nyata',
+            'CRNN fase5_fonts', '34,92%', 'angka G3 resmi sebelumnya', 'Beam + LM',
+            'CRNN fase6_ctrl', 'pembanding: langkah dan titik lanjut sama, tanpa aksara langka',
+            'CRNN fase7_track', '27,00%', 'angka G3 resmi · fase6_ctrl + 1.500 langkah dengan jarak antar-aksara acak',
+            'CRNN fase7_ctrl', 'pembanding: langkah sama tanpa jarak tambahan',
+            'CRNN fase6_ctrl dan CRNN fase7_ctrl: satu run per kondisi',
+            'Angka G3 resmi = CRNN fase7_track (greedy)'])
+            ->assertDontSee('angka G3 resmi tetap');
+        // Kartu tahap 1 memakai pipeline resmi; beam tidak disebut karena membaca checkpoint lain (fase5_fonts).
+        $this->get('/ringkasan')->assertOk()
+            ->assertSee('titik penuh = angka G3 resmi (CRNN fase7_track, greedy)')
+            ->assertSee('CER 27,0% (greedy)')
+            ->assertSee('CRNN fase7_track · target < 8%')
+            ->assertDontSee('beam + LM 29,5% · target');
+        $this->get('/kesalahan')->assertOk()->assertSee('CRNN fase7_track · greedy · 745 baris');
+        // Penjelajah: urutan dan angka di daftar dari pipeline resmi, yang juga ikut tampil sejak halaman dibuka.
+        Livewire::test(Penjelajah::class)
+            ->assertSet('pipes', ['crnn_fase7_track', 'crnn_fonts', 'crnn_fonts_beam', 'vlm_zeroshot'])
+            ->assertSee('CER fase7_track, terburuk dulu')
+            ->assertSee('CRNN 5%')
+            ->assertSeeHtml('row-'.Line::orderBy('external_id')->first()->id.'-crnn_fase7_track');
     }
 
     public function test_followup_runs_match_the_export_script(): void

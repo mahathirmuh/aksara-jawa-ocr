@@ -19,7 +19,8 @@ class Kesalahan extends Component
         return view('livewire.pages.kesalahan', [
             'lists' => collect($limits)->map(fn ($n, $kind) => Confusion::where('kind', $kind)->orderByDesc('count')->limit($n)->get()),
             'totals' => Confusion::selectRaw('kind, sum(count) as total')->groupBy('kind')->pluck('total', 'kind'),
-            'pipeline' => Pipeline::where('key', 'crnn_fonts')->first(),
+            // Ekspor menghitung kesalahan aksara dari pipeline resmi (manifest: confusion.pipeline = official).
+            'pipeline' => Pipeline::official(),
         ]);
     }
 }

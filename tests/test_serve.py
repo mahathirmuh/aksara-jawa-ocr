@@ -5,11 +5,11 @@ import io
 import pytest
 from PIL import Image
 
-from src.serve import ROOT, app, predict_image
+from src.serve import DEFAULT_CHECKPOINT, DEFAULT_LM, ROOT, app, predict_image
 from src.render import render_line
 
-CHECKPOINT = ROOT / "out/checkpoints/fase5_fonts/last_snapshot.pt"
-LM = ROOT / "data/charlm/o5_n300000_ds0.5.pkl"
+CHECKPOINT = ROOT / DEFAULT_CHECKPOINT  # checkpoint run resmi
+LM = ROOT / DEFAULT_LM
 FONT = ROOT / "fonts/NotoSansJavanese-Regular.ttf"
 pytestmark = pytest.mark.skipif(not (CHECKPOINT.exists() and LM.exists()), reason="checkpoint/LM belum ada")
 
@@ -44,7 +44,7 @@ def test_predict_endpoint(client):
     assert r.status_code == 200
     body = r.json()
     assert body["pipeline"] == "crnn_greedy" and body["text"] == TEXT
-    assert body["config"].startswith("crnn:fase5_fonts")
+    assert body["config"].startswith(f"crnn:{CHECKPOINT.parent.name}")
 
 
 def test_predict_rejects_non_image_and_unknown_pipeline(client):
@@ -57,3 +57,4 @@ def test_predict_rejects_non_image_and_unknown_pipeline(client):
 def test_health(client):
     r = client.get("/health")
     assert r.status_code == 200 and r.json()["status"] == "ok"
+    assert r.json()["checkpoint"] == DEFAULT_CHECKPOINT

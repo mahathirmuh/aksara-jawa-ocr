@@ -1,6 +1,7 @@
-"""Test scripts/export_results.py: run lanjutan opsional (fase6, fase7) dan cek angka resmi, tanpa model."""
+"""Test scripts/export_results.py: run lanjutan opsional (fase6, fase7), run resmi, dan cek angka resmi, tanpa model."""
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -12,12 +13,18 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "scripts"))  # scripts
 from export_results import (  # noqa: E402
     CHECKPOINTS,
     MAX_CONFIG,
+    OFFICIAL_LINES,
+    OFFICIAL_RUN,
     OPTIONAL_CHECKPOINTS,
     PIPELINES,
+    TARGETS,
     add_optional,
     check_official,
     check_optional_run,
+    gate_problem,
     insert_after,
+    official_gates,
+    official_pipeline,
     optional_official,
     optional_pipeline,
 )
@@ -348,3 +355,115 @@ def test_check_official_stops_when_pipeline_has_no_full_metric():
     official = {"crnn_fase6_ctrl": (0.35, "out/eval/fase6_ctrl_G3_full.json")}
     with pytest.raises(SystemExit, match="crnn_fase6_ctrl: tidak ada CER 745 baris"):
         check_official([metric("crnn_fase6_ctrl", 0.35, scope="blind_50")], official)
+
+
+# --- run resmi: gerbang G1-G3 dan kunci "official" -------------------------------------------------------
+
+
+def gate_report(code: str, run: str, cer: float = 0.01, lines: int | None = None, **changes) -> dict:
+    """Laporan src.evaluate yang sah untuk gerbang `code` milik `run`; `changes` menimpa kunci tingkat atas."""
+    checkpoint = f"out/checkpoints/{run}/last_snapshot.pt"
+    if code == "G3":
+        report = {"checkpoint": checkpoint, "results": {"semua": {"lines": 745 if lines is None else lines, "cer": cer}},
+                  "pad_ratio": 0.0}
+    else:
+        n = OFFICIAL_LINES if lines is None else lines
+        block = {"lines": n, "cer": cer, "rejected_by_min_frames": 0}
+        report = {"checkpoint": checkpoint, "split": "test", "augment": "none" if code == "G1" else "heavy",
+                  "results": {"javatext.ttf": block, "semua": {"lines": n, "cer": cer}}}
+    return {**report, "goal": code, "target": TARGETS[code], "cer": cer, "passed": cer < TARGETS[code], **changes}
+
+
+def write_gate_reports(eval_dir: Path, run: str, prefix: str | None = None, cers=(0.003, 0.012, 0.21)) -> None:
+    eval_dir.mkdir(parents=True, exist_ok=True)
+    for (code, suffix), value in zip([("G1", "G1_10k"), ("G2", "G2_10k"), ("G3", "G3_full")], cers):
+        (eval_dir / f"{prefix or run}_{suffix}.json").write_text(json.dumps(gate_report(code, run, value)), encoding="utf-8")
+
+
+def test_official_pipeline_is_the_pipeline_that_reads_the_official_checkpoint(tmp_path):
+    root = fase7_dir(tmp_path, ["fase7_track"])
+    _, checkpoints, _ = add_optional(PIPELINES, CHECKPOINTS, root)
+    assert official_pipeline(checkpoints, "fase7_track") == "crnn_fase7_track"
+    assert official_pipeline(checkpoints, "fase5_fonts") == "crnn_fonts"  # run lama: kunci pendek
+    with pytest.raises(SystemExit, match="fase7_ctrl.*tidak ikut diekspor"):  # snapshot belum ada
+        official_pipeline(checkpoints, "fase7_ctrl")
+
+
+def test_official_run_is_declared_as_a_followup_run_or_base_checkpoint():
+    runs = [spec["run"] for spec in OPTIONAL_CHECKPOINTS] + [path.parent.name for path in CHECKPOINTS.values()]
+    assert OFFICIAL_RUN in runs
+
+
+def test_demo_service_defaults_to_the_official_checkpoint():
+    # Demo (src/serve.py) dan angka resmi harus membaca checkpoint yang sama.
+    from src import serve
+
+    assert serve.DEFAULT_CHECKPOINT == f"out/checkpoints/{OFFICIAL_RUN}/last_snapshot.pt"
+
+
+def test_official_gates_come_from_the_official_runs_reports(tmp_path):
+    snapshot = save_ckpt(tmp_path / "ckpt" / "fase7_track" / "last_snapshot.pt", 1500, fase7_args("fase7_track", 0.5))
+    write_gate_reports(tmp_path / "eval", "fase7_track")
+    gates = official_gates("fase7_track", "CRNN fase7_track", snapshot, 745, tmp_path / "eval")
+
+    assert [g["code"] for g in gates] == ["G1", "G2", "G3", "G4"]
+    assert [g["value"] for g in gates[:3]] == [0.003, 0.012, 0.21]
+    assert [g["passed"] for g in gates] == [True, True, False, True]
+    assert [g["target"] for g in gates[:3]] == [0.02, 0.05, 0.08]
+    assert [g["source"] for g in gates[:3]] == ["out/eval/fase7_track_G1_10k.json", "out/eval/fase7_track_G2_10k.json",
+                                                "out/eval/fase7_track_G3_full.json"]
+    assert all("CRNN fase7_track" in g["basis"] for g in gates[:3])
+    assert gates[0]["basis"].startswith("10.000 baris · javatext") and "CarakanJawa" in gates[0]["basis"]
+    assert gates[2]["basis"].startswith("745 baris NusaAksara")
+    assert all(len(g["basis"]) <= MAX_CONFIG and len(g["name"]) <= MAX_CONFIG for g in gates)  # kolom string di web
+
+
+def test_official_gates_use_short_report_names_for_old_runs(tmp_path):
+    snapshot = save_ckpt(tmp_path / "ckpt" / "fase5_fonts" / "last_snapshot.pt", 1298, run_args("fase5_fonts"))
+    write_gate_reports(tmp_path / "eval", "fase5_fonts", prefix="fonts")
+    gates = official_gates("fase5_fonts", "CRNN fase5_fonts", snapshot, 745, tmp_path / "eval")
+    assert gates[0]["source"] == "out/eval/fonts_G1_10k.json" and gates[2]["source"] == "out/eval/fonts_G3_full.json"
+
+
+def test_official_gates_stop_when_a_report_is_missing_or_stale(tmp_path):
+    eval_dir = tmp_path / "eval"
+    snapshot = save_ckpt(tmp_path / "ckpt" / "fase7_track" / "last_snapshot.pt", 1500, fase7_args("fase7_track", 0.5))
+    write_gate_reports(eval_dir, "fase7_track")
+    (eval_dir / "fase7_track_G2_10k.json").unlink()
+    with pytest.raises(SystemExit, match=r"laporan G2 .*tidak ada \(G1/G2: scripts/make_official.sh fase7_track\)"):
+        official_gates("fase7_track", "CRNN fase7_track", snapshot, 745, eval_dir)
+
+    # Run dilatih ulang sesudah dievaluasi: laporan lama tidak boleh menjadi angka resmi checkpoint baru.
+    write_gate_reports(eval_dir, "fase7_track")
+    newer = (eval_dir / "fase7_track_G1_10k.json").stat().st_mtime + 60
+    os.utime(snapshot, (newer, newer))
+    with pytest.raises(SystemExit, match="laporan G1 .*lebih tua dari last_snapshot.pt"):
+        official_gates("fase7_track", "CRNN fase7_track", snapshot, 745, eval_dir)
+
+
+@pytest.mark.parametrize("code, changes, lines, message", [
+    ("G1", {"goal": "G2"}, None, "goal 'G2', bukan G1"),
+    ("G1", {"checkpoint": "out/checkpoints/fase6_ctrl/last_snapshot.pt"}, None, "bukan milik run fase7_track"),
+    ("G1", {}, 100, "100 baris, bukan 10000"),  # tes cepat q100 bukan angka resmi
+    ("G1", {"augment": "heavy"}, None, "augmentasi 'heavy', bukan 'test' dan 'none'"),
+    ("G2", {"augment": "fase5"}, None, "augmentasi 'fase5', bukan 'test' dan 'heavy'"),
+    ("G2", {"split": "val"}, None, "split 'val'"),
+    ("G3", {"pad_ratio": 0.06}, None, "pad_ratio 0.06"),
+    ("G3", {}, 100, "100 baris, bukan seluruh 745 baris nyata"),
+])
+def test_gate_problem_rejects_reports_that_are_not_the_promised_evaluation(code, changes, lines, message):
+    report = gate_report(code, "fase7_track", lines=lines, **changes)
+    assert message in gate_problem(code, report, "fase7_track", 745)
+
+
+def test_gate_problem_accepts_valid_reports_and_counts_rejected_lines():
+    for code in ("G1", "G2", "G3"):
+        assert gate_problem(code, gate_report(code, "fase7_track"), "fase7_track", 745) == ""
+    # Baris yang ditolak T >= 1,5L tidak dinilai tetapi tetap bagian dari 10.000 baris yang dievaluasi.
+    report = gate_report("G1", "fase7_track", lines=OFFICIAL_LINES - 3)
+    report["results"]["javatext.ttf"]["rejected_by_min_frames"] = 3
+    assert gate_problem("G1", report, "fase7_track", 745) == ""
+    # Font lain ikut dievaluasi: bukan gerbang G1 (javatext saja).
+    report = gate_report("G1", "fase7_track")
+    report["results"]["NotoSansJavanese-Regular.ttf"] = dict(report["results"]["javatext.ttf"])
+    assert "bukan javatext.ttf saja" in gate_problem("G1", report, "fase7_track", 745)

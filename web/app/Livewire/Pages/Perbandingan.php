@@ -16,8 +16,9 @@ class Perbandingan extends Component
 {
     /**
      * Run lanjutan (kunci pipeline => catatan di tabel 745 baris), urut seperti OPTIONAL_CHECKPOINTS di
-     * scripts/export_results.py. Satu run per kondisi dan diukur lagi pada test set yang sama: pembanding, bukan
-     * angka resmi (angka G3 resmi tetap crnn_fonts). Ringkasan memakai kuncinya untuk titik "Jarak G3 ke target".
+     * scripts/export_results.py. Satu run per kondisi dan diukur lagi pada test set yang sama: pembanding satu sama
+     * lain. Pipeline resmi ditetapkan ekspor (Pipeline::official()) dan boleh salah satu dari run ini; run lainnya
+     * tetap pembanding. Ringkasan memakai kuncinya untuk titik "Jarak G3 ke target".
      */
     public const FOLLOWUP_RUNS = [
         'crnn_fase6_rare' => 'fase5_fonts + 1.500 langkah dengan sisipan aksara langka',
@@ -35,15 +36,19 @@ class Perbandingan extends Component
         $order = fn ($rows) => $rows->sortBy(fn ($m) => $pipelines[$m->pipeline]->sort ?? 99)->values();
         $full = $order($metrics->get('nusaaksara_745', collect()));
         $blind = $order($metrics->get('blind_50', collect()));
+        $official = Pipeline::official();
 
         return view('livewire.pages.perbandingan', [
             'hasData' => ResultImport::exists(),
             'pipelines' => $pipelines,
             'full' => $full,
+            'official' => $official,
+            'officialIsFollowup' => $official !== null && isset(self::FOLLOWUP_RUNS[$official->key]),
             'runNotes' => self::FOLLOWUP_RUNS,
             // Peringatan "satu run per kondisi" hanya menyebut run lanjutan yang ada di tabel: bisa sebagian saja,
-            // mis. run fase7 berikutnya belum selesai dilatih sehingga belum diekspor.
-            'followups' => $full->filter(fn ($m) => isset(self::FOLLOWUP_RUNS[$m->pipeline]))
+            // mis. run fase7 berikutnya belum selesai dilatih sehingga belum diekspor. Pipeline resmi disebut
+            // tersendiri di kalimat yang sama.
+            'followups' => $full->filter(fn ($m) => isset(self::FOLLOWUP_RUNS[$m->pipeline]) && $m->pipeline !== $official?->key)
                 ->map(fn ($m) => $pipelines[$m->pipeline]->label ?? $m->pipeline)->values(),
             'blind' => $blind,
             'blindChart' => [

@@ -21,7 +21,8 @@ class Demo extends Component
     #[Validate('required|image|max:8192', as: 'citra')]
     public $photo;
 
-    public string $pipeline = 'crnn_beam_lm';
+    /** Bawaan = greedy, jalur yang angkanya dilaporkan sebagai angka resmi. */
+    public string $pipeline = 'crnn_greedy';
 
     public ?array $result = null;
 
@@ -68,6 +69,12 @@ class Demo extends Component
 
     public function render()
     {
-        return view('livewire.pages.demo', ['pipelines' => OcrService::PIPELINES]);
+        // Checkpoint yang sedang dimuat layanan (bawaan src/serve.py = pipeline resmi); tanpa layanan, namanya tidak diketahui.
+        $reader = 'CRNN '.(OcrService::checkpointName($this->service) ?? '(layanan belum berjalan)');
+
+        return view('livewire.pages.demo', [
+            'reader' => $reader,
+            'pipelines' => array_map(fn ($name) => "{$reader} · {$name}", OcrService::PIPELINES),
+        ]);
     }
 }

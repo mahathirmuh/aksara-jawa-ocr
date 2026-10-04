@@ -20,9 +20,10 @@
                                 <td class="r num">{{ pct($m->cer_no_space, 2) }}</td>
                                 <td class="r num">{{ pct($m->exact, 1) }}</td>
                                 <td class="text-zinc-500">
-                                    @if ($m->pipeline === 'crnn_fonts') angka G3 resmi
+                                    @if ($m->pipeline === $official?->key) angka G3 resmi{{ isset($runNotes[$m->pipeline]) ? ' · '.$runNotes[$m->pipeline] : '' }}
                                     @elseif (isset($runNotes[$m->pipeline])) {{ $runNotes[$m->pipeline] }}
-                                    @elseif ($m->better !== null) {{ $m->better }} baris membaik, {{ $m->worse }} memburuk dibanding greedy
+                                    @elseif ($m->better !== null) {{ $m->better }} baris membaik, {{ $m->worse }} memburuk dibanding greedy checkpoint yang sama
+                                    @elseif ($m->pipeline === 'crnn_fonts') angka G3 resmi sebelumnya
                                     @elseif ($m->pipeline === 'crnn_core') tanpa 8 font tambahan
                                     @elseif ($m->pipeline === 'crnn_4b') tanpa augmentasi, 2 font
                                     @endif
@@ -32,11 +33,18 @@
                     </tbody>
                 </table>
             </div>
-            {{-- Run lanjutan (fase6, fase7; daftar dan catatannya di Perbandingan::FOLLOWUP_RUNS) yang ada di tabel. --}}
+            {{-- Run lanjutan (fase6, fase7; daftar dan catatannya di Perbandingan::FOLLOWUP_RUNS) yang ada di tabel.
+                 Bila pipeline resmi sendiri salah satu run itu, ia juga satu run yang diukur pada test set ini. --}}
             @if ($followups->isNotEmpty())
                 <p class="mt-3 max-w-prose rounded-lg bg-[var(--warn-wash)] px-3 py-2 text-xs text-[var(--warn)]">
-                    {{ $followups->join(', ', ' dan ') }}: satu run per kondisi, diukur lagi pada test set yang sama. Baca selisihnya
-                    sebagai arah, bukan angka resmi; angka G3 resmi tetap CRNN fase5_fonts (greedy).
+                    @if ($officialIsFollowup)
+                        {{ $followups->join(', ', ' dan ') }}: satu run per kondisi, diukur pada test set yang sama dengan angka resmi. Baca
+                        selisihnya sebagai arah. Angka G3 resmi = {{ $official->label }} (greedy), juga satu run; NusaAksara dipakai
+                        berulang untuk membandingkan run, jadi angka terbaiknya sedikit optimistis.
+                    @else
+                        {{ $followups->join(', ', ' dan ') }}: satu run per kondisi, diukur lagi pada test set yang sama. Baca selisihnya
+                        sebagai arah, bukan angka resmi; angka G3 resmi tetap {{ $official?->label ?? 'CRNN fase5_fonts' }} (greedy).
+                    @endif
                 </p>
             @endif
         </section>
@@ -103,7 +111,7 @@
 
                 <section class="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
                     <flux:heading size="lg">Data sintetis</flux:heading>
-                    <p class="mt-1 text-sm text-zinc-500">Beam + LM juga membantu di luar data nyata.</p>
+                    <p class="mt-1 text-sm text-zinc-500">Beam + LM juga membantu di luar data nyata (checkpoint fase5_fonts).</p>
                     <table class="data-table mt-3 w-full text-sm">
                         <thead><tr><th>Set</th><th class="r">Greedy</th><th class="r">Beam + LM</th></tr></thead>
                         <tbody>

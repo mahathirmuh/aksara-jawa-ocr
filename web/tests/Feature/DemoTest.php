@@ -40,6 +40,10 @@ class DemoTest extends TestCase
 
         Livewire::test(Demo::class)
             ->assertSee('Layanan model berjalan')
+            // Nama checkpoint dari /health layanan, bukan tertanam di web; bawaannya jalur resmi (greedy).
+            ->assertSet('pipeline', 'crnn_greedy')
+            ->assertSee('CRNN fase5_fonts · greedy (jalur resmi)')
+            ->assertSee('CRNN fase5_fonts · beam + LM')
             ->set('photo', UploadedFile::fake()->image('baris.png', 400, 60))
             ->call('read')
             ->assertHasNoErrors()
@@ -60,6 +64,7 @@ class DemoTest extends TestCase
 
         Livewire::test(Demo::class)
             ->assertSee('Layanan model belum berjalan')
+            ->assertSee('CRNN (layanan belum berjalan) · greedy')
             ->set('photo', UploadedFile::fake()->image('baris.png', 400, 60))
             ->call('read')
             ->assertSee('uvicorn src.serve:app');

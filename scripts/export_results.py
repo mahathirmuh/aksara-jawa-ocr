@@ -12,6 +12,9 @@ Keluaran di out/results/ (ditimpa):
   lines.jsonl        satu baris data nyata per baris: id, path citra, ukuran, label, tag
   predictions.jsonl  satu prediksi per (baris, pipeline): teks, CER, segmen beda per suku kata, kolom citra
 
+Angka resmi (gerbang G1-G3, kesalahan aksara, kunci "official" di manifest) = run OFFICIAL_RUN. Laporan resminya
+(out/eval/<run>_G1_10k.json, _G2_10k.json, _G3_full.json) wajib ada dan sah; lihat `official_gates`.
+
 Semua angka dihitung di sini; web hanya menampilkan. Angka 745 baris dicocokkan dengan laporan resmi
 (out/eval/*_G3_full.json, termasuk run lanjutan yang ikut, dan out/beam/fonts_o5.json) dan skrip berhenti kalau
 berbeda atau laporannya tidak ada. Run lanjutan (OPTIONAL_CHECKPOINTS: fase6_rare, fase6_ctrl, fase7_track,
@@ -41,6 +44,7 @@ from src.align import greedy_path, line_cer, syllable_diff, syllable_spans  # no
 from src.beam import line_log_probs, prefix_beam_search  # noqa: E402
 from src.charlm import CharLM  # noqa: E402
 from src.decode import cer  # noqa: E402
+from src.evaluate import TARGETS  # noqa: E402
 from src.infer import load_checkpoint  # noqa: E402
 from src.tokenizer import nfc  # noqa: E402
 
@@ -102,6 +106,15 @@ OPTIONAL_CHECKPOINTS = [
 ]
 CHECKPOINT_DIR = ROOT / "out/checkpoints"
 EVAL_DIR = ROOT / "out/eval"
+# Run resmi: gerbang G1-G3 di manifest dan tabel kesalahan aksara dihitung darinya, dan web menandai pipelinenya
+# "angka resmi" (kunci "official" di manifest). Nama run = direktori checkpoint dan awalan laporan resminya di
+# out/eval/ (LEGACY_REPORTS untuk run lama). Mengganti run resmi: buat dulu <run>_G1_10k.json dan <run>_G2_10k.json
+# (10.000 baris javatext; scripts/make_official.sh) di samping <run>_G3_full.json, lalu ubah konstanta ini dan
+# DEFAULT_CHECKPOINT di src/serve.py (Demo; tests/test_export_results.py menjaga keduanya sama).
+# Riwayat: fase5_fonts sampai 2026-10-04, lalu fase7_track (keputusan user).
+OFFICIAL_RUN = "fase7_track"
+OFFICIAL_LINES = 10_000  # baris sintetis per gerbang G1/G2; tes cepat 100 baris bukan angka resmi
+LEGACY_REPORTS = {"fase5_fonts": "fonts", "fase5_core": "core"}  # laporan run lama memakai awalan pendek
 TOL = 1e-9  # selisih CER terhadap laporan resmi yang masih dianggap sama
 # Kolom pipelines.config di web bertipe string = varchar(255) di PostgreSQL: config yang lebih panjang menggagalkan
 # `php artisan aksara:import` (SQLite, yang dipakai test web, tidak membatasi panjang).
@@ -244,6 +257,72 @@ def check_official(metrics: list[dict], official: dict[str, tuple[float, str]], 
             raise SystemExit(f"{key}: CER {exported[key]:.6%} berbeda dari laporan {source} ({value:.6%})")
 
 
+def official_pipeline(checkpoints: dict[str, Path], run: str = OFFICIAL_RUN) -> str:
+    """Kunci pipeline yang membaca checkpoint run resmi; berhenti bila checkpoint itu tidak ikut diekspor."""
+    keys = [key for key, path in checkpoints.items() if path.parent.name == run]
+    if len(keys) != 1:
+        raise SystemExit(f"run resmi {run!r} tidak ikut diekspor (out/checkpoints/{run}/last_snapshot.pt belum ada?)")
+    return keys[0]
+
+
+def gate_problem(code: str, report: dict, run: str, real_lines: int) -> str:
+    """Alasan laporan src.evaluate tidak sah sebagai gerbang `code` untuk `run`; "" bila sah.
+
+    G1/G2: OFFICIAL_LINES baris split test, hanya font javatext, bersih (G1) atau preset heavy (G2).
+    G3: semua baris nyata, tanpa margin (`--pad-ratio` bukan jalur resmi).
+    """
+    if report.get("goal") != code:
+        return f"goal {report.get('goal')!r}, bukan {code}"
+    if Path(report.get("checkpoint", "")).parent.name != run:
+        return f"checkpoint {report.get('checkpoint')!r} bukan milik run {run}"
+    total = report["results"]["semua"]["lines"]
+    if code == "G3":
+        if report.get("pad_ratio", 0.0) != 0.0:
+            return f"pad_ratio {report.get('pad_ratio')}, gerbang G3 tanpa margin"
+        return "" if total == real_lines else f"{total} baris, bukan seluruh {real_lines} baris nyata"
+    augment = "none" if code == "G1" else "heavy"
+    if report.get("split") != "test" or report.get("augment") != augment:
+        return f"split {report.get('split')!r} dan augmentasi {report.get('augment')!r}, bukan 'test' dan {augment!r}"
+    fonts = [name for name in report["results"] if name != "semua"]
+    if fonts != ["javatext.ttf"]:
+        return f"font {fonts}, bukan javatext.ttf saja"
+    total += report["results"]["javatext.ttf"].get("rejected_by_min_frames", 0)  # baris ditolak T >= 1,5L tetap dihitung
+    return "" if total == OFFICIAL_LINES else f"{total} baris, bukan {OFFICIAL_LINES}"
+
+
+def official_gates(run: str, label: str, snapshot: Path, real_lines: int, eval_dir: Path = EVAL_DIR) -> list[dict]:
+    """Gerbang G1-G3 dari laporan resmi src.evaluate milik run resmi, plus G4 (round-trip tokenizer, Fase 1).
+
+    Berhenti bila sebuah laporan tidak ada, tidak sah (`gate_problem`), atau lebih tua dari last_snapshot.pt run itu.
+    """
+    prefix = LEGACY_REPORTS.get(run, run)
+    lines = f"{OFFICIAL_LINES:,}".replace(",", ".")
+    specs = [
+        ("G1", f"{prefix}_G1_10k", "Sintetis bersih, font uji",
+         f"{lines} baris · javatext (sekeluarga dengan font training CarakanJawa) · {label}"),
+        ("G2", f"{prefix}_G2_10k", "Sintetis augmentasi berat", f"{lines} baris · javatext · preset heavy · {label}"),
+        ("G3", f"{prefix}_G3_full", "Baris foto/pindaian nyata",
+         f"{real_lines} baris NusaAksara · {label} · greedy (jalur resmi)"),
+    ]
+    gates = []
+    for code, name, title, basis in specs:
+        path = eval_dir / f"{name}.json"
+        if not path.exists():
+            raise SystemExit(f"run resmi {run}: laporan {code} {path} tidak ada (G1/G2: scripts/make_official.sh {run}); "
+                             "ekspor dihentikan")
+        report = read_json(path)
+        problem = gate_problem(code, report, run, real_lines)
+        if not problem and path.stat().st_mtime < snapshot.stat().st_mtime:
+            problem = f"lebih tua dari {snapshot.name} run itu"
+        if problem:
+            raise SystemExit(f"run resmi {run}: laporan {code} {path} tidak sah ({problem}); ekspor dihentikan")
+        gates.append({"code": code, "name": title, "value": report["cer"], "target": TARGETS[code],
+                      "passed": report["cer"] < TARGETS[code], "basis": basis, "source": f"out/eval/{name}.json"})
+    gates.append({"code": "G4", "name": "Round-trip tokenizer", "value": 1.0, "target": 1.0, "passed": True,
+                  "basis": "1.034.357 / 1.034.357 baris korpus (Fase 1)", "source": "tests/test_tokenizer.py"})
+    return gates
+
+
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out", default=str(ROOT / "out/results"))
@@ -261,6 +340,9 @@ def main(argv=None) -> None:
     skipped = [spec["run"] for spec in OPTIONAL_CHECKPOINTS if spec["key"] not in optional_keys]
     if skipped:  # snapshot baru dibuat setelah run selesai (`evaluate` di scripts/fase6_common.sh)
         print(f"run lanjutan dilewati (last_snapshot.pt belum ada): {', '.join(skipped)}", flush=True)
+    official_key = official_pipeline(checkpoints, OFFICIAL_RUN)
+    official_label = next(p["label"] for p in pipelines if p["key"] == official_key)
+    print(f"angka resmi: {official_key} (run {OFFICIAL_RUN})", flush=True)
     official: dict[str, tuple[float, str]] = {}
     if not args.limit:  # laporan resmi dibaca SEBELUM inferensi panjang supaya laporan yang hilang langsung ketahuan
         fonts_json, core_json = EVAL_DIR / "fonts_G3_full.json", EVAL_DIR / "core_G3_full.json"
@@ -272,6 +354,8 @@ def main(argv=None) -> None:
 
     with LABELS.open(encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f, delimiter="\t"))
+    # Sebelum inferensi dan sebelum --limit memotong baris: gerbang G3 = seluruh baris nyata.
+    gates = official_gates(OFFICIAL_RUN, official_label, checkpoints[official_key], len(rows))
     vlm_path = ROOT / "out/eval/vlm_blind_50.json"
     vlm_items = read_json(vlm_path)["items"] if vlm_path.exists() else []
     vlm = {Path(it["image_path"]).name: it for it in vlm_items}
@@ -326,22 +410,10 @@ def main(argv=None) -> None:
 
     confusion = Counter()
     for n in names:
-        r, h = refs[n].replace(" ", ""), hyps["crnn_fonts"][n].replace(" ", "")
+        r, h = refs[n].replace(" ", ""), hyps[official_key][n].replace(" ", "")
         for op in Levenshtein.editops(r, h):
             confusion[(op.tag, r[op.src_pos] if op.tag != "insert" else "", h[op.dest_pos] if op.tag != "delete" else "")] += 1
     kinds = {"replace": "sub", "delete": "del", "insert": "ins"}
-
-    evals = {k: read_json(ROOT / f"out/eval/{k}.json") for k in ["fonts_G1_10k", "fonts_G2_10k", "fonts_G3_full"]}
-    gates = [
-        {"code": "G1", "name": "Sintetis bersih, font baru", "value": evals["fonts_G1_10k"]["cer"], "target": 0.02,
-         "passed": evals["fonts_G1_10k"]["passed"], "basis": "10.000 baris · font held-out javatext", "source": "out/eval/fonts_G1_10k.json"},
-        {"code": "G2", "name": "Sintetis augmentasi berat", "value": evals["fonts_G2_10k"]["cer"], "target": 0.05,
-         "passed": evals["fonts_G2_10k"]["passed"], "basis": "10.000 baris · preset heavy", "source": "out/eval/fonts_G2_10k.json"},
-        {"code": "G3", "name": "Baris foto/pindaian nyata", "value": evals["fonts_G3_full"]["cer"], "target": 0.08,
-         "passed": evals["fonts_G3_full"]["passed"], "basis": "745 baris NusaAksara · greedy (jalur resmi)", "source": "out/eval/fonts_G3_full.json"},
-        {"code": "G4", "name": "Round-trip tokenizer", "value": 1.0, "target": 1.0, "passed": True,
-         "basis": "1.034.357 / 1.034.357 baris korpus (Fase 1)", "source": "tests/test_tokenizer.py"},
-    ]
 
     manifest = {
         "schema": SCHEMA,
@@ -349,11 +421,12 @@ def main(argv=None) -> None:
         "source": "metopenv5",
         "limited": bool(args.limit),
         "pipelines": [{**p, "sort": i} for i, p in enumerate(pipelines)],
+        "official": official_key,
         "gates": gates,
         "metrics": metrics,
         "ablation": read_json(ROOT / "out/ablation.json"),
         "confusion": {
-            "pipeline": "crnn_fonts", "scope": "nusaaksara_745",
+            "pipeline": official_key, "scope": "nusaaksara_745",
             "totals": {kinds[k]: sum(c for (op, _, _), c in confusion.items() if op == k) for k in kinds},
             "items": [{"kind": kinds[op], "ref": a, "hyp": b, "count": c} for (op, a, b), c in confusion.most_common()],
         },

@@ -104,6 +104,7 @@ python scripts/export_results.py                 # kontrak data web -> out/resul
 python scripts/compare_runs.py A B               # dua pipeline di out/results: CER + SK bootstrap baris/halaman, recall aksara langka & adeg-adeg -> out/compare/
 python scripts/eval_rare.py --workers 2          # sintetis tertarget aksara langka (split test, font javatext, 3 kondisi x 3 checkpoint; ~1-2 jam CPU)
 python scripts/eval_spacing.py --lines 301 --threads 4   # dosis-respons jarak antar suku kata (split val, javatext): spasi palsu per 100 batas suku kata; memakai cache
+bash scripts/make_official.sh RUN                # evaluasi resmi G1/G2 10.000 baris untuk RUN, lalu ekspor + impor (OFFICIAL_RUN harus sudah RUN)
 .venv/Scripts/python -m uvicorn src.serve:app --host 127.0.0.1 --port 8011   # layanan model untuk Demo
 cd web && php artisan aksara:import && php artisan serve --port=8010                  # web UI (lihat web/README)
 ```
@@ -274,6 +275,19 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     gerbang, metrik, ablasi, kesalahan aksara), `lines.jsonl`, `predictions.jsonl` (teks, CER, segmen beda
     per suku kata dari `src/align.py`, kolom citra per suku kata dari alignment CTC). Skrip berhenti kalau
     angka 745 baris beda dari laporan resmi. Uji buta VLM tersimpan di `out/eval/vlm_blind_50.json`.
+  - **Angka resmi = satu run, ditetapkan di satu tempat (2026-10-04).** `OFFICIAL_RUN` di
+    `scripts/export_results.py` menentukan pipeline resmi: gerbang G1–G3 di manifest dibaca dari laporan
+    `out/eval/<run>_G1_10k.json`, `_G2_10k.json`, `_G3_full.json` (run lama `fase5_fonts` memakai awalan
+    `fonts_`), tabel kesalahan aksara dihitung dari pipeline itu, dan manifest membawa kunci `"official"`.
+    Ekspor berhenti bila sebuah laporan tidak ada, bukan milik checkpoint run itu, lebih tua dari
+    `last_snapshot.pt`-nya, atau bukan evaluasi yang dijanjikan (G1/G2: 10.000 baris split test, javatext saja,
+    bersih / `heavy`; G3: semua baris nyata tanpa margin; tes cepat q100 ditolak). Web menyimpan tandanya di
+    `pipelines.official` dan membacanya lewat `Pipeline::official()` (manifest lama tanpa kunci itu =
+    `crnn_fonts`); tidak ada lagi nama pipeline resmi yang tertanam di halaman. Demo: `DEFAULT_CHECKPOINT` di
+    `src/serve.py` harus run yang sama (dijaga `tests/test_export_results.py`); bawaan Demo = greedy, karena
+    bobot LM beam disetel pada `fase5_fonts` dan belum diuji ulang. **Mengganti run resmi:**
+    `bash scripts/make_official.sh RUN` (evaluasi G1/G2 10.000 baris, ~30 menit per gerbang di CPU; menunggu
+    training selesai dulu), ubah `OFFICIAL_RUN` + `DEFAULT_CHECKPOINT`, lalu ekspor dan impor.
   - **Seluruh alur = scope proyek (keputusan user 2026-09-24):** OCR -> transliterasi -> arti (Indonesia)
     -> tingkat tutur (ngoko / madya / krama / campur). Transliterasi & arti **manusia** untuk 745 label
     tersedia dari NusaAksara (config `Image Transliteration` / `Image Translation`, cocok 745/745, lisensi
@@ -401,6 +415,23 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     menekan keluaran palsu (penyebabnya bukan glyph kembar di font training); manfaat dan biaya sisipan saling
     menghapus di G3. **Checkpoint dasar berikutnya = `fase7_track`**; sisipan aksara langka perlu cara lain
     (dosis lebih rendah, font yang bentuk aksara langkanya dekat dengan cetakan, atau data nyata).
+  - **Hasil sintetis fase 7 (2026-10-04; `out/compare/spacing_synthetic.md`, `out/compare/fase7/rare_synthetic.md`;
+    citra yang sama untuk semua checkpoint, font javatext, tanpa NusaAksara).** *Dosis-respons jarak* (299 baris
+    val, bersih, 64 px): spasi palsu per 100 batas suku kata pada baris tanpa spasi, jarak 0 / 0,1 / 0,2 / 0,3 /
+    0,45 / 0,6 em (dua terakhir di luar rentang latih 0–0,3): `fase7_track` **0 / 0 / 0 / 0 / 4,2 / 67,5**;
+    `fase7_track_rare` 0 / 0 / 0 / 0 / 4,6 / 72,1; `fase6_ctrl` 0 / 16,6 / 85,0 / 92,3 / 94,1 / 92,4;
+    `fase5_fonts` 0 / 10,3 / 81,1 / 91,8 / 93,4 / 89,3. Selisih `fase7_track` − `fase6_ctrl` pada 0,3 em −92,3
+    [−93,0; −91,6]. Recall spasi asli (baris berspasi) `fase7_track` 99,65–100% di semua jarak; `fase6_ctrl`
+    99,9% → 39,5% pada 0,3 em (celah kata yang sangat lebar tidak lagi dibaca spasi). Biaya: recall spasi pada
+    jarak 0 turun 0,29 poin [−0,58; −0,06]. CER tak peka spasi datar (0,63–0,74% tanpa spasi; 0,28–0,40%
+    berspasi), jadi bentuk aksara tetap terbaca. Batas: di luar rentang latih gejalanya kembali (0,6 em: 67,5),
+    jadi cetakan yang lebih renggang dari 0,3–0,45 em butuh `--track-max` lebih besar. *Aksara langka*
+    (2.000 baris test): teks biasa `fase7_track` 0,33% vs `fase6_ctrl` 0,32% (+0,02 [−0,01; +0,05]: tracking
+    tanpa efek samping pada teks bersih; dengan augmentasi `fase5` −0,21 [−0,29; −0,12]); `fase7_track_rare`
+    recall 44 codepoint 73,5% bersih / 62,2% teraugmentasi (`fase6_rare` 73,7% / 59,3%), presisi 86,1% / 84,1%
+    (90,0% / 86,4%), murda 74,4% / 52,0% (66,3% / 41,7%), pembuka 100%, pembuka palsu 0% / 0,2%. Di sintetis
+    presisi aksara langka tinggi (84–90%) padahal di cetakan nyata 40%: keluaran palsu itu masalah celah domain
+    bentuk huruf, bukan sesuatu yang bisa disetel di javatext.
   - **Aturan analisis, ditetapkan 2026-10-03 SEBELUM angka `fase6_ctrl` ada** (`compare_runs.py crnn_fase6_rare
     crnn_fase6_ctrl` + evaluasi sintetis tertarget font javatext): (1) "sisipan membantu aksara langka" hanya bila
     SK 95% bootstrap per halaman untuk selisih recall 44 codepoint (n=495) atau recall adeg-adeg pembuka (n=112)
@@ -530,5 +561,6 @@ Kalau training bermasalah, cek ini dulu sebelum menyalahkan arsitektur:
 | Laptop mati mendadak, Kernel-Power 41 dengan `BugcheckCode=0` | Baterai habis. **Hibernate gagal selama Docker Desktop/WSL2 hidup:** driver Hyper-V `vpcivsp` menolak transisi daya (Kernel-Power 40), termasuk Hibernate saat baterai kritis (2026-10-03 06:28 → mati 06:31, `fase6_ctrl` hilang di langkah ~300). Training menguras baterai ~21 W (penuh ≈ 1 jam 50 menit). Selama training: charger tetap terpasang, jangan pilih Hibernate/Sleep/Shut down. `BugcheckCode≠0` = crash Windows: sesi 1 `fase6_rare` (25 Sep ~02:00) mati karena bugcheck 0x19C WIN32K_POWER_WATCHDOG_TIMEOUT, bukan karena sesi Claude |
 | Training crash `PermissionError` saat simpan checkpoint | Proses lain (notebook) sedang membaca `best.pt`; `save_atomic` kini mencoba ulang 10x |
 | Training crash `XPU out of memory` | Lebar batch = citra terlebar; memori training ~105 KiB per kolom B×W (batch 32 × 2.900 px ≈ 9,6 GiB), dan iGPU berbagi memori dengan sistem (~6,6 GiB dipakai proses lain). `fase5_quick` crash di langkah ~950, checkpoint terakhir langkah 500. `train.py --max-batch-columns` (default 64.000 ≈ 6,7 GiB) memecah batch lebar dengan akumulasi gradien berbobot n/B (sama dengan batch utuh kecuali statistik BatchNorm); jumlahnya tercatat sebagai `split_batches` di log |
+| Memori sistem habis saat training (commit mendekati batas, RAM tersedia < 1 GB) | Proses training fase7 memakai ~17 GB memori privat + 8 worker (4 render, 4 val) à 0,8–1,6 GB ≈ 27 GB commit, dan naik selama run. Terukur 2026-10-04 13:53: `src.evaluate` 10.000 baris (2 worker, ~6,4 GB) dijalankan bersamaan → commit 75,3 dari 76,4 GB, RAM tersedia 0,2 GB, laju training turun ke 1,8 sampel/dtk; evaluasi dihentikan sebelum ada yang gagal. Jangan menjalankan evaluasi besar, ekspor, atau test suite penuh selama training: `last.pt` hanya disimpan tiap 500 langkah, jadi satu kegagalan alokasi membuang sampai ~2 jam. Cek: `Get-CimInstance Win32_OperatingSystem` (`TotalVirtualMemorySize − FreeVirtualMemory` vs `TotalVirtualMemorySize`). Layanan terjemahan (port 8012) memegang ~3,6 GB dan boleh dihentikan sementara |
 | Training/server berhenti sendiri ~30 menit setelah dijalankan Claude | Tugas background Claude Code punya batas waktu (~30 menit, terukur 2026-10-02: training, `artisan serve`, uvicorn semuanya dihentikan) dan ikut mati saat sesi berakhir. Proses panjang WAJIB dijalankan sebagai proses Windows mandiri: training `Start-Process "C:\Program Files\Git\bin\bash.exe" -ArgumentList scripts/run_fase6_ctrl.sh -WorkingDirectory <repo> -WindowStyle Hidden` (lanjut otomatis lewat `--resume`), server `web\services.ps1 start\|stop\|status`. Setelah restart/mati listrik TIDAK ada yang menyala sendiri: jalankan ulang rantai, `scripts/after_fase6.sh`, dan `services.ps1 start`. Sebelum menjalankan ulang, pastikan tidak ada proses `src.train` lama yang masih hidup (dua training berebut GPU). `taskkill /T` dari Git Bash tidak mengenai program MSYS (`sleep`, `grep`) yang di-exec, karena induk Windows-nya sudah keluar; program native (python) tetap kena. Jangan mengedit skrip bash yang sedang berjalan: bash membaca berkas sedikit demi sedikit |
 | Worker DataLoader crash "Glyph terpotong tepi kanvas" | Rantai pasangan panjang dari kata serapan (4b crash di langkah ~1300). `render.py` kini memperbesar kanvas 3→6→12 em; `SyntheticLines` melewati `RenderClipped`/`EmptyRender` saja (RAQM mati tetap dilempar). Korpus: rantai pasangan ≥4 = 0,11% baris train, semuanya sampah transliterasi — **filter di `src/corpus.py` saat korpus dibangun ulang** |

@@ -46,6 +46,54 @@ class AksaraImportTest extends TestCase
         );
     }
 
+    /** Salinan fixture dengan manifest yang diubah (mis. pipeline resmi lain). */
+    private function fixtureWith(callable $change): string
+    {
+        $dir = sys_get_temp_dir().'/aksara-official-'.uniqid();
+        mkdir($dir);
+        foreach (['lines.jsonl', 'predictions.jsonl'] as $file) {
+            copy($this->fixture().'/'.$file, $dir.'/'.$file);
+        }
+        $manifest = json_decode(file_get_contents($this->fixture().'/manifest.json'), true);
+        file_put_contents($dir.'/manifest.json', json_encode($change($manifest), JSON_UNESCAPED_UNICODE));
+
+        return $dir;
+    }
+
+    public function test_official_pipeline_comes_from_the_manifest(): void
+    {
+        // Ekspor sebelum kunci "official" ada: angka resmi = crnn_fonts.
+        $this->artisan('aksara:import', ['--path' => $this->fixture()])->assertSuccessful();
+        $this->assertSame('crnn_fonts', Pipeline::official()->key);
+        $this->assertSame(['crnn_fonts'], Pipeline::where('official', true)->pluck('key')->all());
+
+        // Ekspor yang menetapkan pipeline lain: tandanya pindah, tidak bertambah.
+        $dir = $this->fixtureWith(function (array $manifest) {
+            $manifest['official'] = 'crnn_core';
+            $manifest['confusion']['pipeline'] = 'crnn_core';
+
+            return $manifest;
+        });
+        $this->artisan('aksara:import', ['--path' => $dir])->assertSuccessful();
+        $this->assertSame('crnn_core', Pipeline::official()->key);
+        $this->assertSame(['crnn_core'], Pipeline::where('official', true)->pluck('key')->all());
+    }
+
+    public function test_import_rejects_inconsistent_official_pipeline(): void
+    {
+        $unknown = $this->fixtureWith(fn (array $manifest) => ['official' => 'crnn_tidak_ada'] + $manifest);
+        $this->artisan('aksara:import', ['--path' => $unknown])
+            ->expectsOutputToContain('Pipeline resmi crnn_tidak_ada tidak ada')
+            ->assertFailed();
+
+        // Halaman Kesalahan aksara menampilkan tabel kesalahan atas nama pipeline resmi: keduanya harus sama.
+        $mismatch = $this->fixtureWith(fn (array $manifest) => ['official' => 'crnn_core'] + $manifest);
+        $this->artisan('aksara:import', ['--path' => $mismatch])
+            ->expectsOutputToContain('bukan pipeline resmi crnn_core')
+            ->assertFailed();
+        $this->assertSame(0, Pipeline::count());
+    }
+
     public function test_reimport_keeps_line_ids_and_human_annotations(): void
     {
         $this->artisan('aksara:import', ['--path' => $this->fixture()])->assertSuccessful();
