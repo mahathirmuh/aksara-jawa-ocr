@@ -435,14 +435,16 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     menghapus di G3. **Checkpoint dasar berikutnya = `fase7_track`**; sisipan aksara langka perlu cara lain
     (dosis lebih rendah, font yang bentuk aksara langkanya dekat dengan cetakan, atau data nyata).
   - **Hasil sintetis fase 7 (2026-10-04; `out/compare/spacing_synthetic.md`, `out/compare/fase7/rare_synthetic.md`;
-    citra yang sama untuk semua checkpoint, font javatext, tanpa NusaAksara).** *Dosis-respons jarak* (299 baris
-    val, bersih, 64 px): spasi palsu per 100 batas suku kata pada baris tanpa spasi, jarak 0 / 0,1 / 0,2 / 0,3 /
-    0,45 / 0,6 em (dua terakhir di luar rentang latih 0–0,3): `fase7_track` **0 / 0 / 0 / 0 / 4,2 / 67,5**;
-    `fase7_track_rare` 0 / 0 / 0 / 0 / 4,6 / 72,1; `fase6_ctrl` 0 / 16,6 / 85,0 / 92,3 / 94,1 / 92,4;
-    `fase5_fonts` 0 / 10,3 / 81,1 / 91,8 / 93,4 / 89,3. Selisih `fase7_track` − `fase6_ctrl` pada 0,3 em −92,3
-    [−93,0; −91,6]. Recall spasi asli (baris berspasi) `fase7_track` 99,65–100% di semua jarak; `fase6_ctrl`
-    99,9% → 39,5% pada 0,3 em (celah kata yang sangat lebar tidak lagi dibaca spasi). Biaya: recall spasi pada
-    jarak 0 turun 0,29 poin [−0,58; −0,06]. CER tak peka spasi datar (0,63–0,74% tanpa spasi; 0,28–0,40%
+    citra yang sama untuk semua checkpoint, font javatext, tanpa NusaAksara).** *Dosis-respons jarak* (300 baris
+    val, bersih, 64 px; jalan akhir 2026-10-04 16:10 dengan run kontrol): spasi palsu per 100 batas suku kata pada
+    baris tanpa spasi, jarak 0 / 0,1 / 0,2 / 0,3 / 0,45 / 0,6 em (dua terakhir di luar rentang latih 0–0,3):
+    `fase7_track` **0 / 0 / 0 / 0 / 4,1 / 67,5**; `fase7_track_rare` 0 / 0 / 0 / 0 / 4,6 / 72,2; kontrol
+    `fase7_ctrl` **0 / 15,3 / 84,3 / 92,5 / 94,2 / 87,6**; `fase6_ctrl` 0 / 16,5 / 85,0 / 92,3 / 94,1 / 92,4;
+    `fase5_fonts` 0 / 10,3 / 81,1 / 91,8 / 93,4 / 89,3. Selisih `fase7_track` − `fase7_ctrl` pada 0,3 em −92,5
+    [−93,2; −91,8]: gejalanya hilang karena tracking, bukan karena tambahan langkah. Recall spasi asli (baris
+    berspasi) `fase7_track` 99,65–100% di semua jarak; `fase7_ctrl` 99,8% → 63,0% pada 0,3 em dan 25,4% pada
+    0,6 em (celah kata yang sangat lebar tidak lagi dibaca spasi). Biaya pada jarak 0 terhadap kontrol tidak
+    nyata: recall spasi −0,18 poin [−0,46; +0,06]. CER tak peka spasi datar (0,63–0,74% tanpa spasi; 0,28–0,40%
     berspasi), jadi bentuk aksara tetap terbaca. Batas: di luar rentang latih gejalanya kembali (0,6 em: 67,5),
     jadi cetakan yang lebih renggang dari 0,3–0,45 em butuh `--track-max` lebih besar. *Aksara langka*
     (2.000 baris test): teks biasa `fase7_track` 0,33% vs `fase6_ctrl` 0,32% (+0,02 [−0,01; +0,05]: tracking
