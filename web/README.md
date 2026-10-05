@@ -9,7 +9,8 @@ memanggil layanan model untuk halaman Demo. Aturan proyek ada di `../CLAUDE.md`.
 ## Menjalankan
 
 ```bash
-# 1. Di folder repo OCR (induk web/): ekspor hasil (~9 menit di CPU) dan jalankan layanan model
+# 1. Di folder repo OCR (induk web/): ekspor hasil (~14 menit di CPU saat diukur dengan run fase6; bertambah
+#    dengan jumlah run yang diekspor) dan jalankan layanan model
 .venv/Scripts/python scripts/export_results.py
 .venv/Scripts/python scripts/export_datasets.py     # kartu data halaman Dataset (~20 detik)
 .venv/Scripts/python scripts/export_methods.py      # kartu metode halaman Metode (beberapa detik; sesudah export_results.py)
@@ -34,7 +35,11 @@ powershell -ExecutionPolicy Bypass -File web\services.ps1 start    # juga: statu
 Setelah model baru atau eksperimen baru: jalankan ulang `export_results.py` lalu `php artisan aksara:import`.
 Kartu halaman Dataset dan Metode bisa diperbarui sendiri: `export_datasets.py` lalu `php artisan aksara:datasets`,
 `export_methods.py` lalu `php artisan aksara:methods`. Kartu metode mengutip angka dari `out/results/manifest.json`,
-jadi diekspor sesudah `export_results.py`.
+jadi diekspor sesudah `export_results.py`; bukti selisih antar-run dan evaluasi tertarget dibacanya dari
+`out/compare/` (`scripts/compare_runs.py`, `scripts/eval_spacing.py`) bila berkasnya ada dan cocok dengan manifest.
+Ketiga perintah impor langsung menulis "PERINGATAN" bila kartu yang baru diimpor tidak sejalan dengan hasil OCR yang
+diimpor (kartu untuk run lain, atau buktinya dari ekspor hasil yang lain), dengan skrip dan perintah yang perlu
+diulang.
 
 ### Tahap 3 (arti) dan tahap 4 (tingkat tutur)
 
@@ -139,7 +144,7 @@ dibangun ulang dari file. Cadangkan labelnya:
 | Perbandingan | CER per pipeline (745 baris, 50 baris uji buta), pipeline yang direncanakan, hasil sintetis |
 | Ablasi | 12 run augmentasi Fase 5 |
 | Dataset | Kartu data: besar korpus, pembagian latih / validasi / uji dengan arti tiap bagian dan berapa yang dipakai run resmi, asal korpus (dari artikel ke baris, sebaran panjang), rantai checkpoint run resmi (langkah, sampel, baris berbeda), daftar dataset (peran, sumber, lisensi, boleh disebar atau tidak), font per peran dengan catatannya, batasan data, dan data pendukung |
-| Metode | Daftar metode dan machine learning yang dipakai, per tahap: pembaca aksara (CNN, BiLSTM, lapisan keluaran, CTC, decoding greedy, tokenizer urutan visual, normalisasi kontras), data latih sintetis (render, variasi font, augmentasi, jarak antar suku kata, buang spasi, sisipan aksara langka), pelatihan (AdamW, OneCycle, pemotongan gradien, batch per panjang, pelatihan bertahap), koreksi sesudah baca (beam search + model bahasa karakter), evaluasi dan statistik (CER, gerbang, bootstrap berpasangan, run kontrol, ablasi, evaluasi sintetis tertarget, uji buta VLM), lalu tahap lanjutan alur milik web (alih aksara, NLLB-200, chrF/BLEU, tingkat tutur, pemulih tanda é). Tiap butir punya jenis, status (dipakai model resmi, dipakai, tersedia, diuji lalu tidak dipakai, pembanding), penjelasan, pengaturan, bukti terukur dengan sumbernya, dan berkas kodenya. Di atasnya: empat angka pokok dan alur dari citra ke arti; di bawahnya: metode yang direncanakan |
+| Metode | Daftar metode dan machine learning yang dipakai, per tahap: pembaca aksara (CNN, BiLSTM, lapisan keluaran, CTC, decoding greedy, tokenizer urutan visual, normalisasi kontras), data latih sintetis (render, variasi font, augmentasi, jarak antar suku kata, buang spasi, sisipan aksara langka), pelatihan (AdamW, OneCycle, pemotongan gradien, batch per panjang, pelatihan bertahap), koreksi sesudah baca (beam search + model bahasa karakter), evaluasi dan statistik (CER, gerbang, bootstrap berpasangan, run kontrol, ablasi, evaluasi sintetis tertarget, uji buta VLM), lalu tahap lanjutan alur milik web (alih aksara, NLLB-200, chrF/BLEU, tingkat tutur, pemulih tanda é). Tiap butir punya jenis, status (dipakai model resmi, dipakai, tersedia, diuji lalu tidak dipakai, pembanding), penjelasan, pengaturan, berkas kodenya, dan bila ada: bukti terukur dengan sumbernya serta catatan batasan (mis. font uji yang sekeluarga dengan font latih, font latih bercacat, ablasi satu seed). Di atasnya: empat angka pokok dan alur dari citra ke teks Latin, yang lalu bercabang ke arti dan tingkat tutur; di bawahnya: metode yang direncanakan |
 | Penjelajah baris | Citra, label, transliterasi, arti, tingkat tutur, dan keluaran tiap pipeline dengan beda per suku kata; arahkan kursor ke suku kata CRNN greedy untuk melihat kolom citra yang dibacanya |
 | Kesalahan aksara | Aksara tertukar, hilang, tambahan |
 | Demo | Unggah potongan satu baris → FastAPI `/predict`, dengan skor CTC dan LM setiap kandidat |
@@ -157,12 +162,15 @@ bergaris tipis, tabel rapat 12 px, huruf Inter 13 px. Stack tetap Tailwind 4 + F
   `.card` / `.card-body` / `.section-title`, `.stat-card`, `.table-wrap` + `.data-table`, `.status status-*`,
   `.badge`, `.chip`, `.alert`, `.nav-tabs`, `.btn-pagination`. Halaman baru memakai kelas itu, bukan gugus utilitas
   warna sendiri. Halaman Dataset menambah `.split-bar` (batang pembagian), `.meter` (batang kecil), `.split-dot` dan
-  `.role-chip` (penanda peran); warna bagiannya `.split-train|val|test` = `--series-1|2|3`. Seri ketiga abu kebiruan
-  gelap. Warna bukan satu-satunya pembeda: tiap bagian selalu disertai namanya (terang-gelap biru dan abu itu hanya
-  berbeda 1,8 kali). Alur `.meter` berwarna permukaan dengan garis tepi, supaya isi jingga tetap berkontras 3:1.
+  `.role-chip` (penanda peran); warna bagiannya `.split-train|val|test` = `--series-1|2|3`. Seri ketiga abu
+  kebiruan. Warna bukan satu-satunya pembeda: tiap bagian selalu disertai namanya (terang-gelap biru dan abu itu hanya
+  berbeda 1,8 kali). Alur `.meter` berwarna permukaan dengan garis tepi dari warna teks redup, supaya batasnya
+  terlihat dan isi jingga tetap berkontras 3:1.
   Halaman Metode menambah `.flow` + `.flow-step` (alur langkah; `.is-learned` = langkah yang memakai model hasil
-  belajar) dan `.method-list` / `.method-row` / `.method-evidence` / `.method-settings` (satu butir: nama dan status,
-  penjelasan dan bukti, pengaturan; tiga kolom di layar lebar, dua di layar sedang, satu di ponsel).
+  belajar, ditandai warna DAN tulisan "ML" lewat `.flow-tag`; `.flow-branches` = dua langkah terakhir yang sama-sama
+  berangkat dari teks Latin) dan `.method-list` / `.method-row` / `.method-evidence` / `.method-note` /
+  `.method-settings` (satu butir: nama dan status, penjelasan dengan kotak "Terukur" dan kotak "Catatan", pengaturan;
+  tiga kolom di layar lebar, dua di layar sedang, satu di ponsel).
 - **Kerangka:** `components/layouts/app/sidebar.blade.php` (sidebar Flux `collapsible`, bilah atas, footer); isi
   halaman dibungkus `.container-xl` (maks. 1440 px) di `layouts/app.blade.php`. Halaman masuk dan daftar:
   `layouts/auth/split.blade.php`.
@@ -196,25 +204,40 @@ yang tidak dihitung ekspor (`null`, misalnya jadwal baris run `--real-train`) di
 `payload` bertipe `json`, bukan `jsonb`: jsonb PostgreSQL mengurutkan ulang kunci objek, dan halaman tidak boleh
 bergantung pada urutan kunci (peran selalu diurutkan latih, validasi, uji). Kartu memuat kunci pipeline run yang
 dihitungnya; bila berbeda dari `Pipeline::official()`, halaman menampilkan peringatan "Kartu data dan hasil OCR
-tidak sejalan", tanpa menebak sisi mana yang tertinggal.
+tidak sejalan", tanpa menebak sisi mana yang tertinggal. Dua kunci yang ditambahkan sesudah tinjauan 2026-10-06:
+`usage.test.others` (evaluasi di luar `out/eval` yang mengambil barisnya secara acak dari seluruh bagian uji:
+aksara langka sintetis dan beam + LM; karena itu halaman tidak lagi menyiratkan hanya N baris pertama yang pernah
+dibaca) dan `fonts_source` per run (`log` bila log training mencatat daftar fontnya, `folder` bila jumlahnya
+dihitung dari folder font sekarang; yang kedua diperingatkan bila ekspor hasil mencatat jumlah lain).
 
 **Kartu metode (skema 1, kontrak sendiri):** `../out/results/methods.json` dari `scripts/export_methods.py`, diimpor
 `php artisan aksara:methods` (atau ikut `aksara:import`) ke tabel `method_reports`. Isinya `model` (arsitektur dan
 jumlah parameter, dihitung dari model yang dibangun dari checkpoint run resmi), `groups[]` (tiap kelompok: `key`,
 `title`, `intro`, `methods[]` dengan `key`, `name`, `kind`, `status`, `summary`, `settings` berupa pasangan
-`[label, nilai]`, `evidence`, `evidence_source`, `files[]`), dan `planned[]`. Penjelasan, pengaturan, dan bukti butir
-milik repo OCR ditulis dan dihitung Python; web menampilkannya apa adanya dan hanya menambah kelompok "Tahap lanjutan
-alur" dari tabel dan konstanta web sendiri (`Metode::webGroup()`). Kartu memuat `results_generated` (waktu ekspor
-hasil yang dikutip buktinya): bila berbeda dari hasil yang diimpor, atau kartu dibuat untuk run lain, halaman
+`[label, nilai]`, `evidence`, `evidence_source`, `note`, `files[]`), `planned[]`, dan `chain_complete` (rantai
+checkpoint run resmi terbaca utuh atau tidak). `evidence` = hasil ukur, `note` = batasan yang harus dibaca bersama
+butir itu; keduanya boleh kosong. Penjelasan, pengaturan, bukti, dan catatan butir milik repo OCR disusun Python:
+angka dan pengaturannya dibaca dari checkpoint, kode, log, dan berkas hasil (selisih antar-run hanya dikutip dari
+berkas pembanding yang CER-nya sama dengan manifest, dan hanya terhadap run kontrol perlakuan itu), sedangkan
+kalimat penjelasannya ditulis tangan di skrip. Web menampilkannya apa adanya dan hanya menambah kelompok "Tahap
+lanjutan alur" dari tabel dan konstanta web sendiri (`Metode::webGroup()`). Kartu memuat `results_generated` (waktu
+ekspor hasil yang dikutip buktinya): bila berbeda dari hasil yang diimpor, atau kartu dibuat untuk run lain, halaman
 menampilkan peringatan "Kartu metode dan hasil tidak sejalan".
 
 **Dua pengaman impor kartu** (`App\Services\CardImporter`, dasar `DatasetImporter` dan `MethodImporter`): (1) bentuk:
-tiap kunci di `shape()` wajib ada dan bertipe benar (notasi titik, `*` = setiap butir, akhiran `?` = boleh `null`),
-dengan pesan yang menyebut kuncinya; (2) uji tampil: sebelum kartu lama diganti, halaman dirender sekali dengan
-kartu calon di dalam transaksi, dan impor dibatalkan bila render gagal karena apa pun. Kartu yang ditolak tidak
-pernah mengganti kartu yang sudah ada. `aksara:import` yang berhasil mengimpor hasil OCR tetapi menolak sebuah
-kartu menulis "PERINGATAN" dan tetap keluar dengan kode sukses, karena hasilnya sudah tersimpan; `aksara:datasets`
-dan `aksara:methods` keluar dengan kode gagal.
+tiap kunci di `shape()` wajib ada dan bertipe benar (notasi titik, `*` = setiap butir; tipe `number`, `count` =
+bilangan tidak negatif, `string`, `text` = teks tidak kosong, `bool`, `list`, `map`; akhiran `?` = boleh tidak ada
+atau `null`, tetapi harus bertipe benar bila ada), dengan pesan yang menyebut kuncinya, ditambah pemeriksaan khusus
+tiap kartu (`check()`: urutan bagian, pasangan pengaturan, kunci kelompok dan butir yang tidak boleh berulang);
+(2) uji tampil: sebelum kartu lama diganti, halaman dirender sekali dengan kartu calon di dalam transaksi, dan impor
+dibatalkan bila render gagal karena apa pun. Kartu yang ditolak tidak pernah mengganti kartu yang sudah ada.
+Pengaman ini menangkap kartu yang RUSAK; kartu yang bentuknya sah tetapi angkanya salah (disunting tangan) tetap
+diterima, jadi kebenaran angka adalah tanggung jawab skrip ekspor dan test-nya.
+Kode keluar: `aksara:datasets` dan `aksara:methods` gagal bila kartunya ditolak. `aksara:import` yang berhasil
+mengimpor hasil OCR tetapi menolak sebuah kartu menulis "PERINGATAN" dengan alasannya dan tetap keluar dengan kode
+sukses, karena hasilnya sudah tersimpan. Lain halnya galat database (`CardStorageException`, mis. tabel kartu belum
+dimigrasi): itu bukan kartu yang ditolak, pesannya menunjuk ke `php artisan migrate`, dan `aksara:import` pun keluar
+dengan kode gagal.
 
 **Pipeline resmi** ditetapkan ekspor, bukan web: kunci `official` di manifest (`OFFICIAL_RUN` di
 `scripts/export_results.py`; manifest lama tanpa kunci itu berarti `crnn_fonts`). Impor menandainya di kolom

@@ -92,7 +92,7 @@ def test_schedule_reproduces_the_real_dataloader_order():
     assert schedule.pool(60, 3) == pool[:60]  # kumpulan kecil = awalan kumpulan besar
 
     # 120 baris, batch 8 = 15 batch per epoch. Dua epoch dari DataLoader sungguhan, tanpa dan dengan worker.
-    for workers in (0, 2):
+    for workers in (0, 1, 2):
         first, second = loader_batches(shuffled[:120], 8, workers, 3, passes=2)
         replay = schedule.batches(120, 3, 8, 30, workers)
         assert [[pool.index(i) for i in batch] for batch in replay] == first + second, workers
@@ -103,6 +103,7 @@ def test_schedule_reproduces_the_real_dataloader_order():
     naive = list(iter(LengthBucketSampler(shuffled[:120], 8, shuffle=True, seed=3)))
     assert [[pool.index(i) for i in batch] for batch in schedule.batches(120, 3, 8, 15, 0)] == naive
     assert [[pool.index(i) for i in batch] for batch in schedule.batches(120, 3, 8, 15, 2)] != naive
+    assert schedule.batches(120, 3, 8, 15, 1) == schedule.batches(120, 3, 8, 15, 2)  # satu worker sudah cukup
 
 
 def test_short_batches_are_counted_as_they_are():
@@ -228,8 +229,11 @@ def fake_repo(root: Path, run: str = "runB") -> Path:
                         "semua": {"lines": OFFICIAL_LINES - 2}}}), encoding="utf-8")
     # Laporan lain yang juga membaca data uji: dua tes cepat, satu evaluasi penuh run lain, satu G3 tes cepat.
     for name, report in (("q100_G1", {"goal": "G1", "split": "test", "results": {"semua": {"lines": 100}}}),
-                         ("q100_x_trainfonts", {"goal": "G1", "split": "test", "results": {"semua": {"lines": 200}}}),
-                         ("lain_G1_10k", {"goal": "G1", "split": "test", "results": {"semua": {"lines": OFFICIAL_LINES}}}),
+                         ("q100_x_trainfonts", {"goal": "G1", "split": "test", "results": {
+                             "a.ttf": {"lines": 100}, "b.ttf": {"lines": 100}, "semua": {"lines": 200}}}),
+                         ("lain_G1_10k", {"goal": "G1", "split": "test", "results": {
+                             "javatext.ttf": {"lines": OFFICIAL_LINES - 3, "rejected_by_min_frames": 3},
+                             "semua": {"lines": OFFICIAL_LINES - 3}}}),
                          ("q100_val", {"goal": "G1", "split": "val", "results": {"semua": {"lines": 100}}}),
                          ("q100_G3", {"goal": "G3", "results": {"semua": {"lines": 3}}}),
                          ("bukan_laporan", {"items": [1, 2]})):
@@ -283,7 +287,10 @@ def test_build_describes_a_fake_repo(tmp_path):
     assert usage["train"] == last
     assert usage["val"] == {"lines": 10, "steps": [5, 10], "fonts": 2}
     assert usage["test"]["lines"] == OFFICIAL_LINES and [g["code"] for g in usage["test"]["gates"]] == ["G1", "G2"]
-    assert (usage["test"]["quick"], usage["test"]["quick_max_lines"], usage["test"]["full"]) == (2, 200, 1)
+    # Dua tes cepat membaca 100 baris pertama (yang berfont dua: baris yang sama dua kali, bukan 200 baris).
+    assert (usage["test"]["quick"], usage["test"]["quick_max_lines"], usage["test"]["full"]) == (2, 100, 1)
+    assert usage["test"]["others"] == []
+    assert (first["fonts_source"], last["fonts_source"]) == ("folder", "folder")
     assert usage["test"]["gates"][1]["augment"] == "heavy" and usage["test"]["gates"][0]["fonts"] == ["javatext.ttf"]
     assert usage["real"] == {"lines": 3, "reports": 2, "gates": [{"code": "G3", "lines": 3, "fonts": [], "split": None,
                                                                   "augment": None, "source": "out/eval/runB_G3_full.json"}]}
@@ -474,9 +481,32 @@ def test_chain_follows_every_ancestor_and_reports_odd_logs(tmp_path):
     (root / "fonts/extra/Salinan.ttf").unlink()
     warnings = ed.build(root, "runB", root / "ujifont")["warnings"]
     assert len(warnings) == 3
-    assert "Log run runA: langkah 6 diperiksa lebih dari satu proses" in warnings[0]
+    assert "Log run runA: sebuah proses mulai lagi di langkah 2 sesudah proses sebelumnya melewati langkah checkpoint 6" in warnings[0]
     assert "Run runB dilanjutkan dengan argumen data yang berbeda" in warnings[1]
     assert "font tambahan dari fonts/extra, tetapi folder itu kosong" in warnings[2]
+
+    # Pemunduran yang sama, tetapi proses kedua memeriksa di langkah lain (--eval-every lain): tetap diperingatkan.
+    shutil.copy(TRAIN_FONTS[0], root / "fonts/extra/Salinan.ttf")
+    write_log(ckpt / "runB" / "log.jsonl", [start(0), {"step": 10, "val_cer": 0.05}, {"step": 10, "event": "end"}])
+    write_log(ckpt / "runA" / "log.jsonl", [start(0), {"step": 6, "val_cer": 0.3}, start(2), {"step": 5, "val_cer": 0.2},
+                                            {"step": 7, "val_cer": 0.2}])
+    warnings = ed.build(root, "runB", root / "ujifont")["warnings"]
+    assert len(warnings) == 1 and "Log run runA: sebuah proses mulai lagi di langkah 2" in warnings[0]
+    # Dimundurkan dua kali: yang disebut pemunduran TERAKHIR (proses-proses sesudahnya yang dihitung).
+    write_log(ckpt / "runA" / "log.jsonl", [start(0), {"step": 6, "val_cer": 0.3}, start(2), {"step": 7, "val_cer": 0.2},
+                                            start(4), {"step": 6, "val_cer": 0.2}])
+    warnings = ed.build(root, "runB", root / "ujifont")["warnings"]
+    assert len(warnings) == 1 and "Log run runA: sebuah proses mulai lagi di langkah 4 sesudah" in warnings[0]
+    # Bukan pemunduran: proses pertama mati di langkah 5 (sebelum langkah checkpoint 6) lalu dilanjutkan dari 4, dan
+    # proses yang dilanjutkan tepat di langkah checkpoint run itu.
+    write_log(ckpt / "runA" / "log.jsonl", [start(0), {"step": 5, "val_cer": 0.3}, start(4), {"step": 6, "val_cer": 0.2},
+                                            start(6), {"step": 9, "val_cer": 0.2}])
+    assert ed.build(root, "runB", root / "ujifont")["warnings"] == []
+    # y03: proses lanjutan dengan --workers lain mengubah urutan batch (0 lawan > 0), jadi ikut diperingatkan.
+    write_log(ckpt / "runB" / "log.jsonl", [start(0), {"step": 5}, {"event": "start", "step": 5, "args": {"workers": 0}},
+                                            {"step": 10, "event": "end"}])
+    warnings = ed.build(root, "runB", root / "ujifont")["warnings"]
+    assert len(warnings) == 1 and "Run runB dilanjutkan dengan argumen data yang berbeda" in warnings[0]
 
 
 def test_paths_outside_the_repo_and_the_last_histogram_bin(tmp_path):
@@ -512,6 +542,13 @@ def test_real_training_data_changes_roles_and_leaves_the_schedule_unknown(tmp_pa
     card = ed.build(root, "runB", root / "ujifont")
     waiting = card["datasets"][2]
     assert (waiting["verified"], waiting["pending"], waiting["status"], waiting["roles"]) == (2, 1, "pending", {})
+
+    # Semua draf sudah diverifikasi tetapi belum dipakai run resmi: terverifikasi, bukan "dipakai".
+    (commons / "labels.tsv").write_text(header + "".join(f"{n}.png\t{KA}\tx{n}\tpapan\n" for n in range(3)),
+                                        encoding="utf-8", newline="\n")
+    ready = ed.build(root, "runB", root / "ujifont")["datasets"][2]
+    assert (ready["verified"], ready["pending"], ready["status"], ready["roles"], ready["planned"]) == (
+        3, 0, "verified", {}, ["train", "val"])
 
     # Run resmi dilatih dan divalidasi dengan data nyata (Fase 6): jadwal baris sintetis tidak dihitung, ditulis null.
     (commons / "labels_train.tsv").write_text(header + f"a.png\t{KA}\tx1\tpapan\n", encoding="utf-8", newline="\n")
@@ -590,9 +627,94 @@ def test_samples_validation_lines_and_corpus_leftovers_are_counted_as_they_are(t
     assert card["warnings"] == []
 
     # Berkas bagian latih ditulis ulang sesudah training: pemakaian dihitung dari berkas yang sekarang, dan itu disebut.
+    # Snapshot disalin ulang tiap evaluasi (waktunya bisa lebih baru dari korpus), jadi log training ikut dilihat:
+    # di sini korpus lebih tua dari semua snapshot tetapi lebih baru dari log run pertama.
     train_path = root / "data/splits/train.txt"
-    newer = train_path.stat().st_mtime + 3600
-    os.utime(train_path, (newer, newer))
+    now = train_path.stat().st_mtime
+    for run in ("runA", "runB"):
+        os.utime(root / "out/checkpoints" / run / "last_snapshot.pt", (now + 7200, now + 7200))
+        os.utime(root / "out/checkpoints" / run / "log.jsonl", (now + 3600, now + 3600))
+    assert ed.build(root, "runB", root / "ujifont")["warnings"] == []
+    os.utime(root / "out/checkpoints/runA/log.jsonl", (now - 3600, now - 3600))
     warnings = ed.build(root, "runB", root / "ujifont")["warnings"]
     assert len(warnings) == 1 and warnings[0].startswith("data/splits/train.txt lebih baru daripada checkpoint")
+
+
+def test_other_readers_of_the_test_split_and_font_counts_from_logs(tmp_path):
+    root = fake_repo(tmp_path)
+    # Evaluasi di luar out/eval yang membaca bagian uji secara acak: aksara langka sintetis (dua laporan) dan beam.
+    settings = {"split": "data/splits/test.txt", "lines": 2000, "sampling": "acak"}
+    (root / "out/compare/fase7").mkdir(parents=True)
+    (root / "out/compare/rare_synthetic.json").write_text(json.dumps(
+        {"settings": settings, "checkpoints": {"a": {}, "b": {}, "c": {}}}), encoding="utf-8")
+    (root / "out/compare/fase7/rare_synthetic.json").write_text(json.dumps(
+        {"settings": {**settings, "lines": 50}, "checkpoints": {"a": {}, "b": {}}}), encoding="utf-8")
+    (root / "out/compare/val_synthetic.json").write_text(json.dumps({"settings": {"split": "data/splits/val.txt", "lines": 9}}),
+                                                         encoding="utf-8")
+    (root / "out/compare/lain/").mkdir()
+    (root / "out/compare/lain/rare_synthetic.json").write_text(json.dumps(
+        {"settings": {"split": "data/splits/val.txt", "lines": 77}, "checkpoints": {"a": {}}}), encoding="utf-8")
+    (root / "out/beam").mkdir()
+    (root / "out/beam/x.json").write_text(json.dumps({"clean_heldout_font": {"lines": 300}, "real": {"lines": 3}}), encoding="utf-8")
+    (root / "out/beam/rusak.json").write_text("{bukan json", encoding="utf-8")
+    (root / "out/beam/tanpa.json").write_text(json.dumps({"dev": {"lines": 300}}), encoding="utf-8")
+
+    card = ed.build(root, "runB", root / "ujifont")
+    assert card["usage"]["test"]["others"] == [
+        {"kind": "rare_synthetic", "file": "out/compare/fase7/rare_synthetic.json", "lines": 50, "checkpoints": 2},
+        {"kind": "rare_synthetic", "file": "out/compare/rare_synthetic.json", "lines": 2000, "checkpoints": 3},
+        {"kind": "beam", "file": "out/beam/x.json", "lines": 300, "checkpoints": 1}]
+
+    # F08: log run yang lebih baru mencatat daftar font; jumlahnya dipakai apa adanya walau folder sudah berubah.
+    ckpt = root / "out/checkpoints/runB"
+    names = [font.name for font in TRAIN_FONTS] + ["Salinan.ttf", "SudahDihapus.ttf"]
+    write_log(ckpt / "log.jsonl", [{**start(0), "fonts": names}, {"step": 10, "val_cer": 0.05}, {"step": 10, "event": "end"}])
+    train = ed.build(root, "runB", root / "ujifont")["usage"]["train"]
+    assert (train["fonts"], train["extra_fonts"], train["fonts_source"]) == (4, 2, "log")
+    # Run yang dilanjutkan: daftar font proses TERAKHIR yang dipakai (proses itulah yang menulis checkpoint-nya).
+    write_log(ckpt / "log.jsonl", [{**start(0), "fonts": names}, {"step": 5, "val_cer": 0.1},
+                                   {**start(5), "fonts": names[:3]}, {"step": 10, "val_cer": 0.05}, {"step": 10, "event": "end"}])
+    train = ed.build(root, "runB", root / "ujifont")["usage"]["train"]
+    assert (train["fonts"], train["extra_fonts"], train["fonts_source"]) == (3, 1, "log")
+
+    (root / "out/results").mkdir()
+    manifest = {"pipelines": [{"key": "crnn_b", "config": "crnn:runB@10 (lanjutan runA@6) · 5 font · aug fase5 · greedy"},
+                              {"key": "crnn_a", "config": "crnn:runA@6 · 2 font · greedy"},
+                              {"key": "vlm", "config": "vlm:frontier · zero-shot"}]}
+    (root / "out/results/manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert ed.recorded_fonts(root) == {"runB": 5, "runA": 2}
+    # Jumlah dari log tidak diperingatkan sebagai "folder sudah berubah", walau ekspor hasil mencatat jumlah lain:
+    # peringatan itu hanya untuk jumlah yang dihitung dari folder sekarang.
+    write_log(ckpt / "log.jsonl", [{**start(0), "fonts": names}, {"step": 10, "val_cer": 0.05}, {"step": 10, "event": "end"}])
+    card = ed.build(root, "runB", root / "ujifont")
+    assert card["usage"]["train"]["fonts"] == 4 and card["warnings"] == []
+
+    # Tanpa daftar di log, jumlahnya dari folder sekarang; bila ekspor hasil mencatat jumlah lain, itu diperingatkan.
+    write_log(ckpt / "log.jsonl", [start(0), {"step": 10, "val_cer": 0.05}, {"step": 10, "event": "end"}])
+    card = ed.build(root, "runB", root / "ujifont")
+    assert card["usage"]["train"]["fonts"] == 3 and card["usage"]["train"]["fonts_source"] == "folder"
+    assert card["warnings"] == ["Run runB: ekspor hasil mencatat 5 font latih, tetapi folder font sekarang berisi 3; jumlah dan "
+                                "daftar font di kartu ini mengikuti folder sekarang, bukan font yang dipakai saat run itu dilatih."]
+    manifest["pipelines"][0]["config"] = "crnn:runB@10 · 3 font · greedy"
+    (root / "out/results/manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert ed.build(root, "runB", root / "ujifont")["warnings"] == []
+
+
+def test_shared_advances_count_only_glyphs_both_fonts_have():
+    count = len(ed.SPACING)
+    full = {ch: 600.0 for ch in ed.SPACING}
+    assert ed.shared_advances(full, full) == {"same": count, "of": count, "family": True}
+    # Glyph yang tidak ada di kedua font bukan "lebar yang sama": dua font kosong tidak sekeluarga.
+    empty = {ch: None for ch in ed.SPACING}
+    assert ed.shared_advances(empty, empty) == {"same": 0, "of": count, "family": False}
+    assert ed.shared_advances(empty, full)["same"] == 0 and ed.shared_advances(full, empty)["same"] == 0
+    # Ambang keluarga: paling sedikit FAMILY_SHARE dari semua codepoint berlebar sama.
+    need = -(-count * 9 // 10)  # pembulatan ke atas dari 90%
+    assert ed.FAMILY_SHARE == 0.9
+
+    def differing(n):
+        return {ch: (600.0 if i < n else 601.0 + i) for i, ch in enumerate(ed.SPACING)}
+
+    assert ed.shared_advances(differing(need), full) == {"same": need, "of": count, "family": True}
+    assert ed.shared_advances(differing(need - 1), full) == {"same": need - 1, "of": count, "family": False}
 

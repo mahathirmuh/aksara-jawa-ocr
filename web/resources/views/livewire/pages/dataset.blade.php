@@ -16,7 +16,7 @@ php artisan aksara:datasets</pre>
         </div>
     @else
         @if ($stale)
-            <div class="alert alert-warning">
+            <div class="alert alert-warning" data-stale>
                 <span class="alert-title">Kartu data dan hasil OCR tidak sejalan</span>
                 <span>Pemakaian di halaman ini dihitung untuk run {{ $stale['run'] }}, sedangkan angka resmi web sekarang milik {{ $stale['official'] }}.
                     Samakan keduanya dengan mengulang ekspor dan impor yang tertinggal:
@@ -118,7 +118,7 @@ php artisan aksara:datasets</pre>
                 <div class="grid gap-x-10 gap-y-6 lg:grid-cols-2">
                     <dl>
                         @foreach ($funnel as [$label, $value, $hint])
-                            <div class="flex items-baseline justify-between gap-4 border-t border-[color:var(--row-line)] py-2 first:border-t-0 first:pt-0">
+                            <div class="flex items-baseline justify-between gap-4 border-t border-[color:var(--row-line)] py-2 first:border-t-0 first:pt-0" data-funnel="{{ $label }}">
                                 <dt class="min-w-0">
                                     <span class="font-medium">{{ $label }}</span>
                                     @if ($hint)
@@ -347,19 +347,19 @@ php artisan aksara:datasets</pre>
             </section>
         @endif
 
-        {{-- Data pendukung: bukan data latih atau data uji pembaca aksara. --}}
+        {{-- Data pendukung: data lain di alur (charset, model bahasa, sampel uji buta, anotasi, kamus). --}}
         <section class="card">
             <div class="card-body">
                 <div class="mb-3">
                     <h2 class="section-title">Data pendukung</h2>
-                    <p class="card-subtitle max-w-[85ch]">Bukan data latih atau data uji pembaca aksara: dipakai untuk keluaran model, koreksi, pembanding, dan tahap lain alur.</p>
+                    <p class="card-subtitle max-w-[85ch]">Data lain di alur: dipakai untuk keluaran model, koreksi, pembanding, dan tahap lanjutan. Tidak ada yang dipakai melatih pembaca aksara.</p>
                 </div>
                 <div class="table-wrap">
                     <table class="data-table">
                         <thead><tr><th>Data</th><th>Dipakai untuk</th><th class="r">Jumlah</th><th>Asal</th></tr></thead>
                         <tbody>
                             @foreach ($support as [$name, $purpose, $amount, $origin])
-                                <tr>
+                                <tr data-support="{{ $name }}">
                                     <td class="whitespace-nowrap font-medium">{{ $name }}</td>
                                     <td class="min-w-44">{{ $purpose }}</td>
                                     <td class="r num whitespace-nowrap">{{ $amount }}</td>

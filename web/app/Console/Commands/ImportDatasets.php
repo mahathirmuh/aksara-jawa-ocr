@@ -23,6 +23,7 @@ class ImportDatasets extends Command
             return self::FAILURE;
         }
         $this->info(self::summary($counts));
+        ImportResults::warnIfStale($this, $importer, 'Dataset', 'scripts/export_datasets.py', 'aksara:datasets');
 
         return self::SUCCESS;
     }

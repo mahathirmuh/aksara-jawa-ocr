@@ -7,8 +7,8 @@
             <div class="card-body">
                 <h2 class="section-title">Kartu metode belum diimpor</h2>
                 <p class="card-subtitle max-w-prose">
-                    Daftar metode, pengaturannya, dan bukti terukurnya disusun di repo Python dari checkpoint, kode, dan hasil evaluasi,
-                    lalu diimpor ke web. Jalankan dari folder repo OCR:
+                    Daftar metode, pengaturannya, dan bukti terukurnya (bila ada) disusun di repo Python dari checkpoint, kode, dan hasil
+                    evaluasi, lalu diimpor ke web. Jalankan dari folder repo OCR:
                 </p>
                 <pre class="code-block mt-3">.venv/Scripts/python scripts/export_methods.py
 cd web
@@ -25,7 +25,7 @@ php artisan aksara:methods</pre>
             </div>
         @endforeach
 
-        {{-- Empat hal pokok: arsitektur, ukuran model, banyaknya butir, dan model apa saja yang dipakai. --}}
+        {{-- Empat hal pokok: arsitektur, ukuran model, banyaknya butir, dan model hasil belajar yang dipakai. --}}
         <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             @foreach ($tiles as $tile)
                 <div class="stat-card shadow-[var(--shadow-card)]">
@@ -46,30 +46,46 @@ php artisan aksara:methods</pre>
             @endforeach
         </div>
 
-        {{-- Alur: urutan langkah dari citra sampai tingkat tutur; kotak bertanda = memakai model hasil belajar. --}}
+        {{-- Alur: urutan langkah dari citra sampai teks Latin, lalu dua cabang yang sama-sama dihitung dari teks Latin.
+             Langkah yang memakai model hasil belajar diberi warna DAN tanda "ML" (warna bukan satu-satunya pembeda). --}}
         <section class="card">
             <div class="card-body">
                 <div class="mb-3">
                     <h2 class="section-title">Alur dari citra ke arti</h2>
                     <p class="card-subtitle max-w-[85ch]">
-                        Kotak biru memakai model hasil belajar (machine learning). Kotak lain memakai aturan tetap atau leksikon.
+                        Kotak bertanda ML memakai model hasil belajar (machine learning). Kotak lain memakai aturan tetap atau leksikon.
+                        Arti dan tingkat tutur sama-sama dihitung dari teks Latin.
                     </p>
                 </div>
-                <ol class="flow" aria-label="Urutan langkah: {{ collect($flow)->pluck(0)->join(', ') }}">
-                    @foreach ($flow as [$name, $detail, $learned])
+                <ol class="flow" aria-label="Urutan langkah: {{ collect($flow['steps'])->pluck(0)->join(', ') }}, lalu dari teks Latin: {{ collect($flow['branches'])->pluck(0)->join(' dan ') }}">
+                    @foreach ($flow['steps'] as [$name, $detail, $learned])
                         <li @class(['flow-step', 'is-learned' => $learned]) data-step="{{ $name }}">
-                            <span class="flow-name">{{ $name }}</span>
+                            <span class="flow-name">{{ $name }}@if ($learned)<span class="flow-tag" aria-hidden="true">ML</span>@endif</span>
                             <span class="flow-detail">{{ $detail }}</span>
                             @if ($learned)
                                 <span class="sr-only">(machine learning)</span>
                             @endif
                         </li>
                     @endforeach
+                    <li class="flow-branches" data-branches>
+                        <span class="sr-only">Dari teks Latin:</span>
+                        <ul class="flow-branch-list">
+                            @foreach ($flow['branches'] as [$name, $detail, $learned])
+                                <li @class(['flow-step', 'is-learned' => $learned]) data-step="{{ $name }}">
+                                    <span class="flow-name">{{ $name }}@if ($learned)<span class="flow-tag" aria-hidden="true">ML</span>@endif</span>
+                                    <span class="flow-detail">{{ $detail }}</span>
+                                    @if ($learned)
+                                        <span class="sr-only">(machine learning)</span>
+                                    @endif
+                                </li>
+                            @endforeach
+                        </ul>
+                    </li>
                 </ol>
             </div>
         </section>
 
-        {{-- Satu kartu per tahap. Tiap butir: nama, jenis, status; penjelasan dan bukti terukur; pengaturan dan berkas kodenya. --}}
+        {{-- Satu kartu per tahap. Tiap butir: nama, jenis, status; penjelasan, bukti terukur, catatan; pengaturan dan berkas kodenya. --}}
         @foreach ($groups as $group)
             <section class="card" id="metode-{{ $group['key'] }}" data-group="{{ $group['key'] }}">
                 <div class="card-body">
@@ -99,6 +115,10 @@ php artisan aksara:methods</pre>
                                                 <span class="code block">Sumber: {{ \App\Livewire\Pages\Metode::breakable($method['evidence_source']) }}</span>
                                             @endif
                                         </p>
+                                    @endif
+                                    {{-- Catatan = batasan atau keterangan yang harus dibaca bersama butir ini; bukan hasil ukur. --}}
+                                    @if ($method['note'] ?? null)
+                                        <p class="method-note"><span class="font-semibold">Catatan.</span> {{ $method['note'] }}</p>
                                     @endif
                                 </div>
                                 <dl class="method-settings">

@@ -87,6 +87,10 @@ FONT_NOTES = {
                           "gambar yang sama (pangkon + lungsi ada di 12% baris latih)."],
     "javatext.ttf": ["Javanese Text bawaan Windows; tidak dipakai merender data latih."],
 }
+# Font yang catatannya di atas adalah cacat (citra tidak sepadan dengan labelnya, atau tidak dirender dengan benar di
+# lingkungan training). Kartu metode menghitung font latih bercacat dari daftar ini ditambah font yang tidak punya
+# glyph sebuah karakter charset, supaya tidak menyebut label sintetis "pasti benar".
+FONT_DEFECTS = ("BasaJan.ttf", "NewKramawirya.ttf")
 
 
 def count_lines(path: Path) -> int:
@@ -301,12 +305,22 @@ def run_usage(link: dict, schedule: Schedule, root: Path, warnings: list[str]) -
                         "satu proses tanpa lanjutan (batas atas).")
         segments = [(0, step)]
     starts = [row for row in rows if row.get("event") == "start" and isinstance(row.get("step"), int)]
-    # Langkah checkpoint yang diperiksa lebih dari satu proses = run pernah dimundurkan ke checkpoint lebih awal
-    # lalu melewati langkah itu lagi. Log tidak mencatat proses mana yang menulis berkasnya (best.pt bisa milik
-    # silsilah yang ditinggalkan), jadi hitungan dari proses-proses terakhir belum tentu benar.
-    if sum(1 for row in rows if "val_cer" in row and row.get("step") == step) > 1:
-        warnings.append(f"Log run {run}: langkah {step} diperiksa lebih dari satu proses, jadi tidak pasti proses mana "
-                        "yang menulis checkpoint-nya; baris berbeda dihitung dari proses-proses terakhir.")
+    # Run yang dimundurkan: sebuah proses mulai di langkah sebelum langkah checkpoint padahal proses sebelumnya sudah
+    # melewati langkah itu. Log tidak mencatat proses mana yang menulis berkasnya (best.pt bisa milik silsilah yang
+    # ditinggalkan), jadi hitungan dari proses-proses terakhir belum tentu benar. Melanjutkan tepat di langkah
+    # checkpoint, atau sebelum proses mana pun mencapainya, bukan pemunduran.
+    reached, rollback = -1, None
+    for row in rows:
+        at = row.get("step")
+        if not isinstance(at, int):
+            continue
+        if row.get("event") == "start" and at < step <= reached:
+            rollback = at
+        reached = max(reached, at)
+    if rollback is not None:
+        warnings.append(f"Log run {run}: sebuah proses mulai lagi di langkah {rollback} sesudah proses sebelumnya melewati "
+                        f"langkah checkpoint {step}, jadi tidak pasti proses mana yang menulis checkpoint-nya; baris "
+                        "berbeda dihitung dari proses-proses terakhir.")
     data_args = ("train_lines", "seed", "batch_size", "workers")
     if any(row.get("args", {}).get(key, args.get(key)) != args.get(key) for row in starts for key in data_args):
         warnings.append(f"Run {run} dilanjutkan dengan argumen data yang berbeda dari checkpoint-nya; baris berbeda "
@@ -328,6 +342,13 @@ def run_usage(link: dict, schedule: Schedule, root: Path, warnings: list[str]) -
         warnings.append(f"Run {run} dilatih dengan font tambahan dari {args['extra_fonts']}, tetapi folder itu kosong "
                         "atau tidak ada di mesin ini; jumlah dan daftar font di kartu ini tidak lengkap.")
     core = len(font_files(root / "fonts"))
+    # Daftar font yang sebenarnya dipakai hanya ada di log run yang lebih baru (src.train mencatatnya di event start).
+    # Tanpa itu jumlahnya dihitung dari folder font SEKARANG, yang bisa sudah berubah sejak run itu dilatih.
+    logged = next((row["fonts"] for row in reversed(starts) if isinstance(row.get("fonts"), list)), None)
+    if logged is not None:
+        fonts, extra = len(logged), sum(1 for name in logged if name not in CORE_FONTS)
+    else:
+        fonts = core + extra
     return {
         "run": run,
         "checkpoint": relative(link["path"], root),
@@ -342,7 +363,8 @@ def run_usage(link: dict, schedule: Schedule, root: Path, warnings: list[str]) -
         # Data nyata ikut dilatih atau dipakai sebagai validasi (Fase 6): jadwal dan validasi sintetis tidak berlaku.
         "real_train": bool(args.get("real_train")),
         "real_val": bool(args.get("real_val")),
-        "fonts": core + extra,
+        "fonts": fonts,
+        "fonts_source": "log" if logged is not None else "folder",
         "extra_fonts": extra,
         "augment": args.get("augment") or "none",
         "drop_space_prob": args.get("drop_space_prob") or 0.0,
@@ -388,7 +410,12 @@ def other_reports(root: Path, official: set[str]) -> dict:
         results = report.get("results") if isinstance(report, dict) else None
         if not isinstance(results, dict) or not isinstance(results.get("semua"), dict):
             continue
-        lines = results["semua"].get("lines") or 0
+        # Baris yang dibaca = baris per font: laporan berfont banyak merender baris yang SAMA dengan tiap font, dan
+        # results.semua.lines menjumlahkan pasangan baris x font (100 baris x 2 font = 200). Baris yang ditolak
+        # (terlalu padat) tetap dibaca.
+        per_font = [value.get("lines", 0) + value.get("rejected_by_min_frames", 0)
+                    for name, value in results.items() if name != "semua" and isinstance(value, dict)]
+        lines = max(per_font) if per_font else results["semua"].get("lines") or 0
         if report.get("goal") == "G3":
             found["real"] += 1
         elif report.get("split") == "test" and relative(path, root) not in official:
@@ -398,6 +425,53 @@ def other_reports(root: Path, official: set[str]) -> dict:
             else:
                 found["full"] += 1
     return found
+
+
+def other_readers(root: Path) -> list[dict]:
+    """Evaluasi di luar out/eval yang juga membaca bagian uji korpus: scripts/eval_rare.py (aksara langka sintetis,
+    out/compare/**/rare_synthetic.json) dan scripts/beam_eval.py (render bersih font uji, out/beam/*.json). Keduanya
+    mengambil barisnya secara acak dari SELURUH bagian uji, jadi baris di luar N pertama gerbang resmi ikut terbaca."""
+    readers = []
+    reports = [("rare_synthetic", path) for path in sorted((root / "out/compare").rglob("rare_synthetic.json"))]
+    reports += [("beam", path) for path in sorted((root / "out/beam").glob("*.json"))]
+    for kind, path in reports:
+        try:
+            report = read_json(path)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(report, dict):
+            continue
+        if kind == "rare_synthetic":
+            settings = report.get("settings") or {}
+            lines = settings.get("lines") if Path(str(settings.get("split", ""))).name == "test.txt" else None
+            checkpoints = len(report.get("checkpoints") or [])
+        else:
+            lines, checkpoints = (report.get("clean_heldout_font") or {}).get("lines"), 1
+        if isinstance(lines, int) and lines > 0:
+            readers.append({"kind": kind, "file": relative(path, root), "lines": lines, "checkpoints": checkpoints})
+    return readers
+
+
+def recorded_fonts(root: Path) -> dict[str, int]:
+    """Jumlah font latih tiap run seperti tercatat di ekspor hasil ("... · 10 font · ..." di konfigurasi pipeline),
+    bila out/results/manifest.json ada. Dipakai untuk memperingatkan bila folder font sudah berubah sejak run dilatih."""
+    path = root / "out/results/manifest.json"
+    if not path.exists():
+        return {}
+    counts = {}
+    for pipeline in read_json(path).get("pipelines") or []:
+        config = str(pipeline.get("config") or "")
+        run = re.match(r"crnn:([A-Za-z0-9_]+)", config)
+        fonts = re.search(r"(\d+) font\b", config)
+        if run and fonts:
+            counts[run[1]] = int(fonts[1])
+    return counts
+
+
+def shared_advances(own: dict[str, float | None], reference: dict[str, float | None]) -> dict:
+    """Berapa codepoint SPACING yang lebar majunya persis sama di dua font, dan apakah itu satu keluarga huruf."""
+    same = sum(1 for ch in SPACING if own[ch] is not None and own[ch] == reference[ch])
+    return {"same": same, "of": len(SPACING), "family": same / len(SPACING) >= FAMILY_SHARE}
 
 
 def rare_coverage(lines: list[str], charset: list[str], pool: list[int], scheduled: set[int] | None) -> dict:
@@ -543,9 +617,7 @@ def font_cards(root: Path, official_args: dict, test_fonts: list[str], charset: 
                 card["drops_space"] = space_ratio(str(path)) < MIN_SPACE_RATIO
                 own = advances(path)
                 for test_name, ref in reference.items():
-                    same = sum(1 for ch in SPACING if own[ch] is not None and own[ch] == ref[ch])
-                    card["shared_with_test"] = {"font": test_name, "same": same, "of": len(SPACING),
-                                                "family": same / len(SPACING) >= FAMILY_SHARE}
+                    card["shared_with_test"] = {"font": test_name, **shared_advances(own, ref)}
             cards.append(card)
     order = {"core": 0, "extra": 1, "test": 2, "review": 3, "rejected": 4}
     return sorted(cards, key=lambda card: (order[card["group"]], card["file"].lower()))
@@ -676,6 +748,15 @@ def build(root: Path = ROOT, run: str = OFFICIAL_RUN, test_font_dir: Path = TEST
         known = known and scheduled is not None
         seen |= scheduled or set()
     train = runs[-1]
+    # Jumlah font tiap run dihitung dari folder font sekarang kecuali log-nya mencatat daftarnya. Ekspor hasil
+    # mencatat jumlahnya sendiri; bila berbeda, folder sudah berubah sejak run dilatih dan itu harus terlihat.
+    recorded = recorded_fonts(root)
+    for usage in runs:
+        then = recorded.get(usage["run"])
+        if usage["fonts_source"] == "folder" and then is not None and then != usage["fonts"]:
+            warnings.append(f"Run {usage['run']}: ekspor hasil mencatat {then} font latih, tetapi folder font sekarang berisi "
+                            f"{usage['fonts']}; jumlah dan daftar font di kartu ini mengikuti folder sekarang, bukan font "
+                            "yang dipakai saat run itu dilatih.")
 
     real = nusaaksara_card(root / "data/real/nusaaksara/labels.tsv")
     gates = gate_reports(run, root, real["lines"])
@@ -697,7 +778,8 @@ def build(root: Path = ROOT, run: str = OFFICIAL_RUN, test_font_dir: Path = TEST
                     "fonts": len(font_files(root / "fonts"))},
             # G1 dan G2 membaca baris yang sama: N baris pertama bagian uji (src.evaluate).
             "test": {"lines": max((g["lines"] for g in synthetic), default=0), "gates": synthetic,
-                     "quick": others["quick"], "quick_max_lines": others["quick_max_lines"], "full": others["full"]},
+                     "quick": others["quick"], "quick_max_lines": others["quick_max_lines"], "full": others["full"],
+                     "others": other_readers(root)},
             "real": {"lines": real["lines"], "gates": [g for g in gates if g["code"] == "G3"], "reports": others["real"]},
         },
         "lineage": {

@@ -10,8 +10,8 @@ use RuntimeException;
 /**
  * Impor kartu metode dari repo OCR (scripts/export_methods.py, kontrak metode skema 1) untuk halaman Metode.
  *
- * Penjelasan, pengaturan, dan bukti tiap butir ditulis dan dihitung Python dari checkpoint, kode, dan hasil evaluasi;
- * web menampilkannya apa adanya dan hanya menambah butir tahap lanjutan alur miliknya sendiri.
+ * Penjelasan, pengaturan, bukti, dan catatan tiap butir ditulis dan dihitung Python dari checkpoint, kode, dan hasil
+ * evaluasi; web menampilkannya apa adanya dan hanya menambah butir tahap lanjutan alur miliknya sendiri.
  */
 class MethodImporter extends CardImporter
 {
@@ -43,31 +43,38 @@ class MethodImporter extends CardImporter
 
         return [
             // Waktu ekspor hasil yang dikutip buktinya: halaman membandingkannya dengan hasil yang sedang diimpor.
-            'results_generated' => 'string',
-            'model.classes' => 'number', 'model.height' => 'number', 'model.conv_layers' => 'number', 'model.lstm_layers' => 'number',
-            'model.parameters.total' => 'number', 'model.parameters.cnn' => 'number', 'model.parameters.proj' => 'number',
-            'model.parameters.rnn' => 'number', 'model.parameters.head' => 'number',
-            'groups' => 'list', 'groups.*.key' => 'string', 'groups.*.title' => 'string', 'groups.*.intro' => 'string',
+            'results_generated' => 'text',
+            'model.classes' => 'count', 'model.height' => 'count', 'model.conv_layers' => 'count', 'model.lstm_layers' => 'count',
+            'model.bidirectional' => 'bool?',
+            'model.parameters.total' => 'count', 'model.parameters.cnn' => 'count', 'model.parameters.proj' => 'count',
+            'model.parameters.rnn' => 'count', 'model.parameters.head' => 'count',
+            'groups' => 'list', 'groups.*.key' => 'text', 'groups.*.title' => 'text', 'groups.*.intro' => 'string',
             'groups.*.methods' => 'list',
-            $method.'key' => 'string', $method.'name' => 'string', $method.'kind' => 'string', $method.'status' => 'string',
+            $method.'key' => 'text', $method.'name' => 'text', $method.'kind' => 'text', $method.'status' => 'text',
             $method.'summary' => 'string', $method.'settings' => 'list', $method.'files' => 'list', $method.'files.*' => 'string',
-            'planned' => 'list', 'planned.*.label' => 'string', 'planned.*.config' => 'string',
+            // Bukti, sumbernya, dan catatan: pilihan, tetapi harus teks bila ada.
+            $method.'evidence' => 'string?', $method.'evidence_source' => 'string?', $method.'note' => 'string?',
+            'planned' => 'list', 'planned.*.label' => 'text', 'planned.*.config' => 'string', 'planned.*.key' => 'string?',
         ];
     }
 
-    /** Pengaturan = pasangan [label, nilai] berupa teks; bukti dan sumbernya teks atau kosong. */
+    /** Pengaturan = pasangan [label, nilai] berupa teks; kunci kelompok dan kunci butir tidak boleh berulang. */
     protected function check(array $card): void
     {
+        $groups = array_column($card['groups'], 'key');
+        if (count($groups) !== count(array_unique($groups)) || in_array('web', $groups, true)) {
+            throw new RuntimeException('Kartu metode tidak sah: kunci kelompok berulang, atau memakai kunci "web" milik halaman.');
+        }
+        $seen = [];
         foreach ($card['groups'] as $group) {
             foreach ($group['methods'] as $method) {
+                if (isset($seen[$method['key']])) {
+                    throw new RuntimeException("Kartu metode tidak sah: kunci butir {$method['key']} berulang.");
+                }
+                $seen[$method['key']] = true;
                 foreach ($method['settings'] as $pair) {
                     if (! is_array($pair) || ! array_is_list($pair) || count($pair) !== 2 || ! is_string($pair[0]) || ! is_string($pair[1])) {
                         throw new RuntimeException("Kartu metode tidak sah: pengaturan butir {$method['key']} harus pasangan [label, nilai] berupa teks.");
-                    }
-                }
-                foreach (['evidence', 'evidence_source'] as $key) {
-                    if (isset($method[$key]) && ! is_string($method[$key])) {
-                        throw new RuntimeException("Kartu metode tidak sah: {$key} butir {$method['key']} harus teks.");
                     }
                 }
             }
@@ -77,6 +84,13 @@ class MethodImporter extends CardImporter
     protected function preview(Model $report): void
     {
         view('livewire.pages.metode', Metode::viewData($report))->render();
+    }
+
+    public function staleNotes(): array
+    {
+        $report = MethodReport::current();
+
+        return $report ? Metode::stale($report->payload) : [];
     }
 
     protected function summary(array $card): array

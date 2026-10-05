@@ -389,9 +389,14 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     kumpulan 50.000). 44 karakter langka masing-masing ada di 100 baris latih, dan hanya di **1-14 baris (rata-rata
     5,9)** dari yang dijadwalkan run resmi. Angka lama 64.612 / 201.536 / 1-12 (rata-rata 5,5) salah. Lebar maju
     CarakanJawa sama dengan javatext di 72 dari 73 aksara/angka/pada (dihitung ulang tiap ekspor; font latih lain 0
-    dari 73). Bagian uji korpus tidak "disimpan sampai akhir": di luar gerbang resmi, 24 tes cepat (sampai 200 baris
-    pertama) dan 2 evaluasi penuh run lain juga membacanya, dan NusaAksara sudah dievaluasi 36 kali (laporan G3 di
-    `out/eval`); halaman menyebut angka-angka itu.
+    dari 73). Bagian uji korpus tidak "disimpan sampai akhir": di luar gerbang resmi, 24 tes cepat (sampai 100 baris
+    pertama; angka 200 di versi sebelumnya menghitung pasangan baris x font) dan 2 evaluasi penuh run lain juga
+    membacanya, dan 3 evaluasi di luar `out/eval` (dua laporan aksara langka sintetis 2.000 baris, beam + LM 300 baris;
+    kunci kartu `usage.test.others`) mengambil barisnya secara ACAK dari seluruh bagian uji, jadi baris di luar 10.000
+    pertama pun pernah dibaca. NusaAksara sudah dievaluasi 36 kali (laporan G3 di `out/eval`); halaman menyebut
+    angka-angka itu. Jumlah font tiap run: dari log run bila mencatatnya (`src.train` kini menulis daftar font di event
+    `start`; run lama tidak), kalau tidak dari folder font SEKARANG (`fonts_source`), dan ekspor memperingatkan bila
+    ekspor hasil mencatat jumlah lain.
     Kalimat dan batasan di halaman dipilih dari isi kartu, supaya tetap benar untuk kartu run lain: font uji
     sekeluarga dengan font latih; data nyata tanpa bagian validasi; aksara langka HANYA bila run resmi tidak memakai
     sisipan aksara langka; jumlah run di rantai, seed, kelengkapan rantai. Nilai `null` (jadwal baris run `--overfit` /
@@ -401,11 +406,22 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     **Impor kartu (`App\Services\CardImporter`, dasar `DatasetImporter` dan `MethodImporter`):** dua pengaman supaya
     kartu yang salah ditolak saat impor, bukan menjadi HTTP 500 saat halaman dibuka (tinjauan 2026-10-05: 55 dari 78
     kartu "satu kunci dibuang" diterima versi pertama lalu membuat halaman 500). (1) `shape()`: kunci wajib dan
-    tipenya (notasi titik, `*` = setiap butir, akhiran `?` = boleh null; wadah didaftar sebelum isinya supaya pesannya
-    menyebut kunci yang salah). (2) uji tampil: halaman dirender sekali dengan kartu calon di dalam transaksi
-    (`preview()`, lewat `viewData()` statis komponennya); gagal karena apa pun = batal, kartu lama dipertahankan.
-    `aksara:import` yang hasil OCR-nya berhasil tetapi sebuah kartunya ditolak menulis PERINGATAN dan tetap keluar 0
-    (hasilnya sudah tersimpan); `aksara:datasets` / `aksara:methods` keluar 1.
+    tipenya (notasi titik, `*` = setiap butir; tipe `number`, `count` = bilangan tidak negatif, `string`, `text` = teks
+    tidak kosong, `bool`, `list`, `map`; akhiran `?` = boleh tidak ada atau null tetapi harus bertipe benar bila ada;
+    wadah didaftar sebelum isinya supaya pesannya menyebut kunci yang salah), ditambah `check()` tiap kartu (urutan
+    bagian; pasangan pengaturan; kunci kelompok dan butir tidak boleh berulang, dan "web" milik halaman). (2) uji
+    tampil: halaman dirender sekali dengan kartu calon di dalam transaksi (`preview()`, lewat `viewData()` statis
+    komponennya); gagal karena apa pun = batal, kartu lama dipertahankan. Pengaman ini menangkap kartu yang RUSAK,
+    bukan angka yang salah. `aksara:import` yang hasil OCR-nya berhasil tetapi sebuah kartunya ditolak menulis
+    PERINGATAN dengan alasannya dan tetap keluar 0 (hasilnya sudah tersimpan); `aksara:datasets` / `aksara:methods`
+    keluar 1. **Galat database bukan kartu yang ditolak** (`CardStorageException`, mis. tabel kartu belum dimigrasi):
+    pesannya menunjuk ke `php artisan migrate` dan `aksara:import` pun keluar 1. Ketiga perintah menulis PERINGATAN
+    langsung bila kartu yang baru diimpor tidak sejalan dengan hasil OCR yang diimpor (`staleNotes()`).
+    **Jebakan PostgreSQL kedua:** kueri yang gagal membatalkan transaksi yang sedang berjalan, dan semua kueri
+    sesudahnya ikut gagal. Karena itu semua kueri importir ada di dalam `DB::transaction`-nya (gagal = digulung balik
+    ke titik simpan), dan halaman Dataset menanyakan `Schema::hasTable` sebelum membaca kartu metode alih-alih
+    menangkap kueri yang gagal. Test "tabel belum dimigrasi" lulus di SQLite walau kodenya salah; jalankan juga
+    `-c phpunit.pgsql.xml`.
     **Test halaman diperiksa dengan mutasi (2026-10-06):** tiap test halaman memeriksa isi per baris lewat atribut
     `data-part|bin|run|dataset|font`, bukan `assertSee` pada teks yang muncul di banyak tempat (versi pertama
     `DatasetPageTest` meloloskan 10 dari 16 kerusakan buatan peninjau: pil "disebar" terbalik, penanda resmi terbalik,
@@ -418,6 +434,22 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     scratchpad sesi, tidak ikut repo. Jebakan saat mengulanginya: folder sementara pytest bernama panjang melewati
     batas jalur 260 karakter Windows dan gagalnya terhitung "mutan terbunuh"; periksa bahwa alasan gagalnya memang
     pernyataan test.
+    **Putaran kedua (2026-10-06, sesudah tinjauan kedua):** peninjau menunjukkan dua hal yang tidak tertangkap putaran
+    pertama. (1) Pembantu "kartu harus ditolak" di kedua test halaman TIDAK BISA GAGAL: bentuk
+    `try { import(); $this->fail(...); } catch (RuntimeException $e) { assert pesan }` menangkap galat `fail()` itu
+    sendiri (`AssertionFailedError` PHPUnit turunan `RuntimeException`), jadi kartu yang DITERIMA pun lolos. Gantinya
+    `Tests\Concerns\RejectsCards::assertCardRejected()`: pengecualian ditangkap dulu, dinyatakan di luar blok `try`,
+    dan kartu yang tersimpan diperiksa tidak berubah. (2) 45 dari 75 mutan baru sisi web dan 14 dari 15 mutan baru di
+    dua skrip ekspor lolos, karena mutasi putaran pertama hanya merusak kelas halaman dan tampilan, bukan importir dan
+    perintah impor. Sesudah test diperkuat, 526 kerusakan satu-hal terhadap kode sekarang semuanya menggagalkan test:
+    131 di `export_methods.py`, 64 di `export_datasets.py`, dan 331 di sisi web (importir kartu 72, perintah impor
+    29, `Metode.php` 73, `Dataset.php` 60, `TranslationRun` 6, tampilan Metode 45 dan Dataset 46). Mekanisme sisi web
+    dari peninjau: kelas yang dirusak dideklarasikan sebelum autoload, jadi importir, perintah artisan, dan model ikut
+    teruji lewat kelas test repo yang tidak diubah. Jebakan baru: `expectsOutputToContain` Laravel mencocokkan satu
+    baris keluaran dengan SATU harapan saja (dua harapan untuk baris yang sama = yang kedua tidak pernah terpenuhi);
+    berkas daftar mutan yang di-`require` di lingkup berkas lain menimpa variabelnya (`$id`), sehingga semua run
+    memakai mutan terakhir: bungkus dengan fungsi; dan run "dasar tanpa mutan" wajib ada untuk menangkap hal semacam
+    itu.
     **Menu Metode (permintaan user 2026-10-05: "pada sidebar tambahkan menu method/machine learning, jadi disana list
     method atau machine learning yang digunakan"; isi dan pengelompokannya keputusan Claude, belum dikonfirmasi):**
     `Pages/Metode.php`, kelompok Hasil di bawah Dataset, rute `/metode`. Isinya dari **kartu metode**
@@ -429,20 +461,49 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     "Tahap lanjutan alur" (alih aksara, NLLB-200, chrF/BLEU, tingkat tutur, alih aksara Latin -> aksara, pemulih é)
     dari tabel dan konstanta web (`Metode::webGroup()`), jadi logika tahap 2-4 tetap tidak masuk `src/`. Tiap butir:
     jenis (`model`, `training`, `data`, `statistic`, `rule`, `evaluation`), status (`official` = bagian model resmi,
-    `used`, `available`, `tested`, `comparator`), penjelasan, pengaturan, bukti terukur + sumbernya, berkas kode.
-    **Tidak ada angka yang diketik tangan di kartu kecuali dua yang bersumber "catatan pengukuran di CLAUDE.md"**
-    (normalisasi kontras 0,9% -> 74,5%; packing 1,12% vs 0,07%): model dibangun dari `model_config` checkpoint resmi
-    dan dimuati bobotnya (4.590.909 parameter: CNN + proyeksi 1.913.568, BiLSTM 2.629.632, keluaran 47.709; 7 lapis
-    konvolusi, tinggi 96 -> 3, langkah lebar 4, 93 kelas), argumen pelatihan dari checkpoint, pengoptimal / jadwal /
-    rugi / pemotongan gradien dicocokkan dengan sumber `src.train.main` (**ekspor BERHENTI bila kode itu berubah**:
-    perbarui `TRAIN_CODE` dan butir pelatihannya), bukti dari `out/results/manifest.json` dan
-    `out/compare/<A>_vs_<B>.json` (bukti yang berkasnya tidak ada dilewati; run kontrol tiap perlakuan di
-    `CONTROL_OF`). Kalimat yang bergantung pada resep run (operasi augmentasi, rantai run, perangkat, beam + LM pada
-    checkpoint resmi atau belum) disusun dari argumen dan hasilnya, bukan teks tetap. Ekspor juga berhenti bila manifest
-    menetapkan pipeline resmi lain, dibuat dengan `--limit`, run-nya tidak dikenal `export_results.py`, jumlah kelas
-    checkpoint beda dari tokenizer, atau jumlah parameter di log beda dari model. Butir web "NLLB-200" menyebut
-    "bukan pipeline resmi" selama terjemahan dari keluaran OCR dibuat dari pipeline lain (sekarang: beam + LM atas
-    `fase5_fonts`). Halaman menampilkan peringatan
+    `used`, `available`, `tested`, `comparator`), penjelasan, pengaturan, berkas kode, dan bila ada: bukti terukur +
+    sumbernya (`evidence`) serta catatan batasan (`note`, kotak "Catatan" di halaman).
+    **Angka dan pengaturan di kartu dibaca dari berkas; kalimat penjelasannya ditulis tangan di skrip.** Dua angka
+    bersumber "catatan pengukuran di CLAUDE.md" (normalisasi kontras 0,9% -> 74,5%; packing 1,12% vs 0,07%). Model
+    dibangun dari `model_config` checkpoint resmi dan dimuati bobotnya (4.590.909 parameter: CNN + proyeksi 1.913.568,
+    BiLSTM 2.629.632, keluaran 47.709; 7 lapis konvolusi, tinggi 96 -> 3, langkah lebar 4, 93 kelas), argumen pelatihan
+    dari checkpoint. Kalimat tentang kode (pengoptimal, jadwal, rugi, pemotongan gradien di `src.train.main`; persentil
+    latar dan tinta di `src.dataset.to_tensor`; penghalusan Witten-Bell di `src.charlm`) dicocokkan dengan sumbernya
+    lewat `CODE_FACTS` (**ekspor BERHENTI bila kode itu berubah**: perbarui `CODE_FACTS` dan butirnya). Bukti dari
+    `out/results/manifest.json`, `out/compare/<A>_vs_<B>.json`, dan `out/compare/spacing_synthetic.json`; yang
+    berkasnya tidak ada dilewati. Kalimat yang bergantung pada resep run (operasi augmentasi, rantai run, perangkat,
+    beam + LM pada checkpoint resmi atau belum) disusun dari argumen dan hasilnya, bukan teks tetap. Ekspor juga
+    berhenti bila manifest menetapkan pipeline resmi lain (manifest lama tanpa kunci `official` = `crnn_fonts`), dibuat
+    dengan `--limit`, run-nya tidak dikenal `export_results.py`, jumlah kelas checkpoint beda dari tokenizer, atau
+    jumlah parameter di log beda dari model.
+    **Aturan kartu metode yang lahir dari tinjauan kedua (2026-10-06, 29 temuan; jangan dikembalikan):**
+    (a) bukti selisih antar-run hanya dari berkas pembanding yang CER kedua sisinya SAMA dengan manifest sekarang
+    (berkas dari ekspor lama tidak dikutip), dan hanya terhadap run kontrol perlakuan itu: `CONTROLS` berkunci
+    perlakuan (`fonts`: fase5_fonts lawan fase5_core; `tracking`: fase7_track lawan fase7_ctrl; `rare`:
+    fase7_track_rare lawan fase7_track, fase6_rare lawan fase6_ctrl), dan run kontrol jarak diperiksa memang dilatih
+    TANPA jarak (`tracking_control`); bukti milik run lain disebut "bukan model resmi".
+    (b) Label sintetis tidak disebut "pasti benar": butir render membawa catatan font latih bercacat (BasaJan,
+    CarakanJawa, NewKramawirya: `FONT_DEFECTS` + font tanpa glyph sebuah karakter charset), dan butir buang-spasi
+    menyebut font berspasi sempit (3 dari 10: spasi selalu dibuang, jadi porsi baris tanpa spasi sekitar 65%, bukan
+    50%).
+    (c) Gerbang G1/G2 dan evaluasi sintetis tertarget membawa catatan "font uji javatext sekeluarga dengan font latih
+    CarakanJawa" (dihitung dari lebar maju, aturan kartu data).
+    (d) Ablasi tidak diberi peringkat "penurunan terbesar": yang dikutip jumlah per kelompok (7 operasi preset −2,38
+    poin, 4 operasi tiruan pindaian −28,63), dengan catatan satu seed, kumulatif, dan rotate yang menaikkan G3 12,79
+    poin.
+    (e) Rantai checkpoint yang terpotong (checkpoint leluhur sudah dihapus) tidak dilaporkan "dari bobot acak"
+    (`chain_complete`); kalimat OneCycle dihitung dari langkah yang DIRENCANAKAN (3 dari 4 run sebelum run resmi
+    dihentikan sebelum siklusnya selesai).
+    (f) Jumlah font tiap run: log -> ekspor hasil -> folder sekarang, dan bila folder sudah berubah itu disebut.
+    (g) Evaluasi jarak menyebut juga batasnya (di luar rentang latih 0,6 em: 67,5 spasi palsu per 100 batas).
+    Sisi web: alur bercabang (arti dan tingkat tutur sama-sama dari teks Latin, bukan berurutan); langkah bermodel
+    ditandai warna DAN tulisan "ML"; ubin keempat menghitung model hasil belajar yang DIPAKAI (CRNN, NLLB-200) dan
+    menyebut model bahasa n-gram terpisah sebagai "tersedia"; bukti alih aksara menyebut "huruf saja" dan "masukannya
+    label aksara"; tingkat tutur tanpa label manusia mendapat catatan "belum dinilai", bukan kotak "Terukur". Butir web
+    "NLLB-200" memilih run terjemahannya lewat `TranslationRun::forOcr()` (aturan yang sama dengan Ringkasan: keluaran
+    pipeline resmi -> bacaan beam + LM-nya -> run terbaru pipeline lain) dan menyebut "bukan pipeline resmi" selama
+    terjemahan dari keluaran OCR dibuat dari pipeline lain (sekarang: beam + LM atas `fase5_fonts`). Halaman
+    menampilkan peringatan
     "Kartu metode dan hasil tidak sejalan" bila kartu dibuat untuk run lain atau `results_generated` kartu bukan ekspor
     hasil yang sedang diimpor: sesudah `export_results.py` dijalankan ulang, jalankan ulang `export_methods.py` juga.
     **Jebakan PostgreSQL:** kolom `payload` bertipe `json`, BUKAN `jsonb`. jsonb mengurutkan ulang kunci objek
@@ -467,9 +528,10 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     `phpunit.xml` memaksa SQLite in-memory (`force="true"`, jadi `DB_*` yang tertinggal di shell diabaikan) dan
     `tests/TestCase.php::createApplication` menolak database bernama `its_aksara` sebelum migrasi. Test memakai folder
     sementara untuk `storage/app/mt` (dulu `TranslationTest` menimpa hasil NLLB; dipulihkan dari DB lewat
-    `php artisan aksara:translate --dump`). 157 test lolos di SQLite dan di PostgreSQL uji (2026-10-06, sesudah menu Metode dan perbaikan tinjauan menu Dataset).
-    **Port:** Laravel 8010, layanan model 8011, layanan terjemahan 8012 — 8000/8001 dipakai proyek lain
-    milik user di laptop yang sama (jangan dihentikan). Test tetap bisa di SQLite in-memory
+    `php artisan aksara:translate --dump`). 164 test lolos di SQLite dan di PostgreSQL uji (2026-10-06, sesudah perbaikan tinjauan kedua menu Dataset dan Metode); 329 test Python.
+    **Port:** Laravel 8010, layanan model 8011, layanan terjemahan 8012 — 8000/8001, 5173, dan 8020 dipakai proyek
+    lain milik user di laptop yang sama (jangan dihentikan; cek dulu siapa yang mendengarkan sebelum memakai sebuah
+    port, dan beri skrip sementara port 8030 ke atas). Test tetap bisa di SQLite in-memory
     (`phpunit.xml`); kode dijaga netral: `whereJsonContains` untuk tag, tabel turunan untuk ORDER BY berekspresi
     (PostgreSQL menolak alias kolom di dalam ekspresi). Isi DB kecuali akun & label manusia bisa dibangun ulang
     (`aksara:import`, `aksara:datasets`, `aksara:methods`, `aksara:annotations`, `aksara:translate --import-only`); label tingkat tutur dicadangkan

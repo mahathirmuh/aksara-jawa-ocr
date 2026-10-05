@@ -78,7 +78,7 @@
     --row-line: #f3f4f6;
     --table-border: #e5e7eb;
     --text: #182433;
-    --text-muted: #667382;
+    --text-muted: #626f7e;
     --primary: #206bc4;
     --primary-wash: #e9f0f9;
     --secondary-wash: #f0f1f3;
@@ -94,7 +94,7 @@
     --radius: 4px;
 
     /* Dua seri grafik: biru + jingga (tetap terbedakan pada buta warna merah-hijau). Seri ketiga (bagian uji di
-       halaman Dataset) abu kebiruan gelap: dibedakan lewat terang-gelap, bukan rona. */
+       halaman Dataset) abu kebiruan. Warna bukan satu-satunya pembeda: tiap bagian selalu disertai namanya. */
     --series-1: #206bc4;
     --series-2: #f76707;
     --series-3: #3a4859;
@@ -317,24 +317,34 @@ select:focus[data-flux-control] {
     .split-test { background: var(--series-3); }
     .split-dot { display: inline-block; flex: none; width: .625rem; height: .625rem; border-radius: 2px; }
     /* Alur batang berwarna permukaan dengan garis tepi, bukan abu: di alur abu isi jingga (validasi) hanya berkontras 2,3:1. */
-    .meter { display: block; height: .375rem; overflow: hidden; border-radius: 100rem; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
+    .meter { display: block; height: .375rem; overflow: hidden; border-radius: 100rem; background: var(--surface); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-muted) 45%, transparent); }
     .meter > span { display: block; min-width: 2px; height: 100%; border-radius: inherit; }
     .meter-lg { height: .625rem; border-radius: 2px; }
     .role-chip { display: inline-flex; align-items: center; gap: .375rem; padding: .1875rem .5rem; border-radius: var(--radius); box-shadow: inset 0 0 0 1px var(--border); font-size: .75rem; line-height: 1.2; white-space: nowrap; }
 
     /* ---------- halaman Metode: alur langkah dan daftar butir ----------
-       Alur menurun di ponsel dan mendatar di layar lebar; kotak .is-learned = langkah yang memakai model hasil belajar.
-       Butir: nama + jenis + status | penjelasan + bukti | pengaturan; kolom ketiga turun ke bawah di layar sedang. */
+       Alur menurun di ponsel dan mendatar di layar lebar; kotak .is-learned = langkah yang memakai model hasil belajar,
+       ditandai warna dan tulisan "ML" (.flow-tag). Langkah terakhir bercabang (.flow-branches): dua kotak yang
+       sama-sama berangkat dari langkah sebelumnya, berdampingan di ponsel dan bertumpuk di layar lebar.
+       Butir: nama + jenis + status | penjelasan + bukti + catatan | pengaturan; kolom ketiga turun ke bawah di layar sedang. */
     .flow { display: flex; flex-direction: column; gap: 1.5rem; margin: 0; padding: 0; list-style: none; }
     .flow-step { position: relative; display: flex; flex: none; flex-direction: column; gap: .125rem; min-width: 0; padding: .5rem .75rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
     .flow-step.is-learned { border-color: var(--brand); background: var(--brand-wash); }
     .flow-step:not(:last-child)::after { content: '↓'; position: absolute; left: 50%; bottom: -1.375rem; transform: translateX(-50%); line-height: 1.25rem; color: var(--text-muted); }
     .flow-name { font-size: .8125rem; font-weight: 600; color: var(--text); }
     .flow-detail { font-size: .75rem; line-height: 1.35; color: var(--text-muted); }
+    .flow-tag { display: inline-block; margin-inline-start: .375rem; padding: 0 .25rem; border: 1px solid currentColor; border-radius: 2px; font-size: .625rem; line-height: 1.3; font-weight: 700; letter-spacing: .04em; color: var(--brand-strong); vertical-align: 1px; }
+    .flow-branches { display: flex; flex: none; min-width: 0; }
+    .flow-branch-list { display: flex; flex: 1; gap: .5rem; min-width: 0; margin: 0; padding: 0; list-style: none; }
+    .flow-branch-list > .flow-step { flex: 1 1 0; }
+    .flow .flow-branch-list > .flow-step::after { content: none; }
     @media (min-width: 768px) {
         .flow { flex-direction: row; flex-wrap: wrap; gap: .75rem 1.5rem; padding-inline-end: 1.25rem; }
         .flow-step { flex: 1 1 6.5rem; }
         .flow-step:not(:last-child)::after { content: '→'; left: auto; right: -1.125rem; bottom: auto; top: 50%; transform: translateY(-50%); }
+        .flow-branches { flex: 1 1 7.5rem; }
+        .flow-branch-list { flex-direction: column; }
+        .flow-branch-list > .flow-step { flex: none; }
     }
     .method-list { display: flex; flex-direction: column; }
     .method-row { display: grid; gap: .75rem 1.5rem; padding: 1rem 0; border-top: 1px solid var(--row-line); }
@@ -343,6 +353,7 @@ select:focus[data-flux-control] {
     .method-name { font-size: .875rem; line-height: 1.25rem; font-weight: 600; color: var(--text); }
     .method-summary { max-width: 75ch; }
     .method-evidence { margin-top: .5rem; padding: .5rem .75rem; border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--surface-2); font-size: .75rem; line-height: 1.5; overflow-wrap: anywhere; }
+    .method-note { margin-top: .5rem; padding: .5rem .75rem; border: 1px solid var(--border-soft); border-inline-start: .1875rem solid var(--warn-solid); border-radius: var(--radius); font-size: .75rem; line-height: 1.5; overflow-wrap: anywhere; }
     .method-settings { display: grid; gap: .375rem; align-content: start; margin: 0; font-size: .75rem; line-height: 1.45; }
     .method-settings > div { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr); gap: .75rem; }
     .method-settings dt { color: var(--text-muted); }

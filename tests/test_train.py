@@ -1,5 +1,6 @@
 """Test pemecahan batch lebar (OOM fase5_quick) — Fase 5."""
 
+import pytest
 import torch
 from torch import nn
 
@@ -65,6 +66,24 @@ def test_weighted_chunk_losses_equal_full_batch_loss():
         logits = per_sample[rows, : int(c_in.max())]
         total = total + ctc_loss(ctc, logits, cy, c_in, c_tgt, cpu) * (cx.shape[0] / X.shape[0])
     assert torch.allclose(total, full, atol=1e-5)
+
+
+def test_training_fonts_are_core_fonts_plus_the_extra_folder(tmp_path):
+    # Daftar ini dicatat di event start log; kartu data dan kartu metode membacanya dari sana.
+    import shutil
+
+    from src.dataset import TRAIN_FONTS
+    from src.train import parse_args, training_fonts
+
+    assert training_fonts(parse_args(["--run", "x"])) == list(TRAIN_FONTS)
+    shutil.copy(TRAIN_FONTS[0], tmp_path / "Tambahan.TTF")
+    (tmp_path / "catatan.md").write_text("bukan font", encoding="utf-8")
+    fonts = training_fonts(parse_args(["--run", "x", "--extra-fonts", str(tmp_path)]))
+    assert [font.name for font in fonts] == [font.name for font in TRAIN_FONTS] + ["Tambahan.TTF"]
+    empty = tmp_path / "kosong"
+    empty.mkdir()
+    with pytest.raises(ValueError, match="Tidak ada font"):
+        training_fonts(parse_args(["--run", "x", "--extra-fonts", str(empty)]))
 
 
 def test_new_data_options_default_to_off():

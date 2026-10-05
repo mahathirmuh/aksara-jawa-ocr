@@ -23,6 +23,7 @@ class ImportMethods extends Command
             return self::FAILURE;
         }
         $this->info(self::summary($counts));
+        ImportResults::warnIfStale($this, $importer, 'Metode', 'scripts/export_methods.py', 'aksara:methods');
 
         return self::SUCCESS;
     }

@@ -235,6 +235,18 @@ def save_atomic(payload: dict, path: Path) -> None:
     os.replace(tmp, path)
 
 
+def training_fonts(args) -> list[Path]:
+    """Font perender data latih: font inti, ditambah isi --extra-fonts. Namanya dicatat di event start log, supaya
+    kartu data dan kartu metode tidak perlu menebak font sebuah run dari folder font yang bisa berubah sesudahnya."""
+    fonts = list(TRAIN_FONTS)
+    if args.extra_fonts:
+        extra = sorted(p for p in Path(args.extra_fonts).glob("*") if p.suffix.lower() in {".ttf", ".otf"})
+        if not extra:
+            raise ValueError(f"Tidak ada font .ttf/.otf di {args.extra_fonts}")
+        fonts += extra
+    return fonts
+
+
 def build_datasets(args, tokenizer: Tokenizer):
     train_lines, val_lines = read_split("train"), read_split("val")
     if args.overfit:
@@ -245,13 +257,9 @@ def build_datasets(args, tokenizer: Tokenizer):
         train_lines = train_lines[: args.train_lines]
         val_lines = val_lines[: args.val_lines]
 
-    train_fonts = list(TRAIN_FONTS)
+    train_fonts = training_fonts(args)
     if args.extra_fonts:
-        extra = sorted(p for p in Path(args.extra_fonts).glob("*") if p.suffix.lower() in {".ttf", ".otf"})
-        if not extra:
-            raise ValueError(f"Tidak ada font .ttf/.otf di {args.extra_fonts}")
-        train_fonts += extra
-        print(f"font training: {len(train_fonts)} ({len(extra)} tambahan dari {args.extra_fonts})")
+        print(f"font training: {len(train_fonts)} ({len(train_fonts) - len(TRAIN_FONTS)} tambahan dari {args.extra_fonts})")
 
     parts = []
     if train_lines:
@@ -340,7 +348,8 @@ def main(argv=None) -> None:
         f"device={device} params={n_params / 1e6:.2f}M train={len(train_ds):,} val={len(val_ds):,} "
         f"steps/epoch={steps_per_epoch} total_steps={total_steps} threads={torch.get_num_threads()}"
     )
-    log({"event": "start", "step": step, "args": vars(args), "params": n_params, "device": str(device)})
+    log({"event": "start", "step": step, "args": vars(args), "params": n_params, "device": str(device),
+         "fonts": [Path(font).name for font in training_fonts(args)]})
 
     eval_every = args.eval_every or steps_per_epoch
     started = time.time()

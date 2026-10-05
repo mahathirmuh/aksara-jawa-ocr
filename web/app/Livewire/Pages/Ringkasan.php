@@ -40,8 +40,8 @@ class Ringkasan extends Component
 
         // Tahap 3 dari keluaran OCR: terjemahan atas keluaran pipeline resmi bila sudah dijalankan, kalau belum
         // terjemahan terbaru atas keluaran pipeline lain; nama pipelinenya selalu ditampilkan.
-        $mtRuns = TranslationRun::latest('id')->get()->unique('source')->keyBy('source');
-        $ocrRun = $mtRuns->get($officialKey) ?? $mtRuns->get($officialKey.'_beam') ?? $mtRuns->first(fn ($r) => $r->source !== 'label');
+        $mtRuns = TranslationRun::latestBySource();
+        $ocrRun = TranslationRun::forOcr($officialKey, $mtRuns);
 
         $lines = Line::count();
 

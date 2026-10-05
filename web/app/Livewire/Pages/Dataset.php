@@ -10,6 +10,7 @@ use App\Models\MethodReport;
 use App\Models\Pipeline;
 use App\Support\TalingRestorer;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Schema;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -35,6 +36,9 @@ class Dataset extends Component
         'val' => ['Validasi', 'Dicek berkala selama training; model tidak belajar darinya. Dipakai memantau training dan menyetel pengaturan. Ibarat try-out.'],
         'test' => ['Uji', 'Tidak pernah dilatihkan. Dipakai untuk angka yang dilaporkan. Ibarat ujian akhir.'],
     ];
+
+    /** Evaluasi lain yang membaca bagian uji (kartu data, usage.test.others). */
+    private const READERS = ['rare_synthetic' => 'aksara langka sintetis', 'beam' => 'beam + LM'];
 
     /** Kenapa sekelompok font tidak dipakai run resmi. */
     private const UNUSED_FONTS = [
@@ -95,8 +99,9 @@ class Dataset extends Component
      * Kartu data dan hasil OCR yang diimpor dihitung untuk run yang berbeda: pemakaian di halaman ini bukan milik
      * pipeline resmi web. Kalimatnya tidak menebak sisi mana yang tertinggal (kartu bisa lebih baru daripada hasil,
      * atau sebaliknya). Kartu untuk run yang tidak dikenal ekspor hasil (kunci pipeline kosong) juga tidak cocok.
+     * Dipakai halaman ini dan perintah impor (yang memperingatkan langsung sesudah mengimpor kartu yang tidak cocok).
      */
-    private static function stale(array $card): ?array
+    public static function stale(array $card): ?array
     {
         $official = Pipeline::official();
         if (! $official || $official->key === ($card['official']['pipeline'] ?? null)) {
@@ -147,6 +152,9 @@ class Dataset extends Component
             $quick ? nfmt($quick).' tes cepat penentu arah (sampai '.nfmt($usage['test']['quick_max_lines'] ?? 0).' baris pertama)' : null,
             $full ? nfmt($full).' evaluasi penuh untuk run lain' : null,
         ]);
+        // Evaluasi di luar laporan gerbang yang mengambil barisnya secara acak dari seluruh bagian uji.
+        $sampled = collect($usage['test']['others'] ?? []);
+        $kinds = $sampled->pluck('kind')->unique()->map(fn ($kind) => self::READERS[$kind] ?? $kind)->join(', ');
         // Sampel = baris di semua batch; batch terakhir sebuah kelompok panjang bisa lebih kecil dari ukuran batch.
         $samples = $train['samples'] === $train['steps'] * $train['batch_size']
             ? nfmt($train['steps']).' langkah × '.$train['batch_size'].' = '.nfmt($train['samples']).' sampel'
@@ -165,7 +173,10 @@ class Dataset extends Component
                     .' dengan '.$usage['val']['fonts'].' font inti, tanpa augmentasi.'],
             'test' => [$usage['test']['lines'], 'baris pertama untuk '.($gates ?: 'gerbang sintetis'),
                 'Dirender dengan '.$fontNames.'; baris yang sama untuk tiap gerbang.'
-                .($others ? ' Di luar gerbang resmi, '.implode(' dan ', $others).' juga membaca bagian ini.' : '')],
+                .($others ? ' Di luar gerbang resmi, '.implode(' dan ', $others).' juga membaca bagian ini.' : '')
+                .($sampled->isNotEmpty() ? ' '.nfmt($sampled->count()).' evaluasi lain ('.$kinds.') mengambil sampai '
+                    .nfmt($sampled->max('lines')).' baris secara acak dari seluruh bagian uji, jadi baris di luar '
+                    .nfmt($usage['test']['lines']).' baris pertama ikut terbaca.' : '')],
         ];
 
         return array_map(function ($split) use ($used) {
@@ -186,7 +197,7 @@ class Dataset extends Component
         $text = 'Kenapa bukan 80/20 atau 70/15/15? Rasio itu untuk data berjumlah ribuan. Di sini bagian uji saja sudah '
             .nfmt($card['splits'][2]['lines']).' baris, padahal gerbang hanya memakai '.nfmt($card['usage']['test']['lines']);
         if ($seen !== null && $trainLines && $seen < $trainLines) {
-            $text .= ', dan sepanjang rantai run resmi baru '.pct($seen / $trainLines).' bagian latih yang pernah dilihat';
+            $text .= ', dan sepanjang rantai run resmi baru '.pct($seen / $trainLines).' bagian latih yang pernah dijadwalkan';
         }
 
         return $text.'. Membagi ulang juga memindahkan teks yang sudah dilatih ke bagian uji, sehingga angka lama tidak bisa lagi '
@@ -243,7 +254,7 @@ class Dataset extends Component
         $seen = $card['lineage']['distinct_lines'];
 
         return $text.($seen === null || ! $trainLines ? ' Jumlah baris berbeda di sepanjang rantai tidak dihitung.'
-            : ' Sepanjang rantai, model melihat '.pct($seen / $trainLines).' bagian latih.');
+            : ' Sepanjang rantai, '.pct($seen / $trainLines).' bagian latih pernah dijadwalkan.');
     }
 
     /**
@@ -282,8 +293,11 @@ class Dataset extends Component
         if ($run['track_prob'] > 0) {
             $parts[] = 'jarak antar suku kata p '.self::dec($run['track_prob']).' (hingga '.self::dec($run['track_max']).' em)';
         }
-        if ($run['rare_insert_prob'] > 0 || $run['rare_opener_prob'] > 0) {
+        // Pembuka baris saja hanya menambah adeg-adeg; sisipan aksara langka menambah karakter langka lain juga.
+        if ($run['rare_insert_prob'] > 0) {
             $parts[] = 'sisipan aksara langka';
+        } elseif ($run['rare_opener_prob'] > 0) {
+            $parts[] = 'pembuka baris adeg-adeg';
         }
         if ($run['real_train'] ?? false) {
             $parts[] = 'data nyata ikut dilatih';
@@ -359,14 +373,15 @@ class Dataset extends Component
                     .mb_strtolower(mb_substr($pending['name'], 0, 1)).mb_substr($pending['name'], 1).' masih menunggu verifikasi pembaca aksara.' : '')];
         }
 
-        // Sisipan aksara langka saat render adalah obat keterbatasan ini: bila run resmi memakainya, batasannya tidak berlaku.
+        // Sisipan aksara langka saat render adalah obat keterbatasan ini: bila run resmi memakainya, batasannya tidak
+        // berlaku. Pembuka baris saja (adeg-adeg) tidak menyisipkan karakter langka lain, jadi batasannya tetap ada.
         $rare = $card['rare'];
         $train = $card['usage']['train'];
-        $inserted = ($train['rare_insert_prob'] ?? 0) > 0 || ($train['rare_opener_prob'] ?? 0) > 0;
+        $inserted = ($train['rare_insert_prob'] ?? 0) > 0;
         $seen = $rare['scheduled_lines'] ?? [];
         if ($rare['codepoints'] > 0 && ! $inserted && $train['distinct_lines'] !== null && isset($seen['min'], $seen['max'], $seen['mean'])) {
             $each = $rare['train_lines'];
-            $trial = collect(MethodReport::current()?->payload['groups'] ?? [])->flatMap(fn ($g) => $g['methods'] ?? [])->contains('key', 'rare');
+            $trial = collect(self::methodCard()['groups'] ?? [])->flatMap(fn ($g) => $g['methods'] ?? [])->contains('key', 'rare');
             $limits[] = ['Aksara langka nyaris tidak terlihat saat training',
                 nfmt($rare['codepoints']).' dari '.nfmt($rare['javanese']).' karakter aksara Jawa di charset ada di '
                 .(($each['min'] ?? null) === ($each['max'] ?? null) ? 'hanya '.nfmt($each['max'] ?? 0) : nfmt($each['min'] ?? 0).'–'.nfmt($each['max'] ?? 0))
@@ -379,6 +394,17 @@ class Dataset extends Component
         return $limits;
     }
 
+    /**
+     * Kartu metode yang tersimpan, untuk satu kalimat penunjuk ke halaman Metode. Halaman Dataset tidak boleh gagal
+     * hanya karena tabel kartu metode belum dimigrasi: itu dianggap belum ada kartunya. Keberadaan tabelnya ditanyakan
+     * dulu, bukan ditangkap dari kueri yang gagal: di PostgreSQL kueri yang gagal membatalkan transaksi yang sedang
+     * berjalan (impor kartu merender halaman ini di dalam transaksinya).
+     */
+    private static function methodCard(): array
+    {
+        return Schema::hasTable((new MethodReport)->getTable()) ? (MethodReport::current()?->payload ?? []) : [];
+    }
+
     /** Data pendukung: milik repo OCR (dari kartu data) lalu milik web (tabel web dan berkas leksikon). */
     private static function support(array $card): array
     {
@@ -389,7 +415,7 @@ class Dataset extends Component
                     nfmt($item['characters']).' karakter + blank = '.nfmt($item['classes']).' kelas', 'Dibangun dari korpus ('.($item['file'] ?? 'data/tokenizer.json').')'],
                 $item['key'] === 'charlm' && isset($item['order'], $item['lines']) => ['Model bahasa karakter', 'Kondisi "kamus": beam search + LM',
                     'order '.$item['order'].' · '.nfmt($item['lines']).' baris', 'Bagian latih korpus'],
-                $item['key'] === 'vlm_blind' && isset($item['lines']) => ['Uji buta VLM', 'Pembanding VLM zero-shot', nfmt($item['lines']).' baris', 'Sampel acak data nyata'],
+                $item['key'] === 'vlm_blind' && isset($item['lines']) => ['Uji buta VLM', 'Pembanding VLM zero-shot', nfmt($item['lines']).' baris', 'Sampel acak dari data uji nyata'],
                 default => null,
             };
         }

@@ -17,7 +17,11 @@ use Throwable;
  *  1. bentuk: kunci di `shape()` wajib ada dan bertipe benar, dengan pesan yang menyebut kuncinya;
  *  2. uji tampil: sebelum disimpan, halaman dirender sekali dengan kartu calon (`preview()`); bila gagal karena apa
  *     pun (kunci yang tidak terdaftar di `shape()`, tipe yang tidak terduga), impor dibatalkan.
- * Kartu yang sudah tersimpan tidak disentuh bila kartu baru ditolak.
+ * Kartu yang sudah tersimpan tidak disentuh bila kartu baru ditolak. Galat database (tabel belum dimigrasi) bukan
+ * kartu yang ditolak: itu dilempar sebagai CardStorageException.
+ *
+ * Batasnya: pengaman ini menangkap kartu yang RUSAK. Kartu yang bentuknya sah tetapi angkanya salah (disunting
+ * tangan) tetap diterima; angka yang benar adalah tanggung jawab skrip ekspor dan test-nya.
  */
 abstract class CardImporter
 {
@@ -25,7 +29,8 @@ abstract class CardImporter
     public const FILE = '';
 
     private const TYPES = [
-        'number' => 'angka', 'string' => 'teks', 'bool' => 'benar/salah', 'list' => 'daftar', 'map' => 'objek',
+        'number' => 'angka', 'count' => 'bilangan yang tidak negatif', 'string' => 'teks', 'text' => 'teks yang tidak kosong',
+        'bool' => 'benar/salah', 'list' => 'daftar', 'map' => 'objek',
     ];
 
     /** Kolom teks tabel kartu (varchar 255): nilai lebih panjang ditolak PostgreSQL saat disimpan. */
@@ -44,8 +49,9 @@ abstract class CardImporter
     abstract protected function exporter(): string;
 
     /**
-     * Bentuk kartu: kunci (notasi titik, "*" = setiap butir daftar atau objek) => tipe (number, string, bool, list,
-     * map; akhiran "?" = boleh null, untuk nilai yang ekspornya menulis null bila tidak dihitung).
+     * Bentuk kartu: kunci (notasi titik, "*" = setiap butir daftar atau objek) => tipe. Tipe: number, count (bilangan
+     * >= 0), string, text (teks tidak kosong), bool, list, map; akhiran "?" = boleh tidak ada atau null (untuk nilai
+     * yang ekspornya menulis null bila tidak dihitung, dan untuk kunci pilihan yang tetap harus bertipe benar bila ada).
      *
      * @return array<string, string>
      */
@@ -56,6 +62,14 @@ abstract class CardImporter
 
     /** Render halaman sekali dengan kartu yang baru disimpan (masih di dalam transaksi); lempar apa pun yang gagal. */
     abstract protected function preview(Model $report): void;
+
+    /**
+     * Hal yang membuat kartu yang tersimpan tidak sejalan dengan hasil OCR yang diimpor web (kartu untuk run lain,
+     * bukti dari ekspor hasil yang lain); kosong bila sejalan. Dipakai perintah impor untuk memperingatkan langsung.
+     *
+     * @return list<string>
+     */
+    abstract public function staleNotes(): array;
 
     /** Pemeriksaan tambahan yang tidak bisa dinyatakan `shape()`; lempar RuntimeException bila gagal. */
     protected function check(array $card): void {}
@@ -89,7 +103,11 @@ abstract class CardImporter
 
         $model = $this->model();
         try {
+            // Semua kueri ada di dalam transaksi, juga pemeriksaan "kartu lama ada": bila sebuah kueri gagal, transaksi
+            // (atau titik simpannya, bila pemanggil sudah di dalam transaksi) digulung balik sebelum galatnya dilaporkan,
+            // jadi pemanggil tidak ditinggali transaksi yang batal (PostgreSQL menolak semua kueri sesudahnya).
             DB::transaction(function () use ($card, $dir, $model, $label) {
+                $kept = $model::query()->exists() ? 'kartu sebelumnya dipertahankan' : 'tidak ada kartu yang disimpan';
                 $model::query()->delete();
                 $report = $model::create([
                     'schema' => $card['schema'], 'generated_at' => $card['generated'],
@@ -97,13 +115,20 @@ abstract class CardImporter
                 ]);
                 try {
                     $this->preview($report);
+                } catch (QueryException $e) {
+                    // Galat database saat merender halaman bukan salah kartunya (mis. tabel lain belum dimigrasi).
+                    throw new CardStorageException(ucfirst($label).' tidak diperiksa: halamannya tidak bisa dirender karena keadaan '
+                        .'database web ('.$e->getMessage().'); '.$kept.'. Jalankan dulu: php artisan migrate', previous: $e);
                 } catch (Throwable $e) {
-                    throw new RuntimeException(ucfirst($label).' tidak bisa ditampilkan halamannya ('.$e->getMessage()
-                        .'); kartu sebelumnya dipertahankan.', previous: $e);
+                    throw new RuntimeException(ucfirst($label).' tidak bisa ditampilkan halamannya ('.$e->getMessage().'); '.$kept
+                        .'. Penyebabnya kartu itu, atau berkas dan tabel web lain yang dibaca halamannya.', previous: $e);
                 }
             });
+        } catch (CardStorageException $e) {
+            throw $e;
         } catch (QueryException $e) {
-            throw new RuntimeException(ucfirst($label).' tidak bisa disimpan: '.$e->getMessage());
+            throw new CardStorageException(ucfirst($label).' tidak bisa disimpan karena keadaan database web ('.$e->getMessage()
+                .'). Jalankan dulu: php artisan migrate', previous: $e);
         }
 
         return $this->summary($card);
@@ -113,12 +138,15 @@ abstract class CardImporter
     {
         $label = ucfirst($this->label());
         // Kunci pipeline boleh kosong: kartu untuk run yang tidak dikenal ekspor hasil, yang ditandai halamannya.
-        $shape = ['generated' => 'string', 'official.run' => 'string', 'official.pipeline' => 'string?'] + $this->shape();
+        $shape = ['generated' => 'text', 'official.run' => 'text', 'official.pipeline' => 'string?'] + $this->shape();
         foreach ($shape as $key => $type) {
             $nullable = str_ends_with($type, '?');
             $type = rtrim($type, '?');
             $values = str_contains($key, '*') ? data_get($card, $key) : [data_get($card, $key)];
             if (! is_array($values)) {
+                if ($nullable) {
+                    continue;
+                }
                 throw new RuntimeException("{$label} tidak lengkap: kunci {$key} tidak ada di {$path}.");
             }
             foreach ($values as $value) {
@@ -144,7 +172,9 @@ abstract class CardImporter
     {
         return match ($type) {
             'number' => is_int($value) || is_float($value),
+            'count' => (is_int($value) || is_float($value)) && $value >= 0,
             'string' => is_string($value),
+            'text' => is_string($value) && trim($value) !== '',
             'bool' => is_bool($value),
             'list' => is_array($value) && array_is_list($value),
             'map' => is_array($value),
