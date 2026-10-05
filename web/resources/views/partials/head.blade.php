@@ -3,8 +3,6 @@
 
 <title>{{ isset($title) ? $title.' · Aksara OCR Lab' : 'Aksara OCR Lab' }}</title>
 
-<link rel="preconnect" href="https://fonts.bunny.net">
-<link href="https://fonts.bunny.net/css?family=ibm-plex-sans:400,500,600,700|ibm-plex-mono:400,500" rel="stylesheet" />
-
+{{-- Font antarmuka (Inter) dan font aksara dibundel/disajikan sendiri lewat app.css: tidak ada CDN font. --}}
 @vite(['resources/css/app.css', 'resources/js/app.js'])
 @fluxAppearance

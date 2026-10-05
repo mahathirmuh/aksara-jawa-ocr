@@ -3,41 +3,55 @@
     <head>
         @include('partials.head')
     </head>
-    <body class="min-h-screen bg-white antialiased dark:bg-linear-to-b dark:from-neutral-950 dark:to-neutral-900">
-        <div class="relative grid h-dvh flex-col items-center justify-center px-8 sm:px-0 lg:max-w-none lg:grid-cols-2 lg:px-0">
-            <div class="bg-muted relative hidden h-full flex-col p-10 text-white lg:flex dark:border-r dark:border-neutral-800">
-                <div class="absolute inset-0 bg-neutral-900"></div>
-                <a href="{{ route('home') }}" class="relative z-20 flex items-center text-lg font-medium" wire:navigate>
-                    <span class="flex h-10 w-10 items-center justify-center rounded-md">
-                        <x-app-logo-icon class="mr-2 h-7 fill-current text-white" />
-                    </span>
-                    {{ config('app.name', 'Laravel') }}
-                </a>
+    <body class="auth-page antialiased">
+        @php
+            // Deret hanacaraka (20 aksara dasar) sebagai tekstur latar; hiasan saja, tersembunyi dari pembaca layar.
+            $carakan = implode(' ', array_map(
+                fn (array $baris) => implode('', array_map('mb_chr', $baris)),
+                [
+                    [0xA9B2, 0xA9A4, 0xA995, 0xA9AB, 0xA98F],
+                    [0xA9A2, 0xA9A0, 0xA9B1, 0xA9AE, 0xA9AD],
+                    [0xA9A5, 0xA99D, 0xA997, 0xA9AA, 0xA99A],
+                    [0xA9A9, 0xA992, 0xA9A7, 0xA99B, 0xA994],
+                ],
+            ));
+        @endphp
 
-                @php
-                    [$message, $author] = str(Illuminate\Foundation\Inspiring::quotes()->random())->explode('-');
-                @endphp
+        <div class="auth-backdrop" aria-hidden="true">{{ str_repeat($carakan.' ', 14) }}</div>
 
-                <div class="relative z-20 mt-auto">
-                    <blockquote class="space-y-2">
-                        <p class="text-lg">&ldquo;{{ trim($message) }}&rdquo;</p>
-                        <footer class="text-sm">{{ trim($author) }}</footer>
-                    </blockquote>
+        {{-- Kartu lebar terbelah: panel gambar di kiri (layar lebar saja), formulir di kanan. --}}
+        <main class="auth-card">
+            <div class="auth-visual" aria-hidden="true">
+                <div class="auth-visual-text">{{ str_repeat($carakan.' ', 3) }}</div>
+                <div class="auth-visual-body">
+                    <div class="auth-flow">
+                        <span>citra baris</span><i>→</i><span>aksara Jawa</span><i>→</i><span>Latin</span><i>→</i><span>arti</span><i>→</i><span>tingkat tutur</span>
+                    </div>
+                    <p class="auth-visual-title">Membaca satu baris aksara Jawa cetak.</p>
+                    <p class="auth-visual-sub">CRNN + CTC yang dilatih dari baris sintetis, lalu diuji pada baris cetak nyata.</p>
                 </div>
             </div>
-            <div class="w-full lg:p-8">
-                <div class="mx-auto flex w-full flex-col justify-center space-y-6 sm:w-[350px]">
-                    <a href="{{ route('home') }}" class="z-20 flex flex-col items-center gap-2 font-medium lg:hidden" wire:navigate>
-                        <span class="flex h-9 w-9 items-center justify-center rounded-md">
-                            <x-app-logo-icon class="size-9 fill-current text-black dark:text-white" />
-                        </span>
 
-                        <span class="sr-only">{{ config('app.name', 'Laravel') }}</span>
+            <div class="auth-panel">
+                <div class="auth-brand">
+                    <a href="{{ route('home') }}" class="app-brand-link" wire:navigate>
+                        <x-app-logo />
                     </a>
-                    {{ $slot }}
+                    <span class="badge badge-outline">lokal</span>
                 </div>
+
+                <div class="auth-body">
+                    <div class="auth-title">Aksara OCR Lab</div>
+                    <hr class="auth-rule">
+                    <div class="flex flex-col gap-6">
+                        {{ $slot }}
+                    </div>
+                </div>
+
+                <p class="auth-foot">&copy; {{ date('Y') }} Aksara OCR Lab</p>
             </div>
-        </div>
+        </main>
+
         @fluxScripts
     </body>
 </html>

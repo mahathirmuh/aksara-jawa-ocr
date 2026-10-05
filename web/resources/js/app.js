@@ -8,6 +8,11 @@ const theme = () => ({
 });
 const pct = (v, d = 1) => `${(v * 100).toFixed(d).replace('.', ',')}%`;
 
+/* Huruf grafik sama dengan antarmuka (Inter dari app.css). */
+const FONT = 'InterVariable, Inter, "Segoe UI", sans-serif';
+Chart.defaults.font.family = FONT;
+Chart.defaults.font.size = 12;
+
 /* Pita latar pada sumbu x kategori, dari indeks `from` (boleh pecahan) sampai `to`. */
 const bandPlugin = {
     id: 'band',
@@ -21,7 +26,7 @@ const bandPlugin = {
         ctx.fillStyle = opts.color;
         ctx.fillRect(left, chartArea.top, right - left, chartArea.bottom - chartArea.top);
         ctx.fillStyle = opts.textColor;
-        ctx.font = '12px "IBM Plex Sans", sans-serif';
+        ctx.font = `12px ${FONT}`;
         ctx.textAlign = 'center';
         ctx.fillText(opts.label, (left + right) / 2, chartArea.top + 14);
         ctx.restore();
@@ -45,7 +50,7 @@ const targetPlugin = {
         ctx.stroke();
         ctx.setLineDash([]);
         ctx.fillStyle = opts.color;
-        ctx.font = '12px "IBM Plex Sans", sans-serif';
+        ctx.font = `12px ${FONT}`;
         ctx.fillText(opts.label, px + 5, chartArea.top + 12);
         ctx.restore();
     },
@@ -66,7 +71,7 @@ const builders = {
                 datasets: [
                     { label: 'G3 · 745 baris nyata', data: p.g3, borderColor: c.s1, backgroundColor: c.s1 },
                     { label: 'Val berat · 500 baris sintetis', data: p.heavy, borderColor: c.s2, backgroundColor: c.s2 },
-                ].map((d) => ({ ...d, borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, pointBorderColor: css('--color-zinc-50'), pointBorderWidth: 2 })),
+                ].map((d) => ({ ...d, borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, pointBorderColor: css('--surface'), pointBorderWidth: 2 })),
             },
             options: {
                 maintainAspectRatio: false,
