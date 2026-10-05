@@ -255,6 +255,8 @@ select:focus[data-flux-control] {
     .data-table tbody tr:first-child td { border-top: 0; }
     .data-table .r { text-align: right; }
     .data-table tr.is-highlight td { background: var(--band); }
+    /* Di baris tersorot, pil berlatar lembut nyaris sewarna dengan sorotannya: beri latar permukaan supaya terbaca. */
+    .data-table tr.is-highlight .status { background: var(--surface); }
 
     /* ---------- status (pil berwarna lembut) & lencana ---------- */
     .pill,

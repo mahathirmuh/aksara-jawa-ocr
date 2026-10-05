@@ -137,7 +137,9 @@
                                 @foreach ($result['candidates'] as $c)
                                     <tr @class(['is-highlight font-semibold' => $c['chosen'] ?? false])>
                                         <td class="whitespace-nowrap"><span class="code">{{ $c['source'] }}</span>@if ($c['chosen'] ?? false) <span class="status status-blue">dipilih</span>@endif</td>
-                                        <td class="jv text-lg font-normal">{{ $c['text'] }}</td>
+                                        {{-- Lebar minimum: tanpa ini, di layar sempit kolom teks menyusut sampai satu suku kata per baris;
+                                             tabelnya menggulung mendatar di dalam .table-wrap. --}}
+                                        <td class="jv min-w-[16rem] text-lg font-normal">{{ $c['text'] }}</td>
                                         <td class="r num">{{ number_format($c['ctc_logp'], 2, ',', '.') }}</td>
                                         <td class="r num">{{ number_format($c['lm_logp'], 2, ',', '.') }}</td>
                                         <td class="r num">{{ number_format($c['score'], 2, ',', '.') }}</td>

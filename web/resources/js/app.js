@@ -117,26 +117,39 @@ const builders = {
 
 /* Alpine: <div x-data="chart('ablation', data)"><canvas x-ref="canvas"></canvas></div> */
 document.addEventListener('alpine:init', () => {
-    window.Alpine.data('chart', (kind, payload) => ({
-        instance: null,
-        init() {
-            /* Chart.js mengukur lebar label sumbu saat grafik dibuat. Bila Inter belum selesai dimuat, lebarnya
-               diukur dengan font cadangan yang lebih sempit dan label terpanjang terpotong: gambar setelah font siap. */
-            const fonts = document.fonts?.load ? document.fonts.load('12px InterVariable').catch(() => {}) : Promise.resolve();
-            fonts.then(() => {
-                if (! this.$el.isConnected) return;
-                this.draw();
-                this.observer = new MutationObserver(() => this.draw());
-                this.observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-            });
-        },
-        destroy() {
-            this.instance?.destroy();
-            this.observer?.disconnect();
-        },
-        draw() {
-            this.instance?.destroy();
-            this.instance = new Chart(this.$refs.canvas, builders[kind](payload, theme()));
-        },
-    }));
+    window.Alpine.data('chart', (kind, payload) => {
+        /* Objek Chart dan pengamat disimpan di closure, BUKAN di data Alpine: data Alpine dibungkus Proxy reaktif,
+           dan Chart.js yang terbungkus gagal saat digambar ulang ("Cannot read properties of null (reading 'save')"),
+           sehingga grafik kosong setelah tema diganti. */
+        let instance = null;
+        let observer = null;
+        let dark = null;
+
+        return {
+            init() {
+                /* Chart.js mengukur lebar label sumbu saat grafik dibuat. Bila Inter belum selesai dimuat, lebarnya
+                   diukur dengan font cadangan yang lebih sempit dan label terpanjang terpotong: gambar setelah font siap. */
+                const fonts = document.fonts?.load ? document.fonts.load('12px InterVariable').catch(() => {}) : Promise.resolve();
+                fonts.then(() => {
+                    if (! this.$el.isConnected) return;
+                    this.draw();
+                    /* Gambar ulang hanya bila tema benar-benar berganti; kelas lain di <html> boleh berubah tanpa efek. */
+                    observer = new MutationObserver(() => {
+                        if (document.documentElement.classList.contains('dark') !== dark) this.draw();
+                    });
+                    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+                });
+            },
+            destroy() {
+                observer?.disconnect();
+                instance?.destroy();
+                observer = instance = null;
+            },
+            draw() {
+                dark = document.documentElement.classList.contains('dark');
+                instance?.destroy();
+                instance = new Chart(this.$refs.canvas, builders[kind](payload, theme()));
+            },
+        };
+    });
 });
