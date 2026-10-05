@@ -281,7 +281,7 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     `phpunit.xml` memaksa SQLite in-memory (`force="true"`, jadi `DB_*` yang tertinggal di shell diabaikan) dan
     `tests/TestCase.php::createApplication` menolak database bernama `its_aksara` sebelum migrasi. Test memakai folder
     sementara untuk `storage/app/mt` (dulu `TranslationTest` menimpa hasil NLLB; dipulihkan dari DB lewat
-    `php artisan aksara:translate --dump`). 70 test lolos di SQLite (2026-10-03).
+    `php artisan aksara:translate --dump`). 77 test lolos di SQLite (2026-10-05, sesudah restyle dan menu Kamus).
     **Port:** Laravel 8010, layanan model 8011, layanan terjemahan 8012 — 8000/8001 dipakai proyek lain
     milik user di laptop yang sama (jangan dihentikan). Test tetap bisa di SQLite in-memory
     (`phpunit.xml`); kode dijaga netral: `whereJsonContains` untuk tag, tabel turunan untuk ORDER BY berekspresi
