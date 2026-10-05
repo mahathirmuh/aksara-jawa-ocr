@@ -3,32 +3,54 @@
     <head>
         @include('partials.head')
     </head>
-    <body class="auth-page antialiased">
-        @php
-            // Deret hanacaraka (20 aksara dasar) sebagai tekstur latar; hiasan saja, tersembunyi dari pembaca layar.
-            $carakan = implode(' ', array_map(
-                fn (array $baris) => implode('', array_map('mb_chr', $baris)),
-                [
-                    [0xA9B2, 0xA9A4, 0xA995, 0xA9AB, 0xA98F],
-                    [0xA9A2, 0xA9A0, 0xA9B1, 0xA9AE, 0xA9AD],
-                    [0xA9A5, 0xA99D, 0xA997, 0xA9AA, 0xA99A],
-                    [0xA9A9, 0xA992, 0xA9A7, 0xA99B, 0xA994],
-                ],
-            ));
-        @endphp
-
-        <div class="auth-backdrop" aria-hidden="true">{{ str_repeat($carakan.' ', 14) }}</div>
-
-        {{-- Kartu lebar terbelah: panel gambar di kiri (layar lebar saja), formulir di kanan. --}}
+    @php
+        // Foto panel kiri, dari Wikimedia Commons (sumber dan lisensi: public/img/login/SUMBER.md; dibuat
+        // tools/login_images.py). pos = titik fokus saat foto dipotong mengikuti ukuran panel.
+        $slides = [
+            ['file' => 'naskah-sonobudoyo.jpg', 'pos' => '50% 60%',
+                'alt' => 'Naskah beraksara Jawa yang terbuka di dalam etalase museum',
+                'title' => 'Naskah beraksara Jawa, Museum Sonobudoyo', 'credit' => 'Foto: Candramawa99 · CC0'],
+            ['file' => 'serat-damar-wulan.jpg', 'pos' => '50% 50%',
+                'alt' => 'Halaman bergambar Serat Damar Wulan dengan dua baris aksara Jawa di bawahnya',
+                'title' => 'Serat Damar Wulan, akhir abad ke-18', 'credit' => 'British Library, MSS Jav 89 · domain publik'],
+            ['file' => 'kraton-yogyakarta.jpg', 'pos' => '50% 45%',
+                'alt' => 'Gerbang Donopratono Kraton Yogyakarta di bawah langit biru',
+                'title' => 'Gerbang Donopratono, Kraton Yogyakarta', 'credit' => 'Foto: Chainwit. · CC BY 4.0'],
+        ];
+    @endphp
+    <body class="auth-page antialiased" style="--auth-backdrop: url('{{ asset('img/login/latar.jpg') }}')">
+        {{-- Kartu lebar terbelah: korsel foto di kiri (di ponsel jadi pita di atas), formulir di kanan. --}}
         <main class="auth-card">
-            <div class="auth-visual" aria-hidden="true">
-                <div class="auth-visual-text">{{ str_repeat($carakan.' ', 3) }}</div>
-                <div class="auth-visual-body">
-                    <div class="auth-flow">
-                        <span>citra baris</span><i>→</i><span>aksara Jawa</span><i>→</i><span>Latin</span><i>→</i><span>arti</span><i>→</i><span>tingkat tutur</span>
-                    </div>
-                    <p class="auth-visual-title">Membaca satu baris aksara Jawa cetak.</p>
-                    <p class="auth-visual-sub">CRNN + CTC yang dilatih dari baris sintetis, lalu diuji pada baris cetak nyata.</p>
+            {{-- Foto berganti tiap 6 detik; berhenti saat disorot atau difokus, dan tidak berputar bila pengguna
+                 meminta gerak dikurangi. Tanpa JavaScript foto pertama tetap tampil. --}}
+            <div class="auth-visual" role="group" aria-roledescription="carousel" aria-label="Foto aksara dan budaya Jawa"
+                 x-data="{
+                     i: 0, n: {{ count($slides) }}, timer: null,
+                     play() {
+                         if (this.timer || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+                         this.timer = setInterval(() => { this.i = (this.i + 1) % this.n }, 6000);
+                     },
+                     stop() { clearInterval(this.timer); this.timer = null },
+                     destroy() { this.stop() },
+                 }"
+                 x-init="play()" x-on:mouseenter="stop()" x-on:mouseleave="play()" x-on:focusin="stop()" x-on:focusout="play()">
+                @foreach ($slides as $k => $slide)
+                    <figure @class(['auth-slide', 'is-active' => $k === 0]) x-bind:class="{ 'is-active': i === {{ $k }} }"
+                            x-bind:aria-hidden="i === {{ $k }} ? 'false' : 'true'">
+                        <img src="{{ asset('img/login/'.$slide['file']) }}" alt="{{ $slide['alt'] }}" width="1200" height="1320"
+                             style="object-position: {{ $slide['pos'] }}">
+                        <figcaption>
+                            <span class="auth-slide-title">{{ $slide['title'] }}</span>
+                            <span class="auth-slide-credit">{{ $slide['credit'] }}</span>
+                        </figcaption>
+                    </figure>
+                @endforeach
+                <div class="auth-thumbs">
+                    @foreach ($slides as $k => $slide)
+                        <button type="button" x-on:click="i = {{ $k }}" x-bind:aria-current="i === {{ $k }} ? 'true' : 'false'"
+                                aria-current="{{ $k === 0 ? 'true' : 'false' }}" aria-label="Tampilkan foto {{ $k + 1 }}: {{ $slide['title'] }}"
+                                style="background-image: url('{{ asset('img/login/'.$slide['file']) }}')"></button>
+                    @endforeach
                 </div>
             </div>
 

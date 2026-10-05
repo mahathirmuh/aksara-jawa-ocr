@@ -273,6 +273,11 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     kamus koreksi OCR (kondisi "kamus" = beam + LM karakter; angka greedy vs beam diambil dari metrik yang diimpor,
     dengan peringatan bila checkpoint-nya bukan pipeline resmi), dan leksikon tingkat tutur (`SpeechLevel::lexicon()`).
     Tidak ada kamus kata Jawa-Indonesia: datanya tidak ada di proyek ini, jadi tidak dibuat-buat.
+    **Foto halaman masuk (user 2026-10-05: "kamu saja yang cari dan pilihkan gambarnya", konsep sama dengan
+    rujukan):** korsel tiga foto di panel kiri + latar foto gelap, semuanya dari Wikimedia Commons berlisensi bebas
+    dan dipilih Claude: naskah beraksara Jawa di Museum Sonobudoyo (CC0), halaman Serat Damar Wulan British Library
+    MSS Jav 89 (domain publik), gerbang Donopratono Kraton Yogyakarta (Chainwit., CC BY 4.0: atribusi WAJIB tetap
+    ada di keterangan foto dan `web/public/img/login/SUMBER.md`). Dibuat ulang lewat `web/tools/login_images.py`.
   - **Database web: PostgreSQL 18** (keputusan user 2026-09-25; layanan Windows `postgresql-x64-18` sudah
     terpasang, port 5432). Database **`its_aksara`** (dibuat user 2026-10-02; UTF8), pengguna `postgres`;
     kredensial HANYA di `web/.env` (diabaikan git), jangan ditulis di file lain. Database uji

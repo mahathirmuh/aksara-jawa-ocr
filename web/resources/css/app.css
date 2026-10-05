@@ -365,21 +365,25 @@ select:focus[data-flux-control] {
     .app-footer { padding-inline: .75rem; }
 }
 
-/* ---------- halaman masuk: kartu lebar terbelah di atas latar gelap, seperti rujukan ---------- */
-.auth-page { --color-accent: #206bc4; position: relative; display: flex; min-height: 100dvh; align-items: center; justify-content: center; padding: 1.5rem 1rem; background: #0b1730; isolation: isolate; }
-.auth-page::before { content: ''; position: fixed; inset: 0; z-index: -2; background: radial-gradient(70rem 40rem at 12% 8%, #1e40af 0%, transparent 62%), radial-gradient(60rem 40rem at 95% 100%, #206bc4 0%, transparent 58%), linear-gradient(160deg, #0f2147, #060d1c); filter: brightness(.62); }
-.auth-backdrop { position: fixed; inset: 0; z-index: -1; overflow: hidden; font-family: var(--font-jv); font-size: 3.5rem; line-height: 2; letter-spacing: .12em; color: rgba(255, 255, 255, .03); word-break: break-all; user-select: none; pointer-events: none; }
-.auth-card { display: grid; width: 100%; max-width: 68.75rem; overflow: hidden; border-radius: 20px; background: var(--surface); color: var(--text); box-shadow: 0 4px 20px rgba(0, 0, 0, .55); }
-.auth-visual { position: relative; display: none; min-height: 34.375rem; overflow: hidden; padding: 2.5rem; color: #fff; background: radial-gradient(40rem 26rem at 85% 0%, rgba(96, 165, 250, .55) 0%, transparent 60%), linear-gradient(150deg, #1d4ed8 0%, #206bc4 46%, #1e3a8a 100%); }
-.auth-visual-text { position: absolute; inset: 0; padding: 1.25rem 1.5rem; font-family: var(--font-jv); font-size: 4.25rem; line-height: 1.85; letter-spacing: .06em; color: rgba(255, 255, 255, .16); word-break: break-all; user-select: none; -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 38%, transparent 62%); mask-image: linear-gradient(to bottom, #000 0%, #000 38%, transparent 62%); }
-.auth-visual-body { position: relative; display: flex; height: 100%; flex-direction: column; justify-content: flex-end; gap: 1rem; }
-.auth-visual-title { max-width: 24rem; font-size: 1.75rem; line-height: 1.2; font-weight: 700; letter-spacing: -.01em; text-wrap: balance; }
-.auth-visual-sub { max-width: 26rem; font-size: .875rem; line-height: 1.5; color: rgba(255, 255, 255, .85); }
-.auth-flow { display: flex; flex-wrap: wrap; align-items: center; gap: .375rem; font-size: .75rem; font-weight: 600; }
-.auth-flow > span { padding: .3rem .625rem; border-radius: 100rem; background: rgba(255, 255, 255, .16); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .22); }
-.auth-flow > i { font-style: normal; opacity: .7; }
+/* ---------- halaman masuk: kartu lebar terbelah di atas foto gelap, seperti rujukan ----------
+   Kiri: korsel foto (silang-pudar, penunjuk berupa gambar kecil). Kanan: merek, judul, formulir.
+   Foto dan sumbernya: public/img/login/ (SUMBER.md), dibuat tools/login_images.py. */
+.auth-page { --color-accent: #206bc4; position: relative; display: flex; min-height: 100dvh; align-items: center; justify-content: center; padding: 1.5rem 1rem; background: #0b1220; isolation: isolate; }
+.auth-page::before { content: ''; position: fixed; inset: 0; z-index: -1; background-image: linear-gradient(rgba(8, 14, 28, .3), rgba(8, 14, 28, .55)), var(--auth-backdrop, none); background-position: center; background-size: cover; background-repeat: no-repeat; }
+.auth-card { display: grid; width: 100%; max-width: 68.75rem; overflow: hidden; border-radius: 16px; background: var(--surface); color: var(--text); box-shadow: 0 4px 20px rgba(0, 0, 0, .55); }
+.auth-visual { position: relative; min-height: 13rem; overflow: hidden; background: #0b1220; color: #fff; }
+.auth-slide { position: absolute; inset: 0; margin: 0; opacity: 0; transition: opacity .9s ease; }
+.auth-slide.is-active { opacity: 1; }
+.auth-slide img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.auth-slide figcaption { position: absolute; inset-inline: 0; bottom: 0; display: flex; flex-direction: column; gap: .125rem; padding: 3rem 1rem .75rem; background: linear-gradient(to top, rgba(4, 10, 17, .8), rgba(4, 10, 17, 0)); line-height: 1.3; }
+.auth-slide-title { font-size: .8125rem; font-weight: 600; }
+.auth-slide-credit { font-size: .6875rem; color: rgba(255, 255, 255, .78); }
+.auth-thumbs { position: absolute; inset-inline-end: 1rem; bottom: .875rem; z-index: 1; display: none; gap: .375rem; }
+.auth-thumbs button { width: 4rem; height: 3rem; border-radius: var(--radius); background-position: center; background-size: cover; opacity: .6; box-shadow: 0 0 0 1px rgba(255, 255, 255, .55); transition: opacity .15s ease, box-shadow .15s ease; }
+.auth-thumbs button:hover, .auth-thumbs button:focus-visible { opacity: 1; outline: none; box-shadow: 0 0 0 2px #fff; }
+.auth-thumbs button[aria-current='true'] { opacity: 1; box-shadow: 0 0 0 2px #fff; }
 .auth-panel { display: flex; min-width: 0; flex-direction: column; justify-content: space-between; }
-.auth-brand { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 2rem 2rem 0; }
+.auth-brand { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.5rem 2rem 0; }
 .auth-body { padding: 0 2rem 1.5rem; }
 .auth-title { margin-top: 1.5rem; text-align: center; font-size: 1.5rem; line-height: 2rem; font-weight: 600; color: var(--text-muted); }
 .auth-rule { margin-block: 1rem; border: 0; border-top: 1px solid var(--border-soft); }
@@ -387,10 +391,14 @@ select:focus[data-flux-control] {
 @media (min-width: 1024px) {
     /* Kartu rujukan mengisi sebagian besar tinggi layar: tinggi minimum ikut tinggi jendela, isi panel kanan di tengah. */
     .auth-card { grid-template-columns: 7fr 5fr; min-height: min(44rem, calc(100dvh - 6rem)); }
-    .auth-visual { display: block; }
+    .auth-slide figcaption { padding: 4rem 15rem 1rem 1.25rem; }
+    .auth-thumbs { display: flex; }
     .auth-body { margin-block: auto; }
     .auth-brand { padding: 3rem 4rem 0; }
     .auth-body { padding: 0 4rem 1.5rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .auth-slide, .auth-thumbs button { transition: none; }
 }
 
 /* ---------- OCR: beda per suku kata (dihitung di Python: src/align.py) ---------- */

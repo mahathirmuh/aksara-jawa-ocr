@@ -99,6 +99,10 @@ bergaris tipis, tabel rapat 12 px, huruf Inter 13 px. Stack tetap Tailwind 4 + F
 - **Huruf dan ikon:** Inter 4.1 dari paket npm `inter-ui` (OFL, dibundel Vite, tanpa CDN); aksara Jawa tetap Noto
   Sans Javanese. Ikon menu = Tabler Icons (MIT) sebagai komponen `flux:icon.ti-*` di `resources/views/flux/icon/`.
   Ikon situs dibuat `tools/favicon.py`.
+- **Halaman masuk:** panel kiri berisi korsel tiga foto (naskah beraksara Jawa di Museum Sonobudoyo, halaman
+  Serat Damar Wulan, gerbang Kraton Yogyakarta), latarnya foto naskah yang diburamkan. Semua dari Wikimedia Commons
+  berlisensi bebas (CC0, domain publik, CC BY 4.0); sumber dan pembuatnya di `public/img/login/SUMBER.md` dan di
+  keterangan tiap foto. Dibuat ulang dengan `../.venv/Scripts/python tools/login_images.py public/img/login`.
 - Setelah mengubah CSS/JS atau menambah kelas utilitas di view: `npm run build` (`public/build` tidak ikut git).
 - Yang diikuti hanya konsep visualnya: logo, nama, dan foto aplikasi rujukan tidak dipakai.
 
