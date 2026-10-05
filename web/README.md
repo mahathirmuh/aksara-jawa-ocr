@@ -36,15 +36,38 @@ Setelah model baru atau eksperimen baru: jalankan ulang `export_results.py` lalu
 ```bash
 # Terjemahan batch Jawa -> Indonesia dengan NLLB-200-distilled-600M lokal (unduhan pertama ~2,5 GB, CPU)
 php artisan aksara:translate                        # sumber: transliterasi manusia + keluaran OCR beam+LM
-# Layanan terjemahan untuk Demo (port 8012)
+# Layanan terjemahan untuk Demo dan halaman Terjemahan (port 8012); satu model, dua arah
 ../.venv/Scripts/python -m uvicorn translate_service:app --app-dir tools --host 127.0.0.1 --port 8012
 ```
 
 - Terjemahan dinilai dengan chrF & BLEU (sacrebleu) terhadap terjemahan manusia NusaAksara. NLLB berlisensi
   CC-BY-NC 4.0 (non-komersial). Tidak ada teks yang dikirim ke layanan luar.
+- API layanan: `POST /translate` dengan `{"texts": [...], "source": "id", "target": "jv"}` (atau sebaliknya; bahasa
+  Jawa selalu beraksara Latin) menjawab `{"translations": [...]}`; bentuk lama `{"text": "..."}` (Jawa → Indonesia)
+  tetap dipakai Demo. Layanan harus dinyalakan ulang sesudah `tools/nllb.py` atau `translate_service.py` berubah.
+- Model tidak mengenal pepet bertanda "ê" (draf transliterasi menulisnya begitu): panggilan langsung membuang tanda
+  itu lewat `TranslationService::forModel()`. Batch `aksara:translate` belum, supaya angka yang sudah dilaporkan
+  tetap bisa diulang.
 - Tingkat tutur memakai leksikon penanda ngoko/madya/krama (`app/Support/SpeechLevel.php`) dan menampilkan
   kata buktinya. Label manusia diisi di Penjelajah baris (tombol ngoko/madya/krama/campur; saringan
   "tutur belum dilabel"); Ringkasan menghitung akurasi leksikon terhadap label itu.
+
+### Alih aksara dan pemulihan tanda é (halaman Terjemahan)
+
+```bash
+../.venv/Scripts/python tools/taling_lexicon.py     # opsional: bangun ulang database/dictionaries/jv-taling.json
+```
+
+- `App\Support\AksaraWriter::fromLatin()` menulis bahasa Jawa Latin dalam aksara Jawa menurut aturan: vokal tanpa
+  konsonan pembuka memakai ha, ng/r/h penutup suku kata menjadi cecak/layar/wignyan, konsonan mati diberi pangkon,
+  rê/lê ditulis pa cerek/nga lelet, konsonan + rê memakai keret, n di depan c/j ditulis nya, angka diapit pada
+  pangkat. Tidak memakai aksara murda/swara. Ejaannya sama dengan 2.086 dari 2.134 lema kamus bahasa Jawa (97,8%;
+  `tests/Unit/AksaraWriterTest.php` menjaga angka itu).
+- `App\Support\TalingRestorer` memulihkan é/è pada kata tanpa tanda memakai `database/dictionaries/jv-taling.json`
+  (8.709 kata dari Wikipedia bahasa Jawa; pada artikel yang ditahan, kata ber-e yang benar naik dari 53% ke 90%).
+  Membangun ulang leksikon butuh snapshot Wikipedia proyek (`../data/raw/jvwiki-20231101.parquet`).
+- Arah balik (`Transliterator::toLatin`) tetap draf: ꦲ di tengah kata selalu dibaca "h" dan teks tanpa spasi tidak
+  punya batas kata.
 
 ### Kamus kata (halaman Kamus)
 
@@ -100,6 +123,7 @@ dibangun ulang dari file. Cadangkan labelnya:
 | Penjelajah baris | Citra, label, transliterasi, arti, tingkat tutur, dan keluaran tiap pipeline dengan beda per suku kata; arahkan kursor ke suku kata CRNN greedy untuk melihat kolom citra yang dibacanya |
 | Kesalahan aksara | Aksara tertukar, hilang, tambahan |
 | Demo | Unggah potongan satu baris → FastAPI `/predict`, dengan skor CTC dan LM setiap kandidat |
+| Terjemahan | Indonesia → Jawa beraksara Jawa dan sebaliknya. Model NLLB lokal menerjemahkan (per kalimat, paling banyak 12); web memulihkan tanda é (`TalingRestorer`), mengalihaksarakan (`AksaraWriter`, `Transliterator`), dan menampilkan teks Jawa Latin yang boleh disunting sehingga aksaranya mengikuti. Alih aksara tetap jalan tanpa layanan model. Tautan: `?arah=jv-id`, `?q=`, `?jawa=` |
 | Kamus | Satu kotak pencarian untuk lima rujukan alur. **Kamus bahasa Jawa** dan **kamus bahasa Indonesia** (data pihak ketiga, `aksara:dictionary`): kata dicari tanpa peduli diakritik dan huruf besar, hasil diurutkan persis sama → berawalan → memuat, bisa dicari balik dari artinya, beberapa kata sekaligus diartikan per kata, dan aksara yang ditempel dicari lewat bacaan Latin drafnya. Lalu **kamus aksara** (91 codepoint charset tokenizer: nama, kode, bacaan Latin draf, jumlah kemunculan di label uji), **kamus koreksi OCR** (model bahasa karakter untuk beam search: greedy vs beam + LM per data, dari hasil yang diimpor), **leksikon tingkat tutur** (kata penanda ngoko/madya/krama tahap 4). Aksara yang ditempel ke kotak cari diurai per codepoint |
 
 ## Tampilan

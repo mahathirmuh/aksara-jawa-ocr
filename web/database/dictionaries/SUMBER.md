@@ -7,6 +7,7 @@ Bukan hasil hitung proyek ini, dan lisensinya mengikuti sumbernya, bukan lisensi
 |---|---|---|---|
 | `jv.jsonl.gz` | kamus bahasa Jawa: kata, ejaan aksara Jawa, kelas kata, ragam (ngoko, krama, krama inggil), padanan antar-ragam, arti berbahasa Inggris | entri bahasa Jawa [Wiktionary bahasa Inggris](https://en.wiktionary.org/wiki/Category:Javanese_language), lewat ekstraksi [kaikki.org](https://kaikki.org/dictionary/Javanese/) (wiktextract) | CC BY-SA 4.0 (juga GFDL) |
 | `id.jsonl.gz` | kamus bahasa Indonesia: kata, kelas kata, arti berbahasa Inggris | entri bahasa Indonesia [Wiktionary bahasa Inggris](https://en.wiktionary.org/wiki/Category:Indonesian_language), lewat ekstraksi [kaikki.org](https://kaikki.org/dictionary/Indonesian/) | CC BY-SA 4.0 (juga GFDL) |
+| `jv-taling.json` | leksikon pemulih tanda é/è halaman Terjemahan: kata tanpa tanda → ejaan bertandanya, plus hasil uji tahan di kunci `meta` | ejaan kata di artikel [Wikipedia bahasa Jawa](https://jv.wikipedia.org/) snapshot 20231101 yang menandai é/è, ditambah lema kamus di atas; dibangun `web/tools/taling_lexicon.py` | CC BY-SA 4.0 |
 | `sources.json` | nama, lisensi, tautan, dan tanggal pengambilan tiap sumber; ditampilkan di kaki tiap kamus | – | – |
 
 Atribusi: teks entri ditulis para penyunting Wiktionary; tiap entri di halaman Kamus bertaut ke halaman asalnya.

@@ -21,6 +21,7 @@ class TransliteratorTest extends TestCase
             'pa cerek & keret' => ['ꦉꦏꦽꦠ', 'rêkrêta'],
             'angka' => ['꧇꧑꧙꧔꧕꧇', '1945'],
             'cecak telu' => ['ꦥ꦳ꦏꦸꦭ꧀ꦠꦱ꧀', 'fakultas'],
+            'nya + pangkon di depan ca/ja dibaca n' => ['ꦥꦚ꧀ꦗꦼꦤꦼꦔꦤ꧀ ꦥꦚ꧀ꦕꦶ ꦧꦚꦸ', 'panjênêngan panci banyu'],
         ];
     }
 

@@ -84,6 +84,10 @@ final class Transliterator
                     };
                     $j++;
                 }
+                // Sengau di depan ca/ja ditulis nya + pangkon (ꦥꦚ꧀ꦕꦶ), tetapi dibaca dan dilatinkan "n": panci, panjenengan.
+                if ($ch === 'ꦚ' && $vowel === '' && $medial === '' && $final === '' && in_array($chars[$j] ?? '', ['ꦕ', 'ꦗ'], true)) {
+                    $onset = 'n';
+                }
                 $out[] = $onset.$medial.$vowel.$final;
                 $i = $j;
             } elseif (($cp = mb_ord($ch)) >= 0xA9D0 && $cp <= 0xA9D9) {

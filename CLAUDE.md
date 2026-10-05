@@ -273,6 +273,29 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     aksara (charset `data/tokenizer.json`, lewat `App\Support\AksaraCatalog`; bacaan Latin = draf Transliterator),
     kamus koreksi OCR (kondisi "kamus" = beam + LM karakter; angka greedy vs beam diambil dari metrik yang diimpor,
     dengan peringatan bila checkpoint-nya bukan pipeline resmi), dan leksikon tingkat tutur (`SpeechLevel::lexicon()`).
+    **Menu Terjemahan (permintaan user 2026-10-05: "menerjemahkan dari bahasa indonesia ke teks jawa aksara dan
+    sebaliknya"; user bertanya "python atau php", dijawab keduanya menurut tugasnya):** `Pages/Terjemahan.php`.
+    *Python hanya untuk model:* satu NLLB-200-distilled-600M melayani dua arah lewat `web/tools/translate_service.py`
+    (`POST /translate {texts, source, target}` dengan `jv`/`id`; bentuk lama `{text}` tetap untuk Demo; layanan harus
+    dinyalakan ulang sesudah `nllb.py` berubah). *PHP untuk alih aksara dan halaman:* `App\Support\AksaraWriter`
+    (Latin -> aksara, aturan sendiri) dan `Transliterator` (arah balik). Indonesia -> Jawa: terjemahan Latin dipulihkan
+    tanda é-nya (`TalingRestorer`), boleh disunting, aksara dihitung dari teks Latin yang terlihat. Jawa -> Indonesia:
+    aksara dilatinkan dulu. Terukur 2026-10-05:
+    (1) alat lama `scripts/translit/translit.js` (honocoroko) TIDAK layak untuk teks umum: "nglakoni" diawali cecak,
+    "foto" -> fa-ha-o, "saé" menyisakan huruf Latin, kata ulang kehilangan pangkon (di korpus kata semacam itu tersaring).
+    Pada 22.519 kata Wikipedia yang bisa dibandingkan, `AksaraWriter` mode korpus sama dengan alat lama di 99,78%.
+    (2) ejaan baku (pa cerek, nga lelet, keret, n di depan c/j ditulis nya, angka diapit pada pangkat) diturunkan dari
+    ejaan aksara lema kamus, bukan dari ingatan: sama di 2.086 dari 2.134 lema (97,8%; mode korpus 93,6%). Angka itu
+    konstanta `AksaraWriter::DICTIONARY_AGREEMENT`, dijaga test dan ikut berubah bila kamus dibangun ulang.
+    (3) e tanpa tanda: 53% kata ber-e benar bila semua dibaca pepet; leksikon `web/database/dictionaries/jv-taling.json`
+    (8.709 kata, `web/tools/taling_lexicon.py`, dari artikel Wikipedia Jawa yang bertanda kuat) menaikkannya ke 90% pada
+    artikel yang ditahan. Aturan "e akhir kata = é" tidak menambah apa-apa di atas leksikon.
+    (4) **NLLB tidak mengenal "ê":** "pêkên" -> "ke sana", "sêga" -> "tiga buah"; tanpa tanda -> "pasar", "nasi".
+    `TranslationService::forModel()` membuang tanda itu di semua panggilan langsung (Terjemahan, Demo). Batch
+    `aksara:translate` BELUM (inputs() masih mengirim ê, juga dari transliterasi manusia), jadi chrF 36,2 / 19,4 yang
+    dilaporkan kemungkinan terlalu rendah; menjalankannya ulang ~1 jam CPU dan mengubah angka tahap 3: keputusan user.
+    Mutu terjemahan Indonesia -> Jawa belum diukur (tidak ada data uji arah itu); contoh salah yang terlihat: "murah" ->
+    "larang regane", "nenek" hilang. Halaman menyebut hasilnya draf.
     **Kamus kata (permintaan user 2026-10-05: "ditambahkan juga kamus bahasa jawa dan kamus bahasa indonesia"):** dua
     bagian baru di atas kamus aksara, isinya DATA PIHAK KETIGA (bukan hasil hitung proyek): tabel `dictionary_entries`
     + `dictionary_sources`, berkas jadi di `web/database/dictionaries/` (ikut git; sumber & lisensi di `SUMBER.md`),
@@ -303,7 +326,7 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     `phpunit.xml` memaksa SQLite in-memory (`force="true"`, jadi `DB_*` yang tertinggal di shell diabaikan) dan
     `tests/TestCase.php::createApplication` menolak database bernama `its_aksara` sebelum migrasi. Test memakai folder
     sementara untuk `storage/app/mt` (dulu `TranslationTest` menimpa hasil NLLB; dipulihkan dari DB lewat
-    `php artisan aksara:translate --dump`). 85 test lolos di SQLite (2026-10-05, sesudah kamus kata).
+    `php artisan aksara:translate --dump`). 132 test lolos di SQLite (2026-10-05, sesudah kamus kata dan menu Terjemahan).
     **Port:** Laravel 8010, layanan model 8011, layanan terjemahan 8012 — 8000/8001 dipakai proyek lain
     milik user di laptop yang sama (jangan dihentikan). Test tetap bisa di SQLite in-memory
     (`phpunit.xml`); kode dijaga netral: `whereJsonContains` untuk tag, tabel turunan untuk ORDER BY berekspresi
@@ -331,8 +354,9 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     -> tingkat tutur (ngoko / madya / krama / campur). Transliterasi & arti **manusia** untuk 745 label
     tersedia dari NusaAksara (config `Image Transliteration` / `Image Translation`, cocok 745/745, lisensi
     non-komersial sama). Transliterasi draf = aturan deterministik aksara -> Latin di `web/`, berlabel
-    "bantu baca, bukan hasil OCR"; **CER draf vs transliterasi manusia 7,4% pada 745 label** (huruf saja,
-    2026-09-24; kelemahan diketahui: ꦲ tengah baris selalu "h", geminasi ditulis ganda, tanpa spasi kata).
+    "bantu baca, bukan hasil OCR"; **CER draf vs transliterasi manusia 7,1% pada 745 label** (huruf saja;
+    7,4% sampai 2026-10-05, lalu nya + pangkon di depan ca/ja dilatinkan "n": panjenengan, bukan panyjenengan;
+    kelemahan diketahui: ꦲ tengah baris selalu "h", geminasi ditulis ganda, tanpa spasi kata).
     **Tahap 3:** NLLB-200-distilled-600M lokal (`web/tools/`, CC-BY-NC), `php artisan aksara:translate`,
     dinilai chrF/BLEU (sacrebleu) terhadap terjemahan manusia, dari transliterasi manusia DAN dari keluaran
     OCR; layanan Demo port 8012. Hasil 2026-09-25 (745 baris): dari transliterasi manusia **chrF 36,2 / BLEU
@@ -529,7 +553,8 @@ Repo ini berisi dua bagian (keputusan user 2026-09-24, menggantikan "satu repo =
 - **`src/`, `scripts/`, `tests/` (Python) HANYA mengerjakan citra baris → Unicode aksara Jawa.**
   Semua metrik OCR (CER, gerbang G1–G4) dihitung di sini.
 - **`web/` (Laravel)** menampilkan hasil dan menampung tahap lanjutan alur: transliterasi,
-  arti (terjemahan Indonesia), dan tingkat tutur. Logika tahap-tahap itu TIDAK boleh masuk `src/`
+  arti (terjemahan Indonesia), dan tingkat tutur; sejak 2026-10-05 juga alat Kamus dan Terjemahan (Indonesia ->
+  Jawa beraksara Jawa dan sebaliknya). Logika tahap-tahap itu TIDAK boleh masuk `src/`
   dan tidak boleh memengaruhi angka OCR.
 
 JANGAN bangun di repo ini:

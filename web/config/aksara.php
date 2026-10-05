@@ -34,6 +34,9 @@ return [
     */
     'dictionary_dir' => database_path('dictionaries'),
 
+    /* Leksikon pemulih tanda é/è untuk halaman Terjemahan (tools/taling_lexicon.py); tanpa berkas ini e tetap dibaca pepet. */
+    'taling_lexicon' => database_path('dictionaries/jv-taling.json'),
+
     /* Transliterasi & terjemahan manusia NusaAksara (config Image Transliteration / Image Translation). */
     'annotations_path' => storage_path('app/nusaaksara/annotations.json'),
 

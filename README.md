@@ -56,6 +56,8 @@ Cara menjalankan: bagian "Cara menjalankan" di `CLAUDE.md` dan `web/README.md`. 
   Haqq): SIL Open Font License 1.1, keterangan lisensi ada di metadata font.
 - Korpus: Wikipedia bahasa Jawa (CC BY-SA), tidak disertakan.
 - Terjemahan di `web/tools/`: NLLB-200-distilled-600M (CC-BY-NC), diunduh saat dipakai, tidak disertakan.
+- Leksikon pemulih tanda é (`web/database/dictionaries/jv-taling.json`): daftar ejaan kata dari Wikipedia bahasa Jawa
+  snapshot 20231101 (CC BY-SA 4.0).
 - Kamus kata halaman Kamus (`web/database/dictionaries/`): entri bahasa Jawa dan bahasa Indonesia dari Wiktionary
   bahasa Inggris, lewat ekstraksi kaikki.org (wiktextract); CC BY-SA 4.0. Rincian di
   [`web/database/dictionaries/SUMBER.md`](web/database/dictionaries/SUMBER.md).

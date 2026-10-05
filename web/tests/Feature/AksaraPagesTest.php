@@ -18,7 +18,7 @@ class AksaraPagesTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const PAGES = ['/ringkasan', '/perbandingan', '/ablasi', '/penjelajah', '/kesalahan', '/demo', '/kamus'];
+    private const PAGES = ['/ringkasan', '/perbandingan', '/ablasi', '/penjelajah', '/kesalahan', '/demo', '/kamus', '/terjemahan'];
 
     private function importFixture(): void
     {

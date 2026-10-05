@@ -148,11 +148,58 @@ class TranslationService
         return rtrim(config('aksara.translate_service_url'), '/');
     }
 
+    /**
+     * Bahasa Jawa beraksara Latin seperti yang dikenal model: pepet tanpa tanda. Draf transliterasi menulis pepet
+     * "ê", ejaan yang nyaris tidak ada di data latih NLLB: terukur 2026-10-05, "pêkên" diterjemahkan "ke sana" dan
+     * "sêga" menjadi "tiga buah", sedangkan "peken" -> "pasar" dan "sega" -> "nasi". Tanda é/è tidak mengganggu.
+     * Dipakai semua panggilan langsung ke layanan; batch (inputs()) belum, supaya angka chrF yang sudah dilaporkan
+     * tetap bisa diulang sampai dijalankan ulang.
+     */
+    public static function forModel(string $latin): string
+    {
+        return strtr($latin, ['ê' => 'e', 'Ê' => 'E']);
+    }
+
+    /** Keadaan layanan terjemahan: {status, model, loaded, directions}; null bila tidak berjalan. */
+    public function health(): ?array
+    {
+        try {
+            return Http::timeout(3)->get($this->url().'/health')->throw()->json();
+        } catch (ConnectionException|RequestException) {
+            return null;
+        }
+    }
+
+    /**
+     * Terjemahan beberapa kalimat sekaligus, arah mana pun antara 'jv' (Jawa beraksara Latin) dan 'id'.
+     * Null bila layanan tidak bisa dihubungi; galat dari layanan (mis. versi lama yang hanya satu arah) dilempar.
+     *
+     * @param  list<string>  $texts
+     * @return array{translations: list<string>, model: string, elapsed_ms: float}|null
+     */
+    public function translateMany(array $texts, string $source, string $target): ?array
+    {
+        try {
+            $body = Http::timeout(180)->post($this->url().'/translate', ['texts' => array_map(self::forModel(...), array_values($texts)), 'source' => $source, 'target' => $target])
+                ->throw()->json();
+        } catch (ConnectionException) {
+            return null;
+        } catch (RequestException $e) {
+            throw new RuntimeException('Layanan terjemahan menolak permintaan: '.($e->response->json('detail') ?? 'HTTP '.$e->response->status()));
+        }
+        if (! is_array($body['translations'] ?? null) || count($body['translations']) !== count($texts)) {
+            // Layanan versi lama mengabaikan "texts" dan hanya mengenal satu arah.
+            throw new RuntimeException('Layanan terjemahan yang berjalan versi lama (hanya Jawa → Indonesia); nyalakan ulang layanannya.');
+        }
+
+        return $body;
+    }
+
     /** Terjemahan satu kalimat lewat layanan Demo; null bila layanan tidak berjalan. */
     public function translateOne(string $latin): ?array
     {
         try {
-            return Http::timeout(120)->post($this->url().'/translate', ['text' => $latin])->throw()->json();
+            return Http::timeout(120)->post($this->url().'/translate', ['text' => self::forModel($latin)])->throw()->json();
         } catch (ConnectionException|RequestException) {
             return null;
         }
