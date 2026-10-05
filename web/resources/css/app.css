@@ -93,9 +93,11 @@
     --shadow-dropdown: 0 16px 24px 2px rgba(0, 0, 0, .07), 0 6px 30px 5px rgba(0, 0, 0, .06), 0 8px 10px -5px rgba(0, 0, 0, .1);
     --radius: 4px;
 
-    /* Dua seri grafik: biru + jingga (tetap terbedakan pada buta warna merah-hijau). */
+    /* Dua seri grafik: biru + jingga (tetap terbedakan pada buta warna merah-hijau). Seri ketiga (bagian uji di
+       halaman Dataset) abu kebiruan gelap: dibedakan lewat terang-gelap, bukan rona. */
     --series-1: #206bc4;
     --series-2: #f76707;
+    --series-3: #3a4859;
     --good: #15803d;  --good-solid: #2fb344;  --good-wash: #eaf7ec;
     --bad: #b91c1c;   --bad-solid: #d63939;   --bad-wash: #fbebeb;
     --warn: #a16207;  --warn-solid: #f59f00;  --warn-wash: #fef5e6;
@@ -132,6 +134,7 @@
 
     --series-1: #4a94ea;
     --series-2: #ff8a3d;
+    --series-3: #c2ccd8;
     --good: #4ade80;  --good-solid: #2fb344;  --good-wash: #1a3235;
     --bad: #f87171;   --bad-solid: #d63939;   --bad-wash: #35242f;
     --warn: #f5c451;  --warn-solid: #f59f00;  --warn-wash: #2e302e;
@@ -304,6 +307,19 @@ select:focus[data-flux-control] {
     /* ---------- kode & jalur berkas ---------- */
     .code { font-family: var(--font-mono); font-size: .6875rem; color: var(--text-muted); }
     .code-block { overflow-x: auto; padding: .75rem 1rem; border-radius: var(--radius); background: var(--surface-2); border: 1px solid var(--border-soft); font-family: var(--font-mono); font-size: .75rem; line-height: 1.6; }
+
+    /* ---------- halaman Dataset: batang pembagian, batang kecil, penanda peran ----------
+       Warna bagian (latih, validasi, uji) sama di batang, titik keterangan, dan penanda peran. */
+    .split-bar { display: flex; gap: 2px; height: 1.25rem; overflow: hidden; border-radius: var(--radius); }
+    .split-bar > span { display: block; min-width: 3px; height: 100%; }
+    .split-train { background: var(--series-1); }
+    .split-val { background: var(--series-2); }
+    .split-test { background: var(--series-3); }
+    .split-dot { display: inline-block; flex: none; width: .625rem; height: .625rem; border-radius: 2px; }
+    .meter { display: block; height: .375rem; overflow: hidden; border-radius: 100rem; background: var(--border); }
+    .meter > span { display: block; min-width: 2px; height: 100%; border-radius: inherit; }
+    .meter-lg { height: .625rem; border-radius: 2px; }
+    .role-chip { display: inline-flex; align-items: center; gap: .375rem; padding: .1875rem .5rem; border-radius: var(--radius); box-shadow: inset 0 0 0 1px var(--border); font-size: .75rem; line-height: 1.2; white-space: nowrap; }
 }
 
 /* ---------- kerangka: sidebar, bilah atas, isi, footer ----------

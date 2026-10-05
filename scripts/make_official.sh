@@ -5,7 +5,8 @@
 #      menambah ~6 GB (2026-10-04: commit 75,3 dari 76,4 GB saat keduanya berjalan, evaluasi dihentikan);
 #   2. menunggu scripts/after_fase7.sh selesai, supaya tidak ada dua ekspor atau dua eval_spacing sekaligus;
 #   3. ekspor (scripts/export_results.py harus sudah menetapkan run itu lewat OFFICIAL_RUN; kalau belum, berhenti
-#      tanpa mengekspor), impor ke web, pembanding terhadap run kontrol, evaluasi sintetis jarak (>= 300 baris).
+#      tanpa mengekspor), kartu data halaman Dataset (scripts/export_datasets.py), impor ke web, pembanding terhadap
+#      run kontrol, evaluasi sintetis jarak (>= 300 baris).
 # Boleh dijalankan ulang: evaluasi yang laporannya lebih baru dari snapshot dilewati, evaluasi sintetis memakai cache.
 # Proses mandiri dari root repo; log out/make_official.log:
 #   Start-Process "C:\Program Files\Git\bin\bash.exe" -ArgumentList scripts/make_official.sh -WindowStyle Hidden
@@ -57,6 +58,11 @@ fi
 say "ekspor mulai"
 $PY scripts/export_results.py 2>&1 | grep -v -E "Warning|warnings.warn" >> "$LOG"
 [ "${PIPESTATUS[0]}" -eq 0 ] || { say "ekspor gagal; impor dilewati"; exit 1; }
+# Kartu data halaman Dataset mengikuti run resmi yang sama (pemakaian data latih dibaca dari checkpoint-nya);
+# aksara:import di bawah ikut mengimpornya. Bila gagal, hasil OCR tetap diimpor dan halaman Dataset menandai
+# kartu lamanya tertinggal.
+$PY scripts/export_datasets.py 2>&1 | grep -v -E "Warning|warnings.warn" >> "$LOG"
+say "ekspor kartu data exit=${PIPESTATUS[0]}"
 (cd web && php artisan aksara:import --no-ansi) >> "$LOG" 2>&1
 say "impor exit=$?"
 

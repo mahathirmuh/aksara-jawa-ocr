@@ -11,12 +11,13 @@ memanggil layanan model untuk halaman Demo. Aturan proyek ada di `../CLAUDE.md`.
 ```bash
 # 1. Di folder repo OCR (induk web/): ekspor hasil (~9 menit di CPU) dan jalankan layanan model
 .venv/Scripts/python scripts/export_results.py
+.venv/Scripts/python scripts/export_datasets.py     # kartu data halaman Dataset (~20 detik)
 .venv/Scripts/python -m uvicorn src.serve:app --host 127.0.0.1 --port 8011
 
 # 2. Di folder web/
 composer install && npm install && npm run build   # sekali
 php artisan migrate
-php artisan aksara:import                           # out/results/ -> database
+php artisan aksara:import                           # out/results/ -> database (termasuk datasets.json bila ada)
 php artisan aksara:annotations                      # transliterasi & arti manusia NusaAksara
 php artisan serve --port=8010                       # http://127.0.0.1:8010, daftar akun di /register
 ```
@@ -30,6 +31,7 @@ powershell -ExecutionPolicy Bypass -File web\services.ps1 start    # juga: statu
 
 `php artisan aksara:annotations --fetch` mengunduh ulang anotasi dari HuggingFace (beberapa menit).
 Setelah model baru atau eksperimen baru: jalankan ulang `export_results.py` lalu `php artisan aksara:import`.
+Kartu data halaman Dataset bisa diperbarui sendiri: `export_datasets.py` lalu `php artisan aksara:datasets`.
 
 ### Tahap 3 (arti) dan tahap 4 (tingkat tutur)
 
@@ -107,6 +109,7 @@ PostgreSQL 18 (layanan Windows, port 5432). `.env`: `DB_CONNECTION=pgsql`, `DB_H
 ```bash
 php artisan migrate
 php artisan aksara:import && php artisan aksara:annotations && php artisan aksara:translate --import-only
+php artisan aksara:datasets     # hanya bila datasets.json diekspor sesudah aksara:import
 ```
 
 `--import-only` membaca `storage/app/mt/output.jsonl` dan `summary.json` (hasil NLLB, ~1 jam CPU). Bila berkas itu
@@ -131,6 +134,7 @@ dibangun ulang dari file. Cadangkan labelnya:
 | Ringkasan | Gerbang G1–G4, jarak G3 ke target, status empat tahap alur, fase |
 | Perbandingan | CER per pipeline (745 baris, 50 baris uji buta), pipeline yang direncanakan, hasil sintetis |
 | Ablasi | 12 run augmentasi Fase 5 |
+| Dataset | Kartu data: besar korpus, pembagian latih / validasi / uji dengan arti tiap bagian dan berapa yang dipakai run resmi, asal korpus (dari artikel ke baris, sebaran panjang), rantai checkpoint run resmi (langkah, sampel, baris berbeda), daftar dataset (peran, sumber, lisensi, boleh disebar atau tidak), font per peran dengan catatannya, batasan data, dan data pendukung |
 | Penjelajah baris | Citra, label, transliterasi, arti, tingkat tutur, dan keluaran tiap pipeline dengan beda per suku kata; arahkan kursor ke suku kata CRNN greedy untuk melihat kolom citra yang dibacanya |
 | Kesalahan aksara | Aksara tertukar, hilang, tambahan |
 | Demo | Unggah potongan satu baris → FastAPI `/predict`, dengan skor CTC dan LM setiap kandidat |
@@ -147,7 +151,9 @@ bergaris tipis, tabel rapat 12 px, huruf Inter 13 px. Stack tetap Tailwind 4 + F
   `--brand`, `--good|bad|warn`, dan seterusnya; semuanya punya nilai untuk tema gelap) serta kelas komponen:
   `.card` / `.card-body` / `.section-title`, `.stat-card`, `.table-wrap` + `.data-table`, `.status status-*`,
   `.badge`, `.chip`, `.alert`, `.nav-tabs`, `.btn-pagination`. Halaman baru memakai kelas itu, bukan gugus utilitas
-  warna sendiri.
+  warna sendiri. Halaman Dataset menambah `.split-bar` (batang pembagian), `.meter` (batang kecil), `.split-dot` dan
+  `.role-chip` (penanda peran); warna bagiannya `.split-train|val|test` = `--series-1|2|3`. Seri ketiga abu kebiruan
+  gelap, dibedakan dari biru dan jingga lewat terang-gelap, bukan rona.
 - **Kerangka:** `components/layouts/app/sidebar.blade.php` (sidebar Flux `collapsible`, bilah atas, footer); isi
   halaman dibungkus `.container-xl` (maks. 1440 px) di `layouts/app.blade.php`. Halaman masuk dan daftar:
   `layouts/auth/split.blade.php`.
@@ -171,6 +177,15 @@ bergaris tipis, tabel rapat 12 px, huruf Inter 13 px. Stack tetap Tailwind 4 + F
 
 `../out/results/` dari `scripts/export_results.py`: `manifest.json` (pipeline, pipeline resmi, gerbang, metrik,
 ablasi, kesalahan aksara), `lines.jsonl`, `predictions.jsonl`. `aksara:import` menolak skema lain.
+
+**Kartu data (skema 1, kontrak sendiri):** `../out/results/datasets.json` dari `scripts/export_datasets.py`, diimpor
+`php artisan aksara:datasets` (atau ikut `aksara:import`) ke tabel `dataset_reports`: satu baris berisi dokumennya
+utuh. `DatasetImporter` hanya memeriksa bentuknya (skema, kunci yang dibaca halaman, tiga bagian train/val/test) dan
+menolak berkas yang salah tanpa menyentuh kartu yang sudah ada. Semua angka data OCR di halaman Dataset berasal dari
+kartu ini; yang dihitung web hanya data pendukung miliknya sendiri (kamus kata, leksikon é, anotasi). Kolom `payload`
+bertipe `json`, bukan `jsonb`: jsonb PostgreSQL mengurutkan ulang kunci objek, dan halaman tidak boleh bergantung
+pada urutan kunci (peran selalu diurutkan latih, validasi, uji). Kartu memuat kunci pipeline run yang dihitungnya;
+bila berbeda dari `Pipeline::official()`, halaman menampilkan peringatan "Kartu data tertinggal".
 
 **Pipeline resmi** ditetapkan ekspor, bukan web: kunci `official` di manifest (`OFFICIAL_RUN` di
 `scripts/export_results.py`; manifest lama tanpa kunci itu berarti `crnn_fonts`). Impor menandainya di kolom

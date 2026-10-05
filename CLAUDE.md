@@ -101,6 +101,7 @@ python -m src.gpt check                          # wadah API GPT (ablasi koreksi
 python -m src.charlm --order 5 --lines 300000 --drop-space-prob 0.5              # LM karakter dari split train (kondisi "kamus")
 python scripts/beam_eval.py CKPT --lm data/charlm/o5_n300000_ds0.5.pkl --name N  # beam+LM vs greedy: disetel di dev sintetis, NusaAksara sekali
 python scripts/export_results.py                 # kontrak data web -> out/results/ (~14 menit CPU dengan run fase6)
+python scripts/export_datasets.py                # kartu data halaman Dataset -> out/results/datasets.json (~20 dtk CPU, tanpa model)
 python scripts/compare_runs.py A B               # dua pipeline di out/results: CER + SK bootstrap baris/halaman, recall aksara langka & adeg-adeg -> out/compare/
 python scripts/eval_rare.py --workers 2          # sintetis tertarget aksara langka (split test, font javatext, 3 kondisi x 3 checkpoint; ~1-2 jam CPU)
 python scripts/eval_spacing.py --lines 301 --threads 4   # dosis-respons jarak antar suku kata (split val, javatext): spasi palsu per 100 batas suku kata; memakai cache
@@ -108,6 +109,7 @@ bash scripts/make_official.sh RUN                # evaluasi resmi G1/G2 10.000 b
 .venv/Scripts/python -m uvicorn src.serve:app --host 127.0.0.1 --port 8011   # layanan model untuk Demo
 cd web && php artisan aksara:import && php artisan serve --port=8010                  # web UI (lihat web/README)
 cd web && php artisan aksara:dictionary                                               # kamus kata halaman Kamus (data jadi di web/database/dictionaries)
+cd web && php artisan aksara:datasets                                                 # kartu data halaman Dataset saja (aksara:import ikut mengimpornya bila berkasnya ada)
 ```
 
 ---
@@ -253,7 +255,7 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   - **Web UI di folder `web/`** (keputusan user 2026-09-24: satu folder dengan repo ini, bukan repo
     terpisah). Laravel 12 + starter kit Livewire (Flux, Volt), PHP 8.4, SQLite; Tailwind 4, Chart.js;
     webfont aksara hanya Noto Sans Javanese. Navigasi = **sidebar** (Hasil: Ringkasan, Perbandingan,
-    Ablasi; Analisis: Penjelajah baris, Kesalahan aksara; Alat: Demo, Kamus). Mockup disetujui user 2026-09-24:
+    Ablasi, Dataset; Analisis: Penjelajah baris, Kesalahan aksara; Alat: Demo, Kamus, Terjemahan). Mockup disetujui user 2026-09-24:
     <https://claude.ai/artifact/9NY5nf3RwJfJQpT479Sibp>. Lokal dengan login (citra NusaAksara
     non-komersial). Python menghitung semua angka OCR; Laravel hanya menampilkan (`php artisan
     aksara:import` dari `out/results/`) dan memanggil `src/serve.py` (FastAPI di `.venv`, 127.0.0.1) untuk demo.
@@ -358,6 +360,29 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     Cipta", tanpa rilis terbuka) dan Kateglo (96% definisinya teks KBBI III) tidak boleh disalin ke repo publik ini;
     Wikikamus (id.wiktionary) punya 71 ribu lema Indonesia tetapi 94% entrinya impor KBBI; kaikki edisi Indonesia tidak
     memuat kosakata dasar; Wikidata hanya 109 leksem Jawa. Halaman hanya MENAUTKAN ke KBBI Daring.
+    **Menu Dataset (permintaan user 2026-10-05: "buatkan menu dataset di sidebar"; isinya dari diskusi hari itu:
+    pembagian 90/5/5 dipertahankan dan ditampilkan apa adanya, bukan dibagi ulang; data pendukung di tabel kedua;
+    pemakaian hanya untuk run resmi):** `Pages/Dataset.php`, kelompok Hasil di bawah Ablasi. Angkanya dari **kartu
+    data** `out/results/datasets.json` buatan `scripts/export_datasets.py` (kontrak sendiri, `aksara.dataset_schema`
+    1), diimpor `php artisan aksara:datasets` ke tabel `dataset_reports` (satu baris, isi utuh). `aksara:import` ikut
+    mengimpornya bila berkasnya ada, dan `scripts/make_official.sh` ikut mengekspornya. Isi kartu: korpus dan
+    pembagian (dihitung ulang dari `data/splits`, wajib sama dengan `corpus_stats.json`), pemakaian run resmi dan
+    rantai checkpoint yang dilanjutkannya (`args.init` tiap checkpoint, proses dari `log.jsonl`, baris yang dijadwalkan
+    dari urutan `LengthBucketSampler` yang sama dengan `src.train`), karakter langka, daftar dataset, font per peran,
+    data pendukung. Teks label NusaAksara tidak pernah ditulis ke kartu (dijaga test). Data pendukung milik web (kamus
+    kata, leksikon é, anotasi) dihitung web dari tabelnya sendiri.
+    Terukur 2026-10-05: run resmi `fase7_track` menjadwalkan **48.000 baris** berbeda (5,2% bagian latih; satu
+    proses, 1.500 langkah x 32) dari kumpulan 100.000 baris. **19.712 adalah angka `fase6_ctrl`** (tiga proses),
+    bukan angka run resmi. Seluruh rantai (base -> fase5_quick -> fase5_fonts -> fase6_ctrl -> fase7_track): 6.298
+    langkah, 201.536 sampel, 64.612 baris berbeda (6,9% bagian latih). 44 karakter langka masing-masing ada di 100
+    baris latih, dan hanya di 1-12 baris (rata-rata 5,5) dari yang dijadwalkan run resmi. Lebar maju CarakanJawa
+    sama dengan javatext di 72 dari 73 aksara/angka/pada (dihitung ulang tiap ekspor; font latih lain 0 dari 73).
+    Batasan di halaman hanya muncul bila syaratnya ada di kartu (font uji sekeluarga dengan font latih, data nyata
+    tanpa bagian validasi, aksara langka), jadi hilang sendiri begitu datanya diperbaiki. Halaman menandai kartu
+    "tertinggal" bila pipeline resmi web bukan run yang dihitung kartu.
+    **Jebakan PostgreSQL:** kolom `payload` bertipe `json`, BUKAN `jsonb`. jsonb mengurutkan ulang kunci objek
+    (train/val/test tampil sebagai "5 / 5 / 90" dan peran dataset tertukar urutannya), sedangkan SQLite tidak, jadi
+    test bawaan tidak menangkapnya. Halaman kini mengurutkan peran sendiri, dan ada test yang mengacak urutan kunci.
     **Foto halaman masuk (user 2026-10-05: "kamu saja yang cari dan pilihkan gambarnya", konsep sama dengan
     rujukan):** korsel tiga foto di panel kiri + latar foto gelap, semuanya dari Wikimedia Commons berlisensi bebas
     dan dipilih Claude: naskah beraksara Jawa di Museum Sonobudoyo (CC0), halaman Serat Damar Wulan British Library
@@ -377,12 +402,12 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     `phpunit.xml` memaksa SQLite in-memory (`force="true"`, jadi `DB_*` yang tertinggal di shell diabaikan) dan
     `tests/TestCase.php::createApplication` menolak database bernama `its_aksara` sebelum migrasi. Test memakai folder
     sementara untuk `storage/app/mt` (dulu `TranslationTest` menimpa hasil NLLB; dipulihkan dari DB lewat
-    `php artisan aksara:translate --dump`). 137 test lolos di SQLite dan di PostgreSQL uji (2026-10-05, sesudah tinjauan kedua kamus kata dan sumber Wikikamus).
+    `php artisan aksara:translate --dump`). 146 test lolos di SQLite dan di PostgreSQL uji (2026-10-05, sesudah menu Dataset).
     **Port:** Laravel 8010, layanan model 8011, layanan terjemahan 8012 — 8000/8001 dipakai proyek lain
     milik user di laptop yang sama (jangan dihentikan). Test tetap bisa di SQLite in-memory
     (`phpunit.xml`); kode dijaga netral: `whereJsonContains` untuk tag, tabel turunan untuk ORDER BY berekspresi
     (PostgreSQL menolak alias kolom di dalam ekspresi). Isi DB kecuali akun & label manusia bisa dibangun ulang
-    (`aksara:import`, `aksara:annotations`, `aksara:translate --import-only`); label tingkat tutur dicadangkan
+    (`aksara:import`, `aksara:datasets`, `aksara:annotations`, `aksara:translate --import-only`); label tingkat tutur dicadangkan
     ke `web/database/labels/speech_levels.json` lewat `php artisan aksara:labels export|import`.
   - **Kontrak data (skema 1):** `scripts/export_results.py` -> `out/results/manifest.json` (pipeline,
     gerbang, metrik, ablasi, kesalahan aksara), `lines.jsonl`, `predictions.jsonl` (teks, CER, segmen beda

@@ -11,6 +11,7 @@
                     ['dashboard', 'ti-chart-pie', 'Ringkasan'],
                     ['perbandingan', 'ti-chart-bar', 'Perbandingan'],
                     ['ablasi', 'ti-flask', 'Ablasi'],
+                    ['dataset', 'ti-database', 'Dataset'],
                 ],
                 'Analisis' => [
                     ['penjelajah', 'ti-list-search', 'Penjelajah baris'],
