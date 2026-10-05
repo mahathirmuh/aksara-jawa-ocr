@@ -305,7 +305,9 @@ class AksaraPagesTest extends TestCase
             // Di fixture pipeline resmi = checkpoint yang sama dengan pembanding greedy: tidak ada peringatan.
             ->assertDontSee('Kamus belum diukur di atas pipeline resmi');
 
-        // Pipeline resmi lain: angka kamus masih milik checkpoint lama, dan halaman mengatakannya.
+        // Pipeline resmi lain: angka kamus masih milik checkpoint lama, dan halaman mengatakannya. Hanya satu pipeline
+        // yang boleh bertanda resmi (dengan dua, urutan baris PostgreSQL dan SQLite memilih yang berbeda).
+        Pipeline::query()->update(['official' => false]);
         Pipeline::where('key', 'crnn_core')->update(['official' => true]);
         $this->get('/kamus')->assertOk()
             ->assertSee('Kamus belum diukur di atas pipeline resmi CRNN fase5_core, dan bobotnya disetel pada CRNN fase5_fonts.');
