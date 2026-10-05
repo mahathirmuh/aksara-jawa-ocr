@@ -80,6 +80,7 @@ Hanya akun dan label tingkat tutur yang tidak bisa dibangun ulang dari file. Cad
 | Penjelajah baris | Citra, label, transliterasi, arti, tingkat tutur, dan keluaran tiap pipeline dengan beda per suku kata; arahkan kursor ke suku kata CRNN greedy untuk melihat kolom citra yang dibacanya |
 | Kesalahan aksara | Aksara tertukar, hilang, tambahan |
 | Demo | Unggah potongan satu baris → FastAPI `/predict`, dengan skor CTC dan LM setiap kandidat |
+| Kamus | Tiga rujukan alur, dengan pencarian: **kamus aksara** (91 codepoint charset tokenizer: nama, kode, bacaan Latin draf, jumlah kemunculan di label uji), **kamus koreksi OCR** (model bahasa karakter untuk beam search: greedy vs beam + LM per data, dari hasil yang diimpor), **leksikon tingkat tutur** (kata penanda ngoko/madya/krama tahap 4). Aksara yang ditempel ke kotak cari diurai per codepoint |
 
 ## Tampilan
 

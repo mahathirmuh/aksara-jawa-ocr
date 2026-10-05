@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Livewire\Pages\Kamus;
 use App\Livewire\Pages\Penjelajah;
 use App\Livewire\Pages\Perbandingan;
 use App\Models\Line;
@@ -17,7 +18,7 @@ class AksaraPagesTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const PAGES = ['/ringkasan', '/perbandingan', '/ablasi', '/penjelajah', '/kesalahan', '/demo'];
+    private const PAGES = ['/ringkasan', '/perbandingan', '/ablasi', '/penjelajah', '/kesalahan', '/demo', '/kamus'];
 
     private function importFixture(): void
     {
@@ -276,5 +277,61 @@ class AksaraPagesTest extends TestCase
 
         $line->update(['image_path' => '../../../../Windows/win.ini']);
         $this->get(route('line.image', $line))->assertNotFound();
+    }
+
+    public function test_dictionary_page_lists_script_language_model_and_lexicon(): void
+    {
+        $this->actingAs(User::factory()->create());
+
+        // Tanpa hasil yang diimpor: kamus aksara dan leksikon tetap tampil, kamus koreksi menjelaskan cara impor.
+        $this->get('/kamus')->assertOk()
+            ->assertSee('Kamus aksara')->assertSee('wulu')->assertSee('U+A9B6')->assertSee('pada lingsa')
+            ->assertSee('(93 kelas)')
+            ->assertSee('Leksikon tingkat tutur')->assertSee('panjenengan')->assertSee('sampeyan')
+            ->assertSee('Kamus koreksi OCR')->assertSee('aksara:import')
+            ->assertDontSee('label uji ditulis tanpa spasi');
+
+        $this->importFixture();
+        $greedy = Metric::where(['scope' => 'nusaaksara_745', 'pipeline' => 'crnn_fonts'])->firstOrFail();
+        $beam = Metric::where(['scope' => 'nusaaksara_745', 'pipeline' => 'crnn_fonts_beam'])->firstOrFail();
+        $unspaced = Line::whereJsonContains('tags', 'label tanpa spasi')->count();
+        // Satu baris tabel: data, greedy, beam + LM, selisih bertanda, lalu jumlah baris yang membaik/memburuk.
+        $this->get('/kamus')->assertOk()
+            ->assertSee($unspaced.' dari '.Line::count().' label uji ditulis tanpa spasi')
+            ->assertSeeInOrder(['Baris cetak nyata (NusaAksara)', pct($greedy->cer, 2), pct($beam->cer, 2),
+                pt($beam->cer - $greedy->cer), $beam->better.' baris membaik, '.$beam->worse.' memburuk'])
+            ->assertSee('Dev sintetis (aug fase5)')->assertSee('Font held-out bersih')
+            ->assertDontSee('aksara:import')
+            // Di fixture pipeline resmi = checkpoint yang sama dengan pembanding greedy: tidak ada peringatan.
+            ->assertDontSee('Kamus belum diukur di atas pipeline resmi');
+
+        // Pipeline resmi lain: angka kamus masih milik checkpoint lama, dan halaman mengatakannya.
+        Pipeline::where('key', 'crnn_core')->update(['official' => true]);
+        $this->get('/kamus')->assertOk()
+            ->assertSee('Kamus belum diukur di atas pipeline resmi CRNN fase5_core, dan bobotnya disetel pada CRNN fase5_fonts.');
+    }
+
+    public function test_dictionary_search_filters_and_breaks_down_script(): void
+    {
+        $this->actingAs(User::factory()->create());
+
+        // Nama aksara: hanya ubin yang cocok; leksikon tidak punya kata "wulu".
+        Livewire::test(Kamus::class)->set('q', 'wulu')
+            ->assertSee('U+A9B6')->assertDontSee('U+A9C0')
+            ->assertSee('Tidak ada yang cocok.');
+
+        // Kata penanda: tersaring ke tingkatnya, dan tidak ada aksara bernama itu.
+        Livewire::test(Kamus::class)->set('q', 'panjenengan')
+            ->assertSee('panjenengan')->assertDontSee('sampeyan')
+            ->assertSee('Tidak ada aksara yang cocok dengan pencarian ini.');
+
+        // Aksara yang ditempel (ka + wulu): diurai per codepoint dan diberi bacaan Latin draf.
+        Livewire::test(Kamus::class)->set('q', mb_chr(0xA98F).mb_chr(0xA9B6))
+            ->assertSeeInOrder(['Uraian', 'Latin (draf aturan):', 'ki'])
+            ->assertSee('U+A98F')->assertSee('U+A9B6')->assertDontSee('U+A9C0');
+
+        // Kalimat Latin berspasi: tingkat tutur dari leksikon beserta kata buktinya.
+        Livewire::test(Kamus::class)->set('q', 'kula badhe tindak')
+            ->assertSee('Tingkat tutur menurut leksikon:')->assertSee('kula · krama')->assertSee('keyakinan cukup');
     }
 }

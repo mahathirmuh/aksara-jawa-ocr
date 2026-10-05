@@ -16,6 +16,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('penjelajah', Pages\Penjelajah::class)->name('penjelajah');
     Route::get('kesalahan', Pages\Kesalahan::class)->name('kesalahan');
     Route::get('demo', Pages\Demo::class)->name('demo');
+    Route::get('kamus', Pages\Kamus::class)->name('kamus');
     Route::get('citra/{line}', LineImageController::class)->name('line.image');
 
     Route::redirect('settings', 'settings/profile');

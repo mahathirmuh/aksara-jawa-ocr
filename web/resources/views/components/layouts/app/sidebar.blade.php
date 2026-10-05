@@ -18,6 +18,7 @@
                 ],
                 'Alat' => [
                     ['demo', 'ti-scan', 'Demo'],
+                    ['kamus', 'ti-book-2', 'Kamus'],
                 ],
             ];
             $pageTitle = $title ?? (request()->routeIs('settings.*') ? __('Settings') : 'Aksara OCR Lab');

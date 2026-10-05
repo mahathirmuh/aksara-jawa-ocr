@@ -49,6 +49,16 @@ final class SpeechLevel
     private const ORDER = ['krama', 'madya', 'ngoko'];
 
     /**
+     * Kata penanda per tingkat, untuk ditampilkan (halaman Kamus). Krama inggil ada di dalam daftar krama.
+     *
+     * @return array<string, list<string>>
+     */
+    public static function lexicon(): array
+    {
+        return self::MARKERS;
+    }
+
+    /**
      * Akurasi terhadap label manusia. $pairs: [[label manusia, prediksi], ...].
      * Prediksi null (tanpa penanda) dihitung salah, bukan dibuang, supaya angka tidak menipu.
      */

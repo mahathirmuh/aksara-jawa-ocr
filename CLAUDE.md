@@ -252,7 +252,7 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   - **Web UI di folder `web/`** (keputusan user 2026-09-24: satu folder dengan repo ini, bukan repo
     terpisah). Laravel 12 + starter kit Livewire (Flux, Volt), PHP 8.4, SQLite; Tailwind 4, Chart.js;
     webfont aksara hanya Noto Sans Javanese. Navigasi = **sidebar** (Hasil: Ringkasan, Perbandingan,
-    Ablasi; Analisis: Penjelajah baris, Kesalahan aksara; Alat: Demo). Mockup disetujui user 2026-09-24:
+    Ablasi; Analisis: Penjelajah baris, Kesalahan aksara; Alat: Demo, Kamus). Mockup disetujui user 2026-09-24:
     <https://claude.ai/artifact/9NY5nf3RwJfJQpT479Sibp>. Lokal dengan login (citra NusaAksara
     non-komersial). Python menghitung semua angka OCR; Laravel hanya menampilkan (`php artisan
     aksara:import` dari `out/results/`) dan memanggil `src/serve.py` (FastAPI di `.venv`, 127.0.0.1) untuk demo.
@@ -267,6 +267,12 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     tanpa kepala memotret); dua jebakannya: `app('livewire')->flushState()` harus dipanggil di antara dua render
     dalam satu proses (kalau tidak, hanya halaman pertama yang mendapat skrip Livewire sehingga grafik kosong), dan
     jendela Edge tidak bisa lebih sempit dari ~500 px (tampilan ponsel dipotret lewat iframe 390 px).
+    **Menu Kamus (permintaan user 2026-10-05, "isinya mengenai kamus/dictionary"; isinya keputusan Claude, belum
+    dikonfirmasi):** `web/app/Livewire/Pages/Kamus.php` menampilkan tiga rujukan yang memang ada di alur: kamus
+    aksara (charset `data/tokenizer.json`, lewat `App\Support\AksaraCatalog`; bacaan Latin = draf Transliterator),
+    kamus koreksi OCR (kondisi "kamus" = beam + LM karakter; angka greedy vs beam diambil dari metrik yang diimpor,
+    dengan peringatan bila checkpoint-nya bukan pipeline resmi), dan leksikon tingkat tutur (`SpeechLevel::lexicon()`).
+    Tidak ada kamus kata Jawa-Indonesia: datanya tidak ada di proyek ini, jadi tidak dibuat-buat.
   - **Database web: PostgreSQL 18** (keputusan user 2026-09-25; layanan Windows `postgresql-x64-18` sudah
     terpasang, port 5432). Database **`its_aksara`** (dibuat user 2026-10-02; UTF8), pengguna `postgres`;
     kredensial HANYA di `web/.env` (diabaikan git), jangan ditulis di file lain. Database uji
