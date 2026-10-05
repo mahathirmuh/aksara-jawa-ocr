@@ -81,6 +81,26 @@ Hanya akun dan label tingkat tutur yang tidak bisa dibangun ulang dari file. Cad
 | Kesalahan aksara | Aksara tertukar, hilang, tambahan |
 | Demo | Unggah potongan satu baris → FastAPI `/predict`, dengan skor CTC dan LM setiap kandidat |
 
+## Tampilan
+
+Gaya mengikuti konsep aplikasi admin berbasis template Tabler (permintaan user 2026-10-05): sidebar terang yang
+bisa diciutkan dengan item aktif biru, bilah atas putih berisi judul halaman, latar abu kebiruan dengan kartu putih
+bergaris tipis, tabel rapat 12 px, huruf Inter 13 px. Stack tetap Tailwind 4 + Flux; tidak ada Bootstrap.
+
+- **Satu sumber gaya:** `resources/css/app.css`. Isinya token warna dan permukaan (`--surface`, `--border-soft`,
+  `--brand`, `--good|bad|warn`, dan seterusnya; semuanya punya nilai untuk tema gelap) serta kelas komponen:
+  `.card` / `.card-body` / `.section-title`, `.stat-card`, `.table-wrap` + `.data-table`, `.status status-*`,
+  `.badge`, `.chip`, `.alert`, `.nav-tabs`, `.btn-pagination`. Halaman baru memakai kelas itu, bukan gugus utilitas
+  warna sendiri.
+- **Kerangka:** `components/layouts/app/sidebar.blade.php` (sidebar Flux `collapsible`, bilah atas, footer); isi
+  halaman dibungkus `.container-xl` (maks. 1440 px) di `layouts/app.blade.php`. Halaman masuk dan daftar:
+  `layouts/auth/split.blade.php`.
+- **Huruf dan ikon:** Inter 4.1 dari paket npm `inter-ui` (OFL, dibundel Vite, tanpa CDN); aksara Jawa tetap Noto
+  Sans Javanese. Ikon menu = Tabler Icons (MIT) sebagai komponen `flux:icon.ti-*` di `resources/views/flux/icon/`.
+  Ikon situs dibuat `tools/favicon.py`.
+- Setelah mengubah CSS/JS atau menambah kelas utilitas di view: `npm run build` (`public/build` tidak ikut git).
+- Yang diikuti hanya konsep visualnya: logo, nama, dan foto aplikasi rujukan tidak dipakai.
+
 ## Kontrak data (skema 1)
 
 `../out/results/` dari `scripts/export_results.py`: `manifest.json` (pipeline, pipeline resmi, gerbang, metrik,
@@ -97,7 +117,8 @@ menampilkan nama checkpoint yang dimuat layanan model (`/health`); bawaannya di 
 
 Citra dan anotasi NusaAksara berlisensi non-komersial dan hanya dipakai sebagai data uji. Web ini untuk
 pemakaian lokal dengan login; citra dibaca langsung dari repo OCR, tidak disalin. Hanya Noto Sans Javanese
-(OFL) yang disajikan sebagai font; font training lain tidak boleh disebar.
+(OFL) yang disajikan sebagai font aksara; font training lain tidak boleh disebar. Huruf antarmuka Inter (OFL) dan
+Tabler Icons (MIT) boleh disebar ulang.
 
 ## Test
 

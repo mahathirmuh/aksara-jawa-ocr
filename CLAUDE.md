@@ -256,6 +256,17 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     <https://claude.ai/artifact/9NY5nf3RwJfJQpT479Sibp>. Lokal dengan login (citra NusaAksara
     non-komersial). Python menghitung semua angka OCR; Laravel hanya menampilkan (`php artisan
     aksara:import` dari `out/results/`) dan memanggil `src/serve.py` (FastAPI di `.venv`, 127.0.0.1) untuk demo.
+    **Gaya & desain (permintaan user 2026-10-05): mengikuti konsep proyek rujukan
+    `C:\Users\itsupport\Documents\Apps\Merdeka\Base-Apps-Merdeka`** (template admin Tabler + palet biru/abu:
+    sidebar terang dengan item aktif biru `#3b82f6`, bilah atas putih, kartu putih radius 4 px di latar `#f6f8fb`,
+    Inter 13 px). Mockup 2026-09-24 hanya menggambarkan isi dan navigasi, bukan lagi gayanya. Stack tetap Tailwind
+    4 + Flux: token dan kelas komponen di `web/resources/css/app.css` (rincian di `web/README.md` bagian
+    Tampilan); halaman baru memakai kelas itu. Hanya konsep visual yang diikuti: logo, nama, dan foto perusahaan
+    rujukan tidak disalin (repo ini publik), dan proyek rujukan hanya dibaca. Setelah mengubah CSS/JS/kelas di
+    view wajib `npm run build`. Halaman dipotret tanpa login lewat salinan statis (tinker merender HTML, Edge
+    tanpa kepala memotret); dua jebakannya: `app('livewire')->flushState()` harus dipanggil di antara dua render
+    dalam satu proses (kalau tidak, hanya halaman pertama yang mendapat skrip Livewire sehingga grafik kosong), dan
+    jendela Edge tidak bisa lebih sempit dari ~500 px (tampilan ponsel dipotret lewat iframe 390 px).
   - **Database web: PostgreSQL 18** (keputusan user 2026-09-25; layanan Windows `postgresql-x64-18` sudah
     terpasang, port 5432). Database **`its_aksara`** (dibuat user 2026-10-02; UTF8), pengguna `postgres`;
     kredensial HANYA di `web/.env` (diabaikan git), jangan ditulis di file lain. Database uji

@@ -37,11 +37,11 @@ new class extends Component {
     }
 }; ?>
 
-<section class="w-full">
+<section class="flex w-full flex-col gap-4">
     @include('partials.settings-heading')
 
     <x-settings.layout heading="Update password" subheading="Ensure your account is using a long, random password to stay secure">
-        <form wire:submit="updatePassword" class="mt-6 space-y-6">
+        <form wire:submit="updatePassword" class="form-rows">
             <flux:input
                 wire:model="current_password"
                 id="update_password_current_passwordpassword"
@@ -70,10 +70,8 @@ new class extends Component {
                 autocomplete="new-password"
             />
 
-            <div class="flex items-center gap-4">
-                <div class="flex items-center justify-end">
-                    <flux:button variant="primary" type="submit" class="w-full">{{ __('Save') }}</flux:button>
-                </div>
+            <div class="form-offset flex items-center gap-4">
+                <flux:button variant="primary" type="submit">{{ __('Save') }}</flux:button>
 
                 <x-action-message class="me-3" on="password-updated">
                     {{ __('Saved.') }}

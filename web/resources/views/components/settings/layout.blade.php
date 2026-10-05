@@ -1,20 +1,32 @@
-<div class="flex items-start max-md:flex-col">
-    <div class="mr-10 w-full pb-4 md:w-[220px]">
-        <flux:navlist>
-            <flux:navlist.item href="{{ route('settings.profile') }}" wire:navigate>Profile</flux:navlist.item>
-            <flux:navlist.item href="{{ route('settings.password') }}" wire:navigate>Password</flux:navlist.item>
-            <flux:navlist.item href="{{ route('settings.appearance') }}" wire:navigate>Appearance</flux:navlist.item>
-        </flux:navlist>
-    </div>
+{{-- Kartu pengaturan: tab bagian menempel di tepi atas kartu (tab garis bawah ala rujukan), lalu judul bagian
+     dan isinya di badan kartu. --}}
+@php
+    $tabs = [
+        'settings.profile' => 'Profile',
+        'settings.password' => 'Password',
+        'settings.appearance' => 'Appearance',
+    ];
+    // Saat Livewire memperbarui komponen (mis. sesudah "Save"), permintaannya menuju rute pembaruan Livewire,
+    // jadi request()->routeIs() saja akan menghapus tanda tab aktif. Jalur halaman asal dibaca dari snapshot,
+    // cara yang sama dipakai Flux untuk data-current.
+    $path = trim(app('livewire')->originalPath(), '/');
+    $isCurrent = fn (string $route) => request()->routeIs($route) || trim(route($route, absolute: false), '/') === $path;
+@endphp
 
-    <flux:separator class="md:hidden" />
+<div class="card">
+    <nav class="nav-tabs px-6 pt-2 max-sm:px-4" aria-label="Settings">
+        @foreach ($tabs as $route => $label)
+            <a href="{{ route($route) }}" wire:navigate @if ($isCurrent($route)) aria-current="page" @endif
+               class="dark:hover:text-[var(--brand-strong)] dark:aria-[current=page]:text-[var(--brand-strong)]">{{ $label }}</a>
+        @endforeach
+    </nav>
 
-    <div class="flex-1 self-stretch max-md:pt-6">
-        <flux:heading>{{ $heading ?? '' }}</flux:heading>
-        <flux:subheading>{{ $subheading ?? '' }}</flux:subheading>
-
-        <div class="mt-5 w-full max-w-lg">
-            {{ $slot }}
+    <div class="card-body">
+        <div class="mb-4">
+            <h2 class="section-title">{{ $heading ?? '' }}</h2>
+            <p class="card-subtitle">{{ $subheading ?? '' }}</p>
         </div>
+
+        {{ $slot }}
     </div>
 </div>

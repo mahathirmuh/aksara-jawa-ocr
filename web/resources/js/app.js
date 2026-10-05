@@ -50,8 +50,9 @@ const targetPlugin = {
         ctx.stroke();
         ctx.setLineDash([]);
         ctx.fillStyle = opts.color;
-        ctx.font = `12px ${FONT}`;
-        ctx.fillText(opts.label, px + 5, chartArea.top + 12);
+        ctx.font = `600 12px ${FONT}`;
+        /* Di atas area grafik (lihat layout.padding.top), supaya tidak tertimpa batang pertama. */
+        ctx.fillText(opts.label, px + 5, chartArea.top - 6);
         ctx.restore();
     },
 };
@@ -101,6 +102,7 @@ const builders = {
             options: {
                 indexAxis: 'y',
                 maintainAspectRatio: false,
+                layout: { padding: { top: 18 } },
                 scales: { x: percentAxis(c), y: { grid: { display: false }, ticks: { color: c.text } } },
                 plugins: {
                     legend: { display: false },
@@ -118,9 +120,15 @@ document.addEventListener('alpine:init', () => {
     window.Alpine.data('chart', (kind, payload) => ({
         instance: null,
         init() {
-            this.draw();
-            this.observer = new MutationObserver(() => this.draw());
-            this.observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+            /* Chart.js mengukur lebar label sumbu saat grafik dibuat. Bila Inter belum selesai dimuat, lebarnya
+               diukur dengan font cadangan yang lebih sempit dan label terpanjang terpotong: gambar setelah font siap. */
+            const fonts = document.fonts?.load ? document.fonts.load('12px InterVariable').catch(() => {}) : Promise.resolve();
+            fonts.then(() => {
+                if (! this.$el.isConnected) return;
+                this.draw();
+                this.observer = new MutationObserver(() => this.draw());
+                this.observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+            });
         },
         destroy() {
             this.instance?.destroy();
