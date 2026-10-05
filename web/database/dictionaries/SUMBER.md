@@ -16,8 +16,10 @@ Ekstraksi terstruktur oleh Tatu Ylonen, *Wiktextract: Wiktionary as Machine-Read
 Perubahan terhadap sumber: hanya kata, kelas kata, arti, dan bentuk di kepala entri yang diambil; kelas kata
 diterjemahkan ke istilah Indonesia; halaman berjudul aksara Jawa digabung dengan ejaan Latinnya; halaman penunjuk
 (romanisasi, "Carakan spelling of") dilebur ke entri utamanya; ragam diturunkan dari kepala entri, tabel ragam, dan
-label di sumber; arti bersarang dirangkai dengan arti induknya ("house: abode"); tanda baca penutup arti (titik dua,
-koma, titik koma) dibuang; tanda aksara yang terlepas dari aksaranya di ekstraksi dirapatkan lagi.
+label di sumber; arti bersarang dirangkai dengan arti induknya ("house: abode"; induk yang panjang ditulis sekali);
+tanda baca penutup arti (titik dua, koma, titik koma) dibuang; tanda aksara yang terlepas dari aksaranya di ekstraksi
+dirapatkan lagi; varian ejaan yang hanya beda diakritik dari kata yang ditunjuknya ("dheweke" = "dhèwèké") diberi
+ejaan aksara kata itu.
 Yang diketahui kurang: sekitar 27 kata tidak membawa ejaan aksara walau halaman beraksaranya ada di sumber, dan
 kesalahan di sumber ikut terbawa (mis. `émah` ber-ejaan ꦲꦺꦴꦩꦃ).
 Karena lisensinya berbagi-serupa, berkas turunan di folder ini juga berlisensi CC BY-SA 4.0.

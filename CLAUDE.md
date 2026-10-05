@@ -285,7 +285,7 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     "foto" -> fa-ha-o, "saé" menyisakan huruf Latin, kata ulang kehilangan pangkon (di korpus kata semacam itu tersaring).
     Pada 22.519 kata Wikipedia yang bisa dibandingkan, `AksaraWriter` mode korpus sama dengan alat lama di 99,78%.
     (2) ejaan baku (pa cerek, nga lelet, keret, n di depan c/j ditulis nya, angka diapit pada pangkat) diturunkan dari
-    ejaan aksara lema kamus, bukan dari ingatan: sama di 2.129 dari 2.175 lema (97,9%; mode korpus 93,5%). Angka itu
+    ejaan aksara lema kamus, bukan dari ingatan: sama di 2.154 dari 2.212 lema (97,4%; mode korpus 93,0%). Angka itu
     konstanta `AksaraWriter::DICTIONARY_AGREEMENT`, dijaga test dan ikut berubah bila kamus dibangun ulang.
     (3) e tanpa tanda: 53% kata ber-e benar bila semua dibaca pepet; leksikon `web/database/dictionaries/jv-taling.json`
     (8.710 kata, `web/tools/taling_lexicon.py`, dari artikel Wikipedia Jawa yang bertanda kuat) menaikkannya ke 90% pada
@@ -301,7 +301,7 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     dan `dictionary_sources`, berkas jadi di `web/database/dictionaries/` (ikut git; sumber & lisensi di `SUMBER.md`),
     dibangun `web/tools/dictionaries.py`, diimpor `php artisan aksara:dictionary`. Sumber: entri bahasa Jawa (3.788)
     dan bahasa Indonesia (39.968) Wiktionary bahasa Inggris lewat kaikki.org, CC BY-SA 4.0, arti berbahasa Inggris;
-    kamus Jawa membawa ejaan aksara (2.695 entri), ragam (645 entri), dan padanan ngoko/krama. Pencarian
+    kamus Jawa membawa ejaan aksara (2.735 entri), ragam (635 entri), dan padanan ngoko/krama. Pencarian
     (`DictionarySearch`): kolom turunan `lookup` (tanpa diakritik) dan `gloss_text`, LIKE biasa dan urutan byte
     (`COLLATE "C"` di PostgreSQL) supaya sama di PostgreSQL dan SQLite. Yang dicari teks seperti diketik: frasa utuh
     termasuk kata berulang ("mau tak mau"), imbuhan dengan tanda hubungnya ("-an", "ke- -an"), kutip pembungkus
@@ -309,10 +309,15 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     yang cocok lewat ejaan aksara tidak diulang di daftar balik; kode "U+A9B6" hanya milik kamus aksara.
     **Aturan pembangun data yang lahir dari tinjauan 2026-10-05 (jangan dikembalikan):** romanisasi dibaca per ENTRI
     dari kepala entrinya (satu halaman beraksara bisa memuat dua kata: ꦲꦗꦶ = haji dan aji); ejaan aksara dari
-    penunjuk "Carakan spelling of" dikunci kata persisnya (enèm bukan enem); arti bersarang wiktextract dirangkai
-    "induk: anak" (tanpa itu sekitar 6.000 arti anak di 2.288 entri Indonesia hilang); ragam dibaca dari kepala
-    entri ("(krama)", "(krama, ngoko)") sebelum tabel ragam, dan krama-ngoko menang atas ngoko; catatan hanya memuat
-    padanan di ragam LAIN; tanda aksara yang terlepas di ekstraksi sumber dirapatkan. Belum beres: ~27 kata tanpa
+    penunjuk "Carakan spelling of" dikunci kata persisnya (enèm bukan enem), dan hanya varian ejaan yang beda
+    diakritik saja dari kata yang ditunjuknya ("dheweke" = "dhèwèké", 40 entri) yang mewarisi ejaan aksara; arti
+    bersarang wiktextract dirangkai "induk: anak" (tanpa itu sekitar 6.000 arti anak di 2.288 entri Indonesia
+    hilang), kecuali induk yang lebih panjang dari 40 karakter: ditulis sekali, anaknya menyusul; ragam dibaca dari
+    kepala entri ("(krama)", "(krama, ngoko)") sebelum tabel ragam, tetapi tanda kurung PERTAMA sesudah judul
+    beraksara adalah romanisasi, bukan label ("ꦏꦿꦩ (krama)" = kata "krama"); krama-ngoko menang atas ngoko; catatan
+    hanya memuat padanan di ragam LAIN; tanda aksara yang terlepas di ekstraksi sumber dirapatkan. Angka kecocokan
+    `AksaraWriter` turun dari 97,9% ke 97,4% hanya karena 40 varian ejaan itu ikut dihitung (ejaan lama menulis
+    taling tanpa tanda), bukan karena aturannya berubah. Belum beres: ~27 kata tanpa
     ejaan aksara walau halaman beraksaranya ada (sumber tidak memasangkannya), dan `émah` ber-ejaan ꦲꦺꦴꦩꦃ (salah di
     sumbernya). `tests/Feature/DictionaryTest.php` mengimpor berkas jadi yang ikut repo, jadi bangun ulang yang
     merusak format ketahuan di test.

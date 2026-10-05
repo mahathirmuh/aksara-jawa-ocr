@@ -61,7 +61,7 @@ php artisan aksara:translate                        # sumber: transliterasi manu
 - `App\Support\AksaraWriter::fromLatin()` menulis bahasa Jawa Latin dalam aksara Jawa menurut aturan: vokal tanpa
   konsonan pembuka memakai ha, ng/r/h penutup suku kata menjadi cecak/layar/wignyan, konsonan mati diberi pangkon,
   rê/lê ditulis pa cerek/nga lelet, konsonan + rê memakai keret, n di depan c/j ditulis nya, angka diapit pada
-  pangkat. Tidak memakai aksara murda/swara. Ejaannya sama dengan 2.129 dari 2.175 lema kamus bahasa Jawa (97,9%;
+  pangkat. Tidak memakai aksara murda/swara. Ejaannya sama dengan 2.154 dari 2.212 lema kamus bahasa Jawa (97,4%;
   `tests/Unit/AksaraWriterTest.php` menjaga angka itu).
 - `App\Support\TalingRestorer` memulihkan é/è pada kata tanpa tanda memakai `database/dictionaries/jv-taling.json`
   (8.710 kata dari Wikipedia bahasa Jawa; pada artikel yang ditahan, kata ber-e yang benar naik dari 53% ke 90%).
@@ -80,8 +80,8 @@ php artisan aksara:dictionary                       # impor kamus bahasa Jawa da
   `id.jsonl.gz`, `sources.json`), jadi `aksara:dictionary` cukup sesudah `migrate`. Sumber dan lisensi tiap berkas:
   `database/dictionaries/SUMBER.md`; juga ditampilkan di kaki tiap kamus, dan tiap entri bertaut ke halaman asalnya.
 - Sumber sekarang: entri bahasa Jawa dan bahasa Indonesia di Wiktionary bahasa Inggris (CC BY-SA 4.0, lewat
-  ekstraksi kaikki.org), jadi artinya berbahasa Inggris. Kamus Jawa (3.788 entri) membawa ejaan aksara (2.695
-  entri), ragam (645 entri), dan padanan ngoko/krama dari kepala entrinya; kamus Indonesia 39.968 entri.
+  ekstraksi kaikki.org), jadi artinya berbahasa Inggris. Kamus Jawa (3.788 entri) membawa ejaan aksara (2.735
+  entri), ragam (635 entri), dan padanan ngoko/krama dari kepala entrinya; kamus Indonesia 39.968 entri.
 - Pencarian (`App\Support\DictionarySearch`) memakai teks seperti diketik: diakritik dan huruf besar diabaikan,
   frasa dicari utuh ("mau tak mau"), imbuhan dicari dengan tanda hubungnya ("-an", "ke- -an"), tanda kutip yang
   membungkus kata dibuang. Urutan: persis sama, berawalan, memuat; lalu kata lain yang artinya memuat kata itu.

@@ -342,7 +342,7 @@ class DictionaryTest extends TestCase
         $this->assertStringNotContainsString('sampun', $lexicon);
     }
 
-    public function test_shipped_dictionary_files_import_cleanly(): void
+    public function test_shipped_dictionary_files_import_cleanly_and_keep_the_builder_rules(): void
     {
         // Berkas yang ikut repo harus lolos validasi pengimpor: bangun ulang data yang merusaknya ketahuan di sini,
         // bukan saat impor ke database situs. Sekaligus impor yang jauh lebih besar dari satu potongan sisipan.
@@ -358,6 +358,33 @@ class DictionaryTest extends TestCase
         // Ejaan aksara hanya berisi aksara Jawa (plus spasi dan tanda hubung antar-kata).
         $this->assertSame([], DictionaryEntry::whereNotNull('aksara')->pluck('aksara')
             ->reject(fn (string $aksara) => preg_match('/^[\x{A980}-\x{A9DF}\x{200C} -]+$/u', $aksara) === 1)->take(5)->values()->all());
+
+        // Aturan pembangun data (web/tools/dictionaries.py) yang lahir dari tinjauan, diperiksa pada berkas jadinya.
+        // Sesudah `dictionaries.py --refresh` isi sumber bisa berubah: cocokkan dengan halaman asalnya sebelum
+        // mengubah harapan di bawah.
+        $jv = fn (string $word) => DictionaryEntry::where('dictionary', 'jv')->where('word', $word)->orderBy('id')->get();
+        $id = fn (string $word) => DictionaryEntry::where('dictionary', 'id')->where('word', $word)->where('pos', 'nomina')->firstOrFail();
+        // Satu halaman beraksara memuat dua kata (ꦲꦗꦶ = aji dan haji): romanisasi dibaca per entri.
+        $this->assertSame([2, ['ꦲꦗꦶ']], [$jv('aji')->count(), $jv('aji')->pluck('aksara')->unique()->values()->all()]);
+        $this->assertSame(['ꦲꦗꦶ'], $jv('haji')->pluck('aksara')->all());
+        // Ragam dari kepala entri; krama-ngoko menang atas ngoko; kata "krama" sendiri tidak berlabel krama.
+        $this->assertSame(['krama'], $jv('ageng')->pluck('register')->unique()->values()->all());
+        $this->assertSame(['krama-ngoko'], $jv('garing')->pluck('register')->unique()->values()->all());
+        $this->assertSame([null], $jv('krama')->pluck('register')->unique()->values()->all());
+        // Catatan hanya memuat padanan di ragam lain, dengan tanda aksara yang sudah dirapatkan (ꦢꦶꦤ꧀ꦠꦼꦤ꧀ -> dinten).
+        $this->assertSame(['ngoko', 'krama dinten'], [$jv('dina')->first()->register, $jv('dina')->first()->note]);
+        $this->assertSame(0, DictionaryEntry::where('note', 'like', '%꧈%')->count());
+        // Varian ejaan yang hanya beda diakritik mewarisi ejaan aksara; kata lain yang mirip (enèm, bukan enem) tidak.
+        $this->assertSame('ꦝꦺꦮꦺꦏꦺ', $jv('dheweke')->first()->aksara);
+        $this->assertNull($jv('enèm')->first()->aksara);
+        // Arti bersarang: induk pendek dirangkai dengan anaknya, induk panjang ditulis sekali lalu anaknya menyusul.
+        $this->assertContains('house: abode', $id('rumah')->glosses);
+        $this->assertStringStartsWith('(zoology) A biting midge', $id('agas')->glosses[0]);
+        $this->assertStringStartsWith('(by extension) A sandfly', $id('agas')->glosses[1]);
+        // Tanda baca penutup arti dibuang (di JSON, arti yang berakhir titik koma tampak sebagai ;").
+        foreach ([';', ':'] as $mark) {
+            $this->assertSame(0, DictionaryEntry::whereRaw('cast(glosses as text) like ?', ['%'.$mark.'"%'])->count(), "arti berakhir '{$mark}'");
+        }
     }
 
     public function test_pattern_characters_and_markup_in_data_are_harmless(): void

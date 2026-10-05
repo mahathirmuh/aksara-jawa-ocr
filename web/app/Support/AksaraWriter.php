@@ -30,7 +30,7 @@ final class AksaraWriter
      * [sama, dari]. Dijaga tests/Unit/AksaraWriterTest terhadap database/dictionaries/jv.jsonl.gz; sisanya nama
      * beraksara murda/swara dan lema yang é-nya tidak ditandai.
      */
-    public const DICTIONARY_AGREEMENT = [2129, 2175];
+    public const DICTIONARY_AGREEMENT = [2154, 2212];
 
     private const CONSONANTS = [
         'ng' => 'ꦔ', 'ny' => 'ꦚ', 'dh' => 'ꦝ', 'th' => 'ꦛ',

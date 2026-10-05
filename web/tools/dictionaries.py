@@ -60,14 +60,34 @@ def plain(text: str) -> str:
     return ' '.join(text.lower().split())
 
 
-def sense_gloss(sense: dict) -> str:
+# Induk arti bersarang yang lebih panjang dari ini ditulis sekali sebagai arti sendiri (median induk 9 karakter,
+# persentil 95 = 32; yang lebih panjang berupa kalimat penuh).
+CHAIN_LIMIT = 40
+
+
+def sense_glosses(sense: dict) -> list[str]:
     """Arti satu sense wiktextract, dengan label pemakaiannya ("(krama) water").
 
-    Sense bersarang disimpan sebagai rantai [arti induk, ..., arti sendiri], mis. ["house:", "abode"]. Rantainya
-    dirangkai ("house: abode") supaya arti anak tidak hilang dan tetap terbaca dalam konteks induknya.
+    Sense bersarang disimpan sebagai rantai [arti induk, ..., arti sendiri], mis. ["house:", "abode"]. Induk yang
+    pendek dirangkai dengan anaknya ("house: abode") supaya arti anak tidak hilang dan terbaca dalam konteksnya.
+    Induk yang panjang ditulis sekali sebagai arti sendiri dan anaknya menyusul (pemanggil membuang ulangannya);
+    induk yang hanya label ("(by extension)") dirangkai dengan spasi.
     """
     chain = [nfc(part).rstrip(' :,;') for part in (sense.get('raw_glosses') or sense.get('glosses') or [])]
-    return ': '.join(dict.fromkeys(part for part in chain if part))
+    chain = list(dict.fromkeys(part for part in chain if part))
+    if len(chain) < 2:
+        return chain
+    out, lead = [], ''
+    for parent in chain[:-1]:
+        short = parent.rstrip('.')
+        if re.fullmatch(r'\([^()]*\)', short):
+            lead += short + ' '
+        elif len(short) <= CHAIN_LIMIT:
+            lead += short + ': '
+        else:
+            out.append(lead + parent)
+            lead = ''
+    return out + [lead + chain[-1]]
 
 
 # ---------- bahasa Jawa dari Wiktionary bahasa Inggris (ekstraksi kaikki.org / wiktextract) ----------
@@ -86,6 +106,8 @@ WORD_REGISTER = {'ngoko': 'ngoko', 'krama': 'krama', 'krama inggil': 'krama ingg
 REGISTER_WORDS = '|'.join(sorted(map(re.escape, WORD_REGISTER), key=len, reverse=True))
 LABELLED = re.compile('^(' + REGISTER_WORDS + ') (.+)$', re.I)
 REGISTER_OF = re.compile('^(' + REGISTER_WORDS + ') of ', re.I)
+# "dated spelling of endhas", "(Surinamese) alternative form of bangsa", "alternative spelling of ꦧꦶꦩ (Bima)".
+VARIANT_OF = re.compile(r'^(?:\([^()]*\) )?(?:\w+ )?(?:spelling|form) of (?:[ꦀ-꧟\u200c]+ \()?([^\s(),.;:“”"]+)')
 SPELLING_OF = re.compile(r'^(?:Carakan|Javanese script) spelling of (.+?)\.?$')
 SET_COLUMN = re.compile(r'([ꦀ-꧟]+) : (.*?)(?= [ꦀ-꧟]+ : |$)')
 
@@ -112,11 +134,17 @@ def head_latin(entry: dict, headword: str) -> str | None:
     return None
 
 
-def head_registers(entry: dict) -> list[str]:
-    """Ragam yang disebut kepala entri untuk kata itu sendiri: "ꦲꦒꦼꦁ (ageng) (krama)", "kang (krama, ngoko)"."""
+def head_registers(entry: dict, headword: str) -> list[str]:
+    """Ragam yang disebut kepala entri untuk kata itu sendiri: "ꦲꦒꦼꦁ (ageng) (krama)", "kang (krama, ngoko)".
+
+    Tanda kurung pertama sesudah judul beraksara adalah romanisasinya, bukan label: "ꦏꦿꦩ (krama)" = kata "krama".
+    """
     found = []
     for head in entry.get('head_templates', []):
-        tail = re.search(r'\(([^()]+)\)\s*$', nfc(head.get('expansion', '')))
+        text = nfc(head.get('expansion', ''))
+        if JAVA.search(headword):
+            text = re.sub('^' + re.escape(headword) + r' \([^()]*\)', '', text)
+        tail = re.search(r'\(([^()]+)\)\s*$', text)
         names = [name.strip().lower() for name in tail.group(1).split(',')] if tail else []
         if names and all(name in WORD_REGISTER for name in names):
             found += [WORD_REGISTER[name] for name in names]
@@ -243,9 +271,8 @@ def enwiktionary_javanese(cache: str, refresh: bool):
                     aksara = spelled.group()
         glosses = []
         for sense in entry.get('senses', []):
-            text = sense_gloss(sense)
-            if text and not spelling_targets(sense) and not {'romanization', 'no-gloss'} & set(sense.get('tags', [])):
-                glosses.append(text)
+            if not spelling_targets(sense) and not {'romanization', 'no-gloss'} & set(sense.get('tags', [])):
+                glosses += sense_glosses(sense)
         glosses = list(dict.fromkeys(glosses))
         if not glosses:
             skipped['tanpa arti'] += 1      # halaman penunjuk (romanisasi, ejaan Carakan) atau sense tanpa arti
@@ -258,7 +285,7 @@ def enwiktionary_javanese(cache: str, refresh: bool):
         registers = {name: list(dict.fromkeys(latin_of.get(value, value) for value in values))
                      for name, values in register_set(entry, headword).items()}
         # Ragam kata ini: yang disebut kepala entrinya, kalau tidak ada dari kolom tabel ragam yang memuat kata ini.
-        own = head_registers(entry) or [name for name in REGISTER_ORDER if any(plain(value) == plain(word) for value in registers.get(name, []))]
+        own = head_registers(entry, headword) or [name for name in REGISTER_ORDER if any(plain(value) == plain(word) for value in registers.get(name, []))]
         if 'krama-ngoko' in own or {'ngoko', 'krama'} <= set(own):
             register = 'krama-ngoko'
         elif own:
@@ -288,6 +315,19 @@ def enwiktionary_javanese(cache: str, refresh: bool):
         else:
             merged[key] = item
 
+    # Varian ejaan yang hanya beda diakritik dari kata yang ditunjuknya ("dheweke" = "dhèwèké", "êndhas" = "endhas")
+    # ditulis sama dalam aksara. Hanya bila kata yang ditunjuk punya SATU ejaan aksara; kata lain yang kebetulan mirip
+    # ("enèm" bukan "enem") tidak menunjuk ke situ, jadi tidak kena.
+    spellings: dict[str, set[str]] = {}
+    for item in merged.values():
+        if item.get('aksara'):
+            spellings.setdefault(item['word'], set()).add(item['aksara'])
+    for item in merged.values():
+        target = VARIANT_OF.match(item['glosses'][0]) if 'aksara' not in item else None
+        known = spellings.get(target.group(1), set()) if target and plain(target.group(1)) == plain(item['word']) else set()
+        if len(known) == 1:
+            item['aksara'] = next(iter(known))
+
     meta = {'key': 'enwiktionary', 'name': 'Wiktionary bahasa Inggris (entri bahasa Jawa, ekstraksi kaikki.org)',
             'license': 'CC BY-SA 4.0', 'url': 'https://kaikki.org/dictionary/Javanese/', 'retrieved': retrieved}
     return meta, list(merged.values()), skipped
@@ -314,9 +354,8 @@ def enwiktionary_indonesian(cache: str, refresh: bool):
                 continue
             glosses = []
             for sense in entry.get('senses', []):
-                text = sense_gloss(sense)
-                if text and 'no-gloss' not in sense.get('tags', []):
-                    glosses.append(text)
+                if 'no-gloss' not in sense.get('tags', []):
+                    glosses += sense_glosses(sense)
             glosses = list(dict.fromkeys(glosses))
             if not glosses:
                 skipped['tanpa arti'] += 1
