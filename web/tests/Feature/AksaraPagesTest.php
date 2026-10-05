@@ -9,6 +9,7 @@ use App\Models\Line;
 use App\Models\Metric;
 use App\Models\Pipeline;
 use App\Models\Prediction;
+use App\Models\TranslationRun;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -265,6 +266,33 @@ class AksaraPagesTest extends TestCase
         Livewire::test(Penjelajah::class)->call('setSpeechLevel', $line->external_id, null);
         $this->assertNull($line->annotation()->first()->speech_level);
         Livewire::test(Penjelajah::class)->call('setSpeechLevel', $line->external_id, 'bukan-tingkat')->assertStatus(422);
+    }
+
+    public function test_summary_quotes_the_newest_translation_runs_with_the_official_pipeline_first(): void
+    {
+        // Aturan yang sama dengan halaman Metode (TranslationRun::forOcr): run terbaru tiap sumber; untuk "dari keluaran
+        // OCR" terjemahan atas keluaran pipeline resmi didahulukan, lalu bacaan beam + LM-nya, lalu run terbaru
+        // pipeline lain.
+        $this->importFixture();
+        $this->actingAs(User::factory()->create());
+        $this->assertSame('crnn_fonts', Pipeline::official()->key);
+        $run = fn (string $source, float $chrf) => TranslationRun::create(['source' => $source, 'model' => 'm', 'lines' => 10, 'chrf' => $chrf, 'bleu' => 1.0]);
+        $this->get('/ringkasan')->assertOk()->assertSee('model terjemahan belum dijalankan');
+
+        $run('label', 30.0);
+        $run('crnn_fonts', 25.04);
+        $run('label', 36.2);
+        $run('crnn_core', 12.3);
+        $this->get('/ringkasan')->assertOk()->assertSee('chrF 36,2 (NLLB, dari transliterasi manusia)')->assertDontSee('chrF 30,0')
+            ->assertSee('dari keluaran OCR (CRNN fase5_fonts) chrF 25,0')->assertDontSee('chrF 12,3');
+
+        TranslationRun::where('source', 'crnn_fonts')->delete();
+        $run('crnn_fonts_beam', 19.37);
+        $run('crnn_core', 12.3);
+        $this->get('/ringkasan')->assertOk()->assertSee('dari keluaran OCR (Beam + LM) chrF 19,4')->assertDontSee('chrF 12,3');
+
+        TranslationRun::where('source', 'crnn_fonts_beam')->delete();
+        $this->get('/ringkasan')->assertOk()->assertSee('dari keluaran OCR (CRNN fase5_core) chrF 12,3');
     }
 
     public function test_line_image_is_served_only_from_ocr_repo(): void

@@ -18,7 +18,8 @@ trait RejectsCards
 {
     /**
      * @param  class-string  $model  model tempat kartu disimpan
-     * @param  class-string  $exception  kelas pengecualian yang diharapkan (CardStorageException untuk galat database)
+     * @param  class-string  $exception  kelas pengecualian yang diharapkan, persis (CardStorageException untuk galat
+     *                                   database; bawaannya RuntimeException = kartu yang ditolak)
      */
     protected function assertCardRejected(CardImporter $importer, string $model, string $dir, string $expected,
         ?array $card = null, ?string $raw = null, string $exception = RuntimeException::class): void
@@ -32,7 +33,9 @@ trait RejectsCards
             $caught = $e;
         }
         $this->assertNotNull($caught, "Kartu seharusnya ditolak ({$expected}), tetapi diterima.");
-        $this->assertInstanceOf($exception, $caught);
+        // Kelas PERSIS, bukan turunannya: CardStorageException turunan RuntimeException, dan kartu yang ditolak harus
+        // terbedakan dari galat penyimpanan (perintah impor memberi kode keluar yang berbeda untuk keduanya).
+        $this->assertSame($exception, $caught::class, $caught->getMessage());
         $this->assertStringContainsString($expected, $caught->getMessage());
         $this->assertSame($before, $model::query()->orderBy('id')->get()->toArray(), "Kartu yang tersimpan berubah sesudah penolakan: {$expected}");
     }

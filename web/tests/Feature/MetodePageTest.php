@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Livewire\Pages\Metode;
 use App\Models\DatasetReport;
+use App\Models\Line;
 use App\Models\LineAnnotation;
 use App\Models\MethodReport;
 use App\Models\Metric;
@@ -13,6 +14,7 @@ use App\Models\TranslationRun;
 use App\Models\User;
 use App\Services\CardStorageException;
 use App\Services\MethodImporter;
+use App\Services\TranslationService;
 use App\Support\AksaraWriter;
 use App\Support\SpeechLevel;
 use App\Support\TalingRestorer;
@@ -131,8 +133,19 @@ class MetodePageTest extends TestCase
         $has = fn (string $class) => "contains(concat(' ', normalize-space(@class), ' '), ' {$class} ')";
         $text = fn (string $query) => $this->squash($xpath->query($query, $row)->item(0));
         $pill = $xpath->query(".//span[{$has('status')}]", $row)->item(0);
-        preg_match('/^Terukur\. (.*?)(?: Sumber: (.+))?$/u', (string) $text(".//p[{$has('method-evidence')}]"), $evidence);
-        preg_match('/^Catatan\. (.*)$/u', (string) $text(".//p[{$has('method-note')}]"), $note);
+        // Kotak "Terukur" dan kotak "Catatan": paling banyak satu, dan bila ada harus berisi (kotak kosong = cacat).
+        $box = function (string $class, string $pattern) use ($xpath, $row, $has, $key): array {
+            $boxes = $xpath->query(".//p[{$has($class)}]", $row);
+            $this->assertLessThanOrEqual(1, $boxes->length, "{$key}: {$class}");
+            if (! $boxes->length) {
+                return [];
+            }
+            $this->assertSame(1, preg_match($pattern, $this->squash($boxes->item(0)), $found), "{$key}: kotak {$class} kosong atau salah bentuk");
+
+            return $found;
+        };
+        $evidence = $box('method-evidence', '/^Terukur\. (\S.*?)(?: Sumber: (.+))?$/u');
+        $note = $box('method-note', '/^Catatan\. (\S.*)$/u');
         $settings = [];
         foreach ($xpath->query(".//dl[{$has('method-settings')}]/div", $row) as $pair) {
             $settings[] = [$this->squash($xpath->query('./dt', $pair)->item(0)), $this->squash($xpath->query('./dd', $pair)->item(0))];
@@ -202,7 +215,11 @@ class MetodePageTest extends TestCase
                 $this->assertSame('true', $tag->item(0)->getAttribute('aria-hidden'));
                 $this->assertSame('sr-only', $hidden->item(0)->getAttribute('class'));
             }
-            $steps[] = [$step->getAttribute('data-step'), $this->squash($xpath->query("./span[contains(@class, 'flow-detail')]", $step)->item(0)), $learned];
+            // Nama langkah = teks yang terlihat di kotaknya (tanpa tanda "ML"); atribut data-step harus sama dengannya.
+            $name = $this->squash($xpath->evaluate("string(./span[contains(@class, 'flow-name')]/text()[1])", $step));
+            $this->assertSame($step->getAttribute('data-step'), $name);
+            $this->assertNotSame('', $name);
+            $steps[] = [$name, $this->squash($xpath->query("./span[contains(@class, 'flow-detail')]", $step)->item(0)), $learned];
         }
 
         return $steps;
@@ -254,6 +271,9 @@ class MetodePageTest extends TestCase
             $this->flowSteps($html, '//li[@data-branches]//li[@data-step]'));
         $this->assertSame('Urutan langkah: Citra baris, CNN, BiLSTM, CTC, Teks aksara, Latin, lalu dari teks Latin: Arti dan Tingkat tutur',
             $xpath->evaluate("string(//ol[contains(@class, 'flow')]/@aria-label)"));
+        // Cabangnya diberi label untuk pembaca layar, tersembunyi dari tampilan.
+        $this->assertSame(['Dari teks Latin:', 'sr-only'], [$xpath->evaluate('string(//li[@data-branches]/span[1])'),
+            $xpath->evaluate('string(//li[@data-branches]/span[1]/@class)')]);
         $page->assertSee('Kotak bertanda ML memakai model hasil belajar (machine learning). Kotak lain memakai aturan tetap atau leksikon.')
             ->assertSee('Arti dan tingkat tutur sama-sama dihitung dari teks Latin.');
 
@@ -314,13 +334,21 @@ class MetodePageTest extends TestCase
         $this->assertSame(['Alih aksara ke Latin', 'aturan atau algoritme', 'dipakai', 'status-blue', null, null, [['Kode', 'web/app/Support/Transliterator.php']]],
             [$translit['name'], $translit['kind'], $translit['status'], $translit['pill'], $translit['evidence'], $translit['note'], $translit['settings']]);
         $nllb = $this->shown($html, 'nllb');
-        $this->assertSame(['NLLB-200 (model terjemahan pralatih)', 'model deep learning', 'dipakai', null], [$nllb['name'], $nllb['kind'], $nllb['status'], $nllb['evidence']]);
+        $this->assertSame(['NLLB-200 (model terjemahan pralatih)', 'model deep learning', 'dipakai', null, null],
+            [$nllb['name'], $nllb['kind'], $nllb['status'], $nllb['evidence'], $nllb['note']]);
+        // Ukuran model tidak ditulis di kalimatnya: nama modelnya ada di pengaturan dan mengikuti run terjemahan.
+        $this->assertSame('Model Transformer pralatih untuk 200 bahasa, dijalankan lokal tanpa mengirim data keluar. Dipakai apa adanya, '
+            .'tanpa dilatih ulang, untuk bahasa Jawa ke Indonesia dan sebaliknya.', $nllb['summary']);
+        // Kunci butir tahap lanjutan = daftar yang dicadangkan importir.
+        $this->assertSame(Metode::WEB_KEYS, $this->groupKeys($html)['web']);
         $this->assertSame([['Model', 'facebook/nllb-200-distilled-600M'], ['Lisensi', 'CC-BY-NC 4.0, hanya non-komersial'],
             ['Kode', 'web/tools/nllb.py web/tools/translate_batch.py']], $nllb['settings']);
         $speech = $this->shown($html, 'speech');
         $this->assertSame([null, null, 'Belum dinilai: belum ada label manusia.'], [$speech['evidence'], $speech['source'], $speech['note']]);
-        $this->assertStringEndsWith('Kata buktinya ditampilkan di Penjelajah baris dan Kamus.', $speech['summary']);
-        $this->assertStringContainsString('masing-masing paling sedikit dua kata dan seperempat dari semua penanda', $speech['summary']);
+        $this->assertSame('Kata penanda ngoko, madya, dan krama serta imbuhan krama (-ipun, dipun-) dihitung per teks, lalu tingkat dengan '
+            .'penanda terbanyak yang dipilih. Hasilnya campur bila penanda ngoko dan penanda madya atau krama sama-sama cukup banyak '
+            .'(masing-masing paling sedikit dua kata dan seperempat dari semua penanda). Kata buktinya ditampilkan di Penjelajah baris '
+            .'dan Kamus.', $speech['summary']);
         $this->assertSame(['Kata penanda', collect(SpeechLevel::lexicon())->map(fn ($words, $level) => $level.' '.nfmt(count($words)))->join(' · ')],
             $speech['settings'][0]);
         $writer = $this->shown($html, 'aksara_writer');
@@ -358,14 +386,21 @@ class MetodePageTest extends TestCase
     {
         $this->import($this->card());
         Metric::create(['scope' => 'translit_draft', 'pipeline' => null, 'lines' => 745, 'cer' => 0.0713]);
-        Pipeline::create(['key' => 'crnn_fonts_beam', 'label' => 'Beam + LM', 'config' => 'x', 'kind' => 'beam', 'status' => 'done', 'sort' => 0]);
+        Pipeline::create(['key' => 'crnn_fonts_beam', 'label' => 'Beam + LM', 'config' => 'crnn:fase5_fonts@1298 · beam 16 · LM karakter o5',
+            'kind' => 'beam', 'status' => 'done', 'sort' => 0]);
+        foreach (['a.png', 'b.png', 'c.png'] as $id) {
+            Line::create(['dataset' => 'nusaaksara', 'external_id' => $id, 'image_path' => 'data/real/nusaaksara/images/'.$id,
+                'width' => 100, 'height' => 20, 'reference' => 'ꦏ', 'tags' => []]);
+        }
         // Dua run untuk tiap sumber: yang TERBARU yang ditampilkan (run lama memakai model dan angka lain).
         TranslationRun::create(['source' => 'label', 'model' => 'model-lama', 'lines' => 10, 'chrf' => 1.0, 'bleu' => 1.0]);
         TranslationRun::create(['source' => 'crnn_fonts_beam', 'model' => 'model-lama', 'lines' => 10, 'chrf' => 2.0, 'bleu' => 2.0]);
         TranslationRun::create(['source' => 'label', 'model' => 'facebook/nllb-200-distilled-1.3B', 'lines' => 745, 'chrf' => 36.2, 'bleu' => 10.53]);
         TranslationRun::create(['source' => 'crnn_fonts_beam', 'model' => 'facebook/nllb-200-distilled-1.3B', 'lines' => 740, 'chrf' => 19.37, 'bleu' => 0.96]);
         // Leksikon menandai "ora" dan "aku" ngoko, "boten" dan "kula" krama: dua baris berlabel, satu tebakan benar.
-        // Label tanpa alih aksara tidak bisa dinilai dan tidak ikut dihitung.
+        // Label pada baris yang tidak diimpor (d.png), dan label tanpa alih aksara walau barisnya diimpor (c.png), tidak
+        // bisa dinilai dan tidak ikut dihitung (kueri yang sama dengan Ringkasan); jumlahnya disebut di catatan.
+        LineAnnotation::create(['dataset' => 'nusaaksara', 'external_id' => 'd.png', 'transliteration' => 'kula boten', 'speech_level' => 'krama', 'source' => 'uji']);
         LineAnnotation::create(['dataset' => 'nusaaksara', 'external_id' => 'a.png', 'transliteration' => 'aku ora lunga', 'speech_level' => 'ngoko', 'source' => 'uji']);
         LineAnnotation::create(['dataset' => 'nusaaksara', 'external_id' => 'b.png', 'transliteration' => 'aku ora lunga', 'speech_level' => 'krama', 'source' => 'uji']);
         LineAnnotation::create(['dataset' => 'nusaaksara', 'external_id' => 'c.png', 'transliteration' => null, 'speech_level' => 'ngoko', 'source' => 'uji']);
@@ -378,21 +413,30 @@ class MetodePageTest extends TestCase
             .'Masukannya label aksara, bukan keluaran OCR.', 'tabel metrik web'], [$translit['evidence'], $translit['source']]);
         $nllb = $this->shown($html, 'nllb');
         $human = 'Dari alih aksara manusia: chrF 36,2 / BLEU 10,5 pada 745 baris.';
-        $this->assertSame([$human.' Dari keluaran OCR (Beam + LM): chrF 19,4 / BLEU 1,0 pada 740 baris.', 'tabel terjemahan web'],
+        // Run OCR-nya disebut dengan checkpoint yang dibacanya, supaya "Beam + LM" tidak terbaca sebagai bacaan model resmi.
+        $this->assertSame([$human.' Dari keluaran OCR (Beam + LM atas checkpoint fase5_fonts): chrF 19,4 / BLEU 1,0 pada 740 baris.', 'tabel terjemahan web'],
             [$nllb['evidence'], $nllb['source']]);
+        // N01: angka itu dihitung dari masukan berejaan yang tidak dikenal model; batasannya ditulis di kotak Catatan.
+        $this->assertTrue(TranslationService::BATCH_KEEPS_PEPET_MARK);
+        $this->assertSame('Angka ini dihitung batch yang masih mengirim pepet bertanda "ê", ejaan yang tidak dikenal model; alat Demo dan '
+            .'Terjemahan membuang tanda itu lebih dulu. Karena itu chrF dan BLEU di atas kemungkinan terlalu rendah sampai batchnya '
+            .'dijalankan ulang.', $nllb['note']);
         $this->assertSame(['Model', 'facebook/nllb-200-distilled-1.3B'], $nllb['settings'][0]);
         $speech = $this->shown($html, 'speech');
-        $this->assertSame(['Akurasi 50,0% pada 2 baris berlabel manusia.', 'label di Penjelajah baris', null], [$speech['evidence'], $speech['source'], $speech['note']]);
+        $this->assertSame(['Akurasi 50,0% pada 2 baris berlabel manusia.', 'label di Penjelajah baris',
+            '2 label manusia lain belum bisa dinilai: barisnya belum diimpor atau belum punya alih aksara manusia.'],
+            [$speech['evidence'], $speech['source'], $speech['note']]);
+        $this->assertSame(['a.png', 'b.png'], LineAnnotation::scorableSpeechLabels()->pluck('external_id')->all());
         // Angka tahap web hanya ada di barisnya sendiri.
         $this->assertNull($this->shown($html, 'mt_scores')['evidence']);
         $this->assertStringNotContainsString('chrF 36,2', $this->part($html, 'data-method', 'translit'));
 
         // Terjemahan dari keluaran OCR dibuat dari pipeline yang bukan pipeline resmi: disebut, supaya angkanya tidak
         // dibaca sebagai milik model resmi.
-        $official = Pipeline::create(['key' => 'crnn_fase7_track', 'label' => 'CRNN fase7_track', 'config' => 'x', 'kind' => 'crnn',
-            'status' => 'done', 'sort' => 1, 'official' => true]);
+        $official = Pipeline::create(['key' => 'crnn_fase7_track', 'label' => 'CRNN fase7_track', 'config' => 'crnn:fase7_track@1500 · greedy',
+            'kind' => 'crnn', 'status' => 'done', 'sort' => 1, 'official' => true]);
         $evidence = fn () => $this->shown($this->get('/metode')->getContent(), 'nllb')['evidence'];
-        $this->assertSame($human.' Dari keluaran OCR (Beam + LM, bukan pipeline resmi): chrF 19,4 / BLEU 1,0 pada 740 baris.', $evidence());
+        $this->assertSame($human.' Dari keluaran OCR (Beam + LM atas checkpoint fase5_fonts, bukan pipeline resmi): chrF 19,4 / BLEU 1,0 pada 740 baris.', $evidence());
         // Begitu ada terjemahan atas keluaran pipeline resmi, itulah yang dikutip (aturan yang sama dengan Ringkasan),
         // walau run pipeline lain lebih baru.
         TranslationRun::create(['source' => 'crnn_fase7_track', 'model' => 'facebook/nllb-200-distilled-1.3B', 'lines' => 745, 'chrf' => 25.04, 'bleu' => 3.0]);
@@ -413,15 +457,54 @@ class MetodePageTest extends TestCase
         TranslationRun::where('source', 'crnn_fase7_track')->delete();
         $official->update(['official' => false]);
         Pipeline::where('key', 'crnn_fonts_beam')->update(['official' => true]);
-        $this->assertSame($human.' Dari keluaran OCR (Beam + LM): chrF 19,4 / BLEU 1,0 pada 740 baris.', $evidence());
+        $this->assertSame($human.' Dari keluaran OCR (Beam + LM atas checkpoint fase5_fonts): chrF 19,4 / BLEU 1,0 pada 740 baris.', $evidence());
 
         // Hanya terjemahan dari label manusia: kalimat keluaran OCR tidak ada. Hanya dari keluaran OCR: itu saja yang ada.
         TranslationRun::where('source', 'crnn_fonts_beam')->delete();
         $this->assertSame($human, $evidence());
         TranslationRun::query()->delete();
         TranslationRun::create(['source' => 'crnn_fonts_beam', 'model' => 'model-ocr', 'lines' => 5, 'chrf' => 19.37, 'bleu' => 0.96]);
-        $this->assertSame('Dari keluaran OCR (Beam + LM): chrF 19,4 / BLEU 1,0 pada 5 baris.', $evidence());
+        $this->assertSame('Dari keluaran OCR (Beam + LM atas checkpoint fase5_fonts): chrF 19,4 / BLEU 1,0 pada 5 baris.', $evidence());
         $this->assertSame(['Model', 'model-ocr'], $this->shown($this->get('/metode')->getContent(), 'nllb')['settings'][0]);
+        // Pipeline yang konfigurasinya tidak menyebut checkpoint (atau yang sudah tidak ada di tabel): namanya apa adanya.
+        Pipeline::where('key', 'crnn_fonts_beam')->update(['config' => 'kandidat gabungan']);
+        $this->assertSame('Dari keluaran OCR (Beam + LM): chrF 19,4 / BLEU 1,0 pada 5 baris.', $evidence());
+        Pipeline::where('key', 'crnn_fonts_beam')->delete();
+        $this->assertSame('Dari keluaran OCR (crnn_fonts_beam): chrF 19,4 / BLEU 1,0 pada 5 baris.', $evidence());
+        // Tanpa run terjemahan sama sekali: tidak ada bukti, jadi tidak ada catatan tentang angkanya.
+        TranslationRun::query()->delete();
+        $empty = $this->shown($this->get('/metode')->getContent(), 'nllb');
+        $this->assertSame([null, null], [$empty['evidence'], $empty['note']]);
+
+        // N06: label tingkat tutur yang ada tetapi belum satu pun bisa dinilai bukan "belum ada label".
+        LineAnnotation::whereIn('external_id', ['a.png', 'b.png'])->delete();
+        $speech = $this->shown($this->get('/metode')->getContent(), 'speech');
+        $this->assertSame([null, 'Belum dinilai: 2 label manusia yang ada belum bisa dinilai (barisnya belum diimpor atau belum punya alih aksara manusia).'],
+            [$speech['evidence'], $speech['note']]);
+        // Semua label yang ada bisa dinilai: angkanya saja, tanpa kotak catatan.
+        LineAnnotation::query()->delete();
+        LineAnnotation::create(['dataset' => 'nusaaksara', 'external_id' => 'a.png', 'transliteration' => 'aku ora lunga', 'speech_level' => 'ngoko', 'source' => 'uji']);
+        $speech = $this->shown($this->get('/metode')->getContent(), 'speech');
+        $this->assertSame(['Akurasi 100,0% pada 1 baris berlabel manusia.', null], [$speech['evidence'], $speech['note']]);
+        // Tanpa label sama sekali.
+        LineAnnotation::query()->delete();
+        $speech = $this->shown($this->get('/metode')->getContent(), 'speech');
+        $this->assertSame([null, 'Belum dinilai: belum ada label manusia.'], [$speech['evidence'], $speech['note']]);
+    }
+
+    public function test_the_pepet_note_is_true_of_what_the_batch_sends(): void
+    {
+        // Catatan butir NLLB-200 ("batch masih mengirim pepet bertanda ê") hanya benar selama masukan batch memang
+        // begitu. Panggilan langsung membuang tanda itu (forModel); batch mengikuti BATCH_KEEPS_PEPET_MARK, konstanta
+        // yang juga dibaca halaman. Masukan batch dan konstanta itu harus berubah bersamaan.
+        Line::create(['dataset' => 'contoh', 'external_id' => 'pepet.png', 'image_path' => 'contoh/pepet.png',
+            'width' => 10, 'height' => 10, 'reference' => 'ꦏ', 'tags' => []]);
+        LineAnnotation::create(['dataset' => 'contoh', 'external_id' => 'pepet.png', 'transliteration' => 'Pêkên sêga saé',
+            'translation' => 'pasar nasi bagus', 'source' => 'uji']);
+        $this->assertSame('Peken sega saé', TranslationService::forModel('Pêkên sêga saé'));
+        $rows = app(TranslationService::class)->inputs(['label']);
+        $this->assertSame([['dataset' => 'contoh', 'external_id' => 'pepet.png', 'source' => 'label',
+            'input' => TranslationService::BATCH_KEEPS_PEPET_MARK ? 'Pêkên sêga saé' : 'Peken sega saé', 'reference' => 'pasar nasi bagus']], $rows);
     }
 
     public function test_a_card_that_no_longer_matches_the_imported_results_is_flagged(): void
@@ -499,14 +582,24 @@ class MetodePageTest extends TestCase
             $c['groups'][0]['methods'][0]['settings'][0][0] = 7;
         }));
         // Tipe: angka dalam tanda kutip bukan angka, bilangan negatif bukan jumlah, objek bukan daftar, angka bukan teks.
-        $rejects('kunci model.classes harus bilangan yang tidak negatif', $changed(function (&$c) {
+        $rejects('kunci model.classes harus bilangan bulat yang tidak negatif', $changed(function (&$c) {
             $c['model']['classes'] = 'sembilan puluh tiga';
         }));
-        $rejects('kunci model.classes harus bilangan yang tidak negatif', $changed(function (&$c) {
+        $rejects('kunci model.classes harus bilangan bulat yang tidak negatif', $changed(function (&$c) {
             $c['model']['classes'] = '93';
         }));
-        $rejects('kunci model.conv_layers harus bilangan yang tidak negatif', $changed(function (&$c) {
+        $rejects('kunci model.conv_layers harus bilangan bulat yang tidak negatif', $changed(function (&$c) {
             $c['model']['conv_layers'] = -1;
+        }));
+        // Jumlah kelas, lapis, dan parameter bilangan bulat: "1,5 kelas" atau 1e30 parameter bukan kartu yang sah.
+        $rejects('kunci model.classes harus bilangan bulat yang tidak negatif', $changed(function (&$c) {
+            $c['model']['classes'] = 1.5;
+        }));
+        $rejects('kunci model.parameters.total harus bilangan bulat yang tidak negatif', $changed(function (&$c) {
+            $c['model']['parameters']['total'] = 1e30;
+        }));
+        $rejects('kunci chain_complete harus benar/salah', $changed(function (&$c) {
+            $c['chain_complete'] = 'ya';
         }));
         $rejects('kunci model.bidirectional harus benar/salah', $changed(function (&$c) {
             $c['model']['bidirectional'] = 'ya';
@@ -539,6 +632,15 @@ class MetodePageTest extends TestCase
         $rejects('kunci groups.*.methods.*.note harus teks', $changed(function (&$c) {
             $c['groups'][3]['methods'][0]['note'] = ['bukan', 'teks'];
         }));
+        // Kotak "Terukur" selalu menyebut sumbernya: bukti tanpa sumber (tidak ada, null, atau kosong) ditolak.
+        foreach ([null, ''] as $source) {
+            $rejects('Kartu metode tidak sah: butir visual_order punya bukti tanpa sumbernya (evidence_source).', $changed(function (&$c) use ($source) {
+                $c['groups'][0]['methods'][2]['evidence_source'] = $source;
+            }));
+        }
+        $rejects('butir tracking punya bukti tanpa sumbernya', $changed(function (&$c) {
+            unset($c['groups'][1]['methods'][0]['evidence_source']);
+        }));
         $rejects('kunci results_generated tidak ada', $changed(function (&$c) {
             unset($c['results_generated']);
         }));
@@ -565,6 +667,13 @@ class MetodePageTest extends TestCase
         $rejects('kunci butir cnn berulang', $changed(function (&$c) {
             $c['groups'][1]['methods'][0]['key'] = 'cnn';
         }));
+        // N08: kunci butir tahap lanjutan milik halaman tidak boleh dipakai kartu (dua butir berkunci sama, dan ubin
+        // menghitung butir menurut kuncinya).
+        foreach (Metode::WEB_KEYS as $key) {
+            $rejects("kunci butir {$key} milik butir tahap lanjutan yang ditulis halaman", $changed(function (&$c) use ($key) {
+                $c['groups'][0]['methods'][0]['key'] = $key;
+            }));
+        }
         $rejects('kunci groups.*.methods.*.settings harus daftar', $changed(function (&$c) {
             $c['groups'][0]['methods'][0]['settings'] = [['Label', 'nilai'], 'kunci' => ['Label', 'nilai']];
         }));
@@ -575,16 +684,32 @@ class MetodePageTest extends TestCase
             $c['groups'][0]['methods'][0]['files'] = ['src/model.py', ['bukan', 'teks']];
         }));
 
-        // Kartu tanpa kunci pilihan (catatan, kunci rencana, arah LSTM) tetap diterima: memang boleh tidak ada.
+        // Kartu tanpa kunci pilihan (catatan, kunci rencana, arah LSTM; bukti dan sumbernya pada butir yang memang tidak
+        // punya bukti) tetap diterima: memang boleh tidak ada. Sumber tanpa bukti juga bukan kesalahan.
         $bare = $this->card();
         unset($bare['model']['bidirectional'], $bare['planned'][0]['key'], $bare['chain_complete']);
+        $dropped = 0;
         foreach ($bare['groups'] as &$group) {
             foreach ($group['methods'] as &$method) {
-                unset($method['note'], $method['evidence_source']);
+                unset($method['note']);
+                if (! $method['evidence']) {
+                    unset($method['evidence'], $method['evidence_source']);
+                    $dropped++;
+                }
             }
         }
         unset($group, $method);
+        $this->assertSame(3, $dropped);
+        $bare['groups'][0]['methods'][0]['evidence_source'] = 'src/model.py';
         $this->import($bare);
+        // ... dan halamannya dibaca: tanpa kunci arah, LSTM-nya dianggap dua arah (arsitektur proyek); tanpa kunci
+        // kelengkapan rantai, "dilatih dari nol" tidak diklaim.
+        $this->actingAs(User::factory()->create());
+        $html = $this->get('/metode')->assertOk()->getContent();
+        $this->assertSame('Model pembaca CRNN + CTC CNN 7 lapis → BiLSTM 2 lapis → 93 kelas', $this->tile($html, 'Model pembaca'));
+        $this->assertSame(['BiLSTM', '2 lapis, dua arah', true], $this->flowSteps($html, "//ol[contains(@class, 'flow')]/li[@data-step]")[2]);
+        $this->assertStringStartsWith('Parameter 4.590.909 CNN 1,9 juta · BiLSTM 2,6 juta', $this->tile($html, 'Parameter'));
+        $this->assertNull($this->shown($html, 'gates')['note']);
         $this->import($this->card());
 
         unlink($this->dir.'/methods.json');
@@ -658,6 +783,24 @@ class MetodePageTest extends TestCase
             ->assertSuccessful();
         $this->assertSame(1, MethodReport::count());
         $this->artisan('aksara:methods', ['--path' => $this->dir])->expectsOutputToContain('Skema kartu metode 5 tidak didukung')->assertFailed();
+
+        // Begitu juga kartu yang salah tipe dan kartu yang halamannya tidak bisa dirender: itu kartu yang DITOLAK
+        // (peringatan, kode sukses), bukan galat penyimpanan (yang menggagalkan perintah).
+        $wrong = $this->card();
+        $wrong['model']['classes'] = 'sembilan puluh tiga';
+        $this->write($wrong);
+        $this->artisan('aksara:import', ['--path' => $this->dir])
+            ->expectsOutputToContain('tetapi kartu halaman Metode ditolak. Kartu metode tidak sah: kunci model.classes harus bilangan bulat')
+            ->doesntExpectOutputToContain('tidak diimpor.')->assertSuccessful();
+        $this->write($this->card());
+        View::composer('livewire.pages.metode', function () {
+            throw new LogicException('halaman rusak');
+        });
+        $this->artisan('aksara:import', ['--path' => $this->dir])
+            ->expectsOutputToContain('tetapi kartu halaman Metode ditolak. Kartu metode tidak bisa ditampilkan halamannya (halaman rusak)')
+            ->doesntExpectOutputToContain('tidak diimpor.')->assertSuccessful();
+        Event::forget('composing: livewire.pages.metode');
+        $this->assertSame(1, MethodReport::count());
 
         // Kartu data yang ditolak tidak menghentikan impor kartu metode di sebelahnya.
         MethodReport::query()->delete();
@@ -736,8 +879,15 @@ class MetodePageTest extends TestCase
             ->expectsOutputToContain('Kartu metode tidak bisa ditampilkan halamannya (halaman rusak); kartu sebelumnya dipertahankan')->assertFailed();
         $this->assertSame('2026-10-05T23:40:00', MethodReport::sole()->generated_at);
 
+        // Yang dirender saat impor adalah kartu CALON: bukan halaman kosong, bukan kartu yang masih tersimpan.
         Event::forget('composing: livewire.pages.metode');
+        $rendered = [];
+        View::composer('livewire.pages.metode', function ($view) use (&$rendered) {
+            $rendered[] = $view->getData()['card']['generated'] ?? null;
+        });
         $this->import($newer);
+        $this->assertSame(['2026-10-09T10:00:00'], $rendered);
+        Event::forget('composing: livewire.pages.metode');
         $this->assertSame('2026-10-09T10:00:00', MethodReport::sole()->generated_at);
     }
 
@@ -834,6 +984,19 @@ class MetodePageTest extends TestCase
         $this->assertSame(['Urutan <script>alert(1)</script> visual.', 'Gerbang <b>G4</b>, 100%.', '<i>data</i>/tokenizer.json'],
             [$order['summary'], $order['evidence'], $order['source']]);
         $this->assertSame('Catatan <u>berbahaya</u>.', $this->shown($html, 'gates')['note']);
+
+        // B7: "dilatih dari nol" hanya bila kartu menyatakan rantai checkpoint-nya terbaca utuh; "+ CTC" hanya bila
+        // butirnya ada di kartu.
+        $cut = $this->card();
+        $cut['chain_complete'] = false;
+        $this->import($cut);
+        $html = $this->get('/metode')->assertOk()->getContent();
+        $this->assertSame('Model pembaca CRNN + CTC CNN 7 lapis → BiLSTM 2 lapis → 93 kelas', $this->tile($html, 'Model pembaca'));
+        $this->assertStringStartsWith('Model hasil belajar 2 dipakai CRNN · NLLB-200 (pralatih, tidak dilatih ulang)', $this->tile($html, 'Model hasil belajar'));
+        $other = $this->card();
+        $other['groups'][0]['methods'] = [$other['groups'][0]['methods'][0], $other['groups'][0]['methods'][2]];  // tanpa butir CTC
+        $this->import($other);
+        $this->assertStringStartsWith('Model pembaca CRNN CNN 7 lapis', $this->tile($this->get('/metode')->getContent(), 'Model pembaca'));
     }
 
     public function test_the_card_exported_on_this_machine_imports_and_renders(): void

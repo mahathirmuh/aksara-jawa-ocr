@@ -52,10 +52,7 @@ php artisan aksara:datasets</pre>
             <div class="card-body">
                 <div class="mb-4">
                     <h2 class="section-title">Pembagian latih, validasi, uji</h2>
-                    <p class="card-subtitle max-w-[85ch]">
-                        {{ nfmt($card['corpus']['lines']) }} baris teks dibagi menurut artikel asalnya, jadi satu artikel tidak pernah muncul di dua bagian
-                        dan teks uji tidak pernah dilihat saat latih.
-                    </p>
+                    <p class="card-subtitle max-w-[85ch]" data-split-intro>{{ $splitIntro }}</p>
                 </div>
                 <div class="split-bar" role="img"
                      aria-label="{{ collect($parts)->map(fn ($p) => $p['label'].' '.pct($p['share']))->join(', ') }}">

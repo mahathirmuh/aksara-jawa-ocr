@@ -14,7 +14,10 @@ use App\Services\DatasetImporter;
 use App\Support\TalingRestorer;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\View;
+use LogicException;
 use Tests\Concerns\ReadsPage;
 use Tests\Concerns\RejectsCards;
 use Tests\TestCase;
@@ -86,7 +89,8 @@ class DatasetPageTest extends TestCase
                     ['kind' => 'beam', 'file' => 'out/beam/fonts_o5.json', 'lines' => 300, 'checkpoints' => 1]], 'gates' => [
                         ['code' => 'G1', 'lines' => 10000, 'fonts' => ['javatext.ttf'], 'split' => 'test', 'augment' => 'none', 'source' => 'out/eval/fase7_track_G1_10k.json'],
                         ['code' => 'G2', 'lines' => 10000, 'fonts' => ['javatext.ttf'], 'split' => 'test', 'augment' => 'heavy', 'source' => 'out/eval/fase7_track_G2_10k.json']]],
-                'real' => ['lines' => 745, 'reports' => 36, 'gates' => [['code' => 'G3', 'lines' => 745, 'fonts' => [], 'split' => null, 'augment' => null, 'source' => 'out/eval/fase7_track_G3_full.json']]],
+                'real' => ['lines' => 745, 'reports' => 36, 'others' => [['kind' => 'beam', 'file' => 'out/beam/fonts_o5.json', 'lines' => 745]],
+                    'gates' => [['code' => 'G3', 'lines' => 745, 'fonts' => [], 'split' => null, 'augment' => null, 'source' => 'out/eval/fase7_track_G3_full.json']]],
             ],
             'lineage' => ['complete' => true, 'steps' => 3000, 'samples' => 96000, 'pool' => 100000, 'distinct_lines' => 64595, 'runs' => [
                 $this->chainRun('fase6_ctrl', null, 1500, 100000, 19712, 10, ['processes' => 3, 'segments' => [[0, 500], [500, 884], [884, 1500]]]),
@@ -198,7 +202,8 @@ class DatasetPageTest extends TestCase
         $meter = fn (string $key, string $attribute) => $xpath->evaluate("string(//*[@data-part='{$key}']//div[contains(@class, 'meter')]{$attribute})");
         $this->assertSame(['width: 5.15%', 'width: 0.966%', 'width: 19.746%'], array_map(fn ($key) => $meter($key, '/span/@style'), ['train', 'val', 'test']));
         $this->assertSame(['5,2% bagian latih', '1,0% bagian validasi', '19,7% bagian uji'], array_map(fn ($key) => $meter($key, '/@aria-label'), ['train', 'val', 'test']));
-        $page->assertSee('jadi satu artikel tidak pernah muncul di dua bagian')->assertSee('dan teks uji tidak pernah dilihat saat latih.');
+        $this->assertSame('1.034.357 baris teks dibagi menurut artikel asalnya, jadi satu artikel tidak pernah muncul di dua bagian dan teks '
+            .'uji tidak pernah dilihat saat latih.', $this->part($html, 'data-split-intro', ''));
         $page->assertSee('bagian uji saja sudah 50.643 baris, padahal gerbang hanya memakai 10.000, dan sepanjang rantai run resmi baru 6,9% '
             .'bagian latih yang pernah dijadwalkan.');
 
@@ -253,7 +258,7 @@ class DatasetPageTest extends TestCase
         // Batasan dan data pendukung.
         $page->assertSee('Font uji javatext sekeluarga dengan font latih CarakanJawa: lebar 72 dari 73 aksara, angka, dan pada persis sama. G1 dan G2 karena itu')
             ->assertSee('Semua 745 baris NusaAksara, bagian aksara Jawa dipakai sebagai data uji, dan tidak ada data nyata untuk validasi.')
-            ->assertSee('(data itu sudah dievaluasi 36 kali sepanjang proyek)')->assertSee('berasal dari satu terbitan dengan huruf yang sama')
+            ->assertSee('(data itu sudah dievaluasi paling sedikit 37 kali sepanjang proyek)')->assertSee('berasal dari satu terbitan dengan huruf yang sama')
             ->assertSee('43 baris papan nama Wikimedia Commons masih menunggu verifikasi pembaca aksara.')
             ->assertSee('44 dari 91 karakter aksara Jawa di charset ada di hanya 100 baris latih masing-masing')
             ->assertSee('Di antara 48.000 baris yang dijadwalkan run resmi, tiap karakter itu muncul di 1–14 baris, rata-rata 5,9.')
@@ -397,6 +402,18 @@ class DatasetPageTest extends TestCase
             ->assertSee('rata-rata 5,9. Sisipan aksara langka saat render sudah diuji; hasilnya ada di halaman Metode.');
         $this->assertStringContainsString('43 baris citra 40 terverifikasi 3 baris menunggu verifikasi', $this->part($page->getContent(), 'data-dataset', 'commons'));
 
+        // N09: ada baris berteks sama di lebih dari satu bagian: "teks uji tidak pernah dilihat saat latih" tidak ditulis,
+        // jumlahnya yang disebut. Tanpa pembaca lain data nyata: hitungannya laporan gerbang saja (36).
+        $card = $this->card();
+        $card['corpus']['leaked_lines'] = 12;
+        unset($card['usage']['real']['others']);
+        $this->import($card);
+        $page = $this->get('/dataset')->assertOk()->assertSee('(data itu sudah dievaluasi paling sedikit 36 kali sepanjang proyek)')
+            ->assertDontSee('tidak pernah dilihat saat latih');
+        $this->assertSame('1.034.357 baris teks dibagi menurut artikel asalnya, jadi satu artikel tidak pernah muncul di dua bagian. Walau '
+            .'begitu, 12 baris berteks sama ada di lebih dari satu bagian.', $this->part($page->getContent(), 'data-split-intro', ''));
+        $this->assertStringEndsWith('teks yang sama di dua bagian: 12 baris', $this->tile($page->getContent(), 'Pembagian'));
+
         // Rasio rancangan (keranjang artikel) bukan pembulatan porsi baris, dan batch terakhir yang lebih kecil membuat
         // sampel bukan langkah x ukuran batch: dua-duanya ditampilkan seperti di kartu.
         $card = $this->card();
@@ -437,7 +454,11 @@ class DatasetPageTest extends TestCase
         $this->assertStringContainsString('data nyata ikut dilatih', $this->part($html, 'data-run', 'fase7_track'));
         $page->assertSee('Checkpoint fase7_track dilatih dalam satu run, dari bobot acak. Jumlah baris berbeda di sepanjang rantai tidak dihitung.')
             ->assertSee('padahal gerbang hanya memakai 10.000. Membagi ulang')
-            ->assertDontSee('pernah dijadwalkan')->assertDontSee('Aksara langka nyaris tidak terlihat')->assertDontSee('kumpulan acak yang sama');
+            ->assertDontSee('pernah dijadwalkan')->assertDontSee('kumpulan acak yang sama')
+            // Kelangkaan aksara di korpus berlaku apa pun jadwalnya; yang tidak dihitung hanya bagian jadwalnya.
+            ->assertSee('44 dari 91 karakter aksara Jawa di charset ada di hanya 100 baris latih masing-masing: aksara murda dan mahaprana, '
+                .'aksara swara, beberapa sandhangan dan pada. Berapa baris di antaranya yang dijadwalkan run resmi tidak dihitung.')
+            ->assertDontSee('tiap karakter itu muncul di');
 
         // Satu run yang terbaca, tetapi checkpoint leluhurnya sudah tidak ada: BUKAN "dari bobot acak".
         $card['lineage']['complete'] = false;
@@ -540,18 +561,51 @@ class DatasetPageTest extends TestCase
             unset($c['usage']['val']['steps']);
         }));
         // Tipe yang salah.
-        $rejects('kunci corpus.lines harus bilangan yang tidak negatif', $changed(function (&$c) {
+        $rejects('kunci corpus.lines harus bilangan bulat yang tidak negatif', $changed(function (&$c) {
             $c['corpus']['lines'] = 'sejuta';
         }));
         // Angka dalam tanda kutip bukan angka, dan bilangan negatif bukan jumlah.
-        $rejects('kunci corpus.lines harus bilangan yang tidak negatif', $changed(function (&$c) {
+        $rejects('kunci corpus.lines harus bilangan bulat yang tidak negatif', $changed(function (&$c) {
             $c['corpus']['lines'] = '1034357';
         }));
-        $rejects('kunci usage.test.lines harus bilangan yang tidak negatif', $changed(function (&$c) {
+        $rejects('kunci usage.test.lines harus bilangan bulat yang tidak negatif', $changed(function (&$c) {
             $c['usage']['test']['lines'] = -1;
         }));
-        $rejects('kunci splits.*.lines harus bilangan yang tidak negatif', $changed(function (&$c) {
+        $rejects('kunci splits.*.lines harus bilangan bulat yang tidak negatif', $changed(function (&$c) {
             $c['splits'][2]['lines'] = -50643;
+        }));
+        // Jumlah baris bilangan bulat ("1.034.357,5 baris" bukan kartu yang sah); peluang dan porsi boleh pecahan.
+        $rejects('kunci corpus.lines harus bilangan bulat yang tidak negatif', $changed(function (&$c) {
+            $c['corpus']['lines'] = 1034357.5;
+        }));
+        $rejects('kunci lineage.runs.*.steps harus bilangan bulat yang tidak negatif', $changed(function (&$c) {
+            $c['lineage']['runs'][0]['steps'] = 1e30;
+        }));
+        $rejects('kunci splits.*.share harus bilangan dari 0 sampai 1', $changed(function (&$c) {
+            $c['splits'][0]['share'] = -0.9;
+        }));
+        // Porsi dan peluang tidak lebih dari 1 ("bagian latih 250%", "CER ≤ 150%", "peluang 50" bukan kartu yang sah);
+        // jarak dalam em bukan porsi dan boleh lebih dari 1.
+        $rejects('kunci splits.*.share harus bilangan dari 0 sampai 1', $changed(function (&$c) {
+            $c['splits'][0]['share'] = 2.5;
+        }));
+        $rejects('kunci corpus.max_roundtrip_cer harus bilangan dari 0 sampai 1', $changed(function (&$c) {
+            $c['corpus']['max_roundtrip_cer'] = 1.5;
+        }));
+        $rejects('kunci corpus.roundtrip_pass_rate harus bilangan dari 0 sampai 1', $changed(function (&$c) {
+            $c['corpus']['roundtrip_pass_rate'] = 95.8;
+        }));
+        $rejects('kunci corpus.roundtrip_pass_rate harus bilangan dari 0 sampai 1', $changed(function (&$c) {
+            $c['corpus']['roundtrip_pass_rate'] = '0.958';
+        }));
+        $rejects('kunci lineage.runs.*.drop_space_prob harus bilangan dari 0 sampai 1', $changed(function (&$c) {
+            $c['lineage']['runs'][1]['drop_space_prob'] = 50;
+        }));
+        $rejects('kunci lineage.runs.*.track_prob harus bilangan dari 0 sampai 1', $changed(function (&$c) {
+            $c['lineage']['runs'][1]['track_prob'] = 1.01;
+        }));
+        $rejects('kunci lineage.runs.*.track_max harus bilangan yang tidak negatif', $changed(function (&$c) {
+            $c['lineage']['runs'][1]['track_max'] = -0.3;
         }));
         // Objek bukan daftar, dan angka bukan teks.
         $rejects('kunci fonts harus daftar', $changed(function (&$c) {
@@ -576,16 +630,31 @@ class DatasetPageTest extends TestCase
         $rejects('kunci corpus.split_buckets.* harus bilangan yang tidak negatif', $changed(function (&$c) {
             $c['corpus']['split_buckets']['train'] = 'abc';
         }));
-        $rejects('kunci datasets.*.pending harus bilangan yang tidak negatif', $changed(function (&$c) {
+        $rejects('kunci datasets.*.pending harus bilangan bulat yang tidak negatif', $changed(function (&$c) {
             $c['datasets'][2]['pending'] = 'tiga';
         }));
-        $rejects('kunci usage.test.others.*.lines harus bilangan yang tidak negatif', $changed(function (&$c) {
+        $rejects('kunci usage.test.others.*.lines harus bilangan bulat yang tidak negatif', $changed(function (&$c) {
             $c['usage']['test']['others'][0]['lines'] = 'banyak';
+        }));
+        $rejects('kunci usage.test.others.*.kind harus teks yang tidak kosong', $changed(function (&$c) {
+            $c['usage']['test']['others'][0]['kind'] = 5;
+        }));
+        $rejects('kunci usage.real.others harus daftar', $changed(function (&$c) {
+            $c['usage']['real']['others'] = 'banyak';
+        }));
+        $rejects('kunci lineage.complete harus benar/salah', $changed(function (&$c) {
+            $c['lineage']['complete'] = 'ya';
+        }));
+        $rejects('kunci fonts.*.in_repo harus benar/salah', $changed(function (&$c) {
+            $c['fonts'][0]['in_repo'] = 'tidak';
+        }));
+        $rejects('kunci fonts.*.drops_space harus benar/salah', $changed(function (&$c) {
+            $c['fonts'][2]['drops_space'] = 'tidak';
         }));
         $rejects('kunci fonts harus daftar', $changed(function (&$c) {
             $c['fonts'] = 'bukan daftar';
         }));
-        $rejects('kunci datasets.*.roles.* harus bilangan yang tidak negatif', $changed(function (&$c) {
+        $rejects('kunci datasets.*.roles.* harus bilangan bulat yang tidak negatif', $changed(function (&$c) {
             $c['datasets'][0]['roles']['train'] = 'banyak';
         }));
         $rejects('kunci datasets.*.shareable harus benar/salah', $changed(function (&$c) {
@@ -598,11 +667,14 @@ class DatasetPageTest extends TestCase
         $rejects('kunci corpus.other harus angka', $changed(function (&$c) {
             $c['corpus']['other'] = '5';
         }));
-        $rejects('kunci usage.train.rare_insert_prob harus bilangan yang tidak negatif', $changed(function (&$c) {
+        $rejects('kunci usage.train.rare_insert_prob harus bilangan dari 0 sampai 1', $changed(function (&$c) {
             $c['usage']['train']['rare_insert_prob'] = 'sering';
         }));
-        $rejects('kunci usage.train.rare_opener_prob harus bilangan yang tidak negatif', $changed(function (&$c) {
+        $rejects('kunci usage.train.rare_opener_prob harus bilangan dari 0 sampai 1', $changed(function (&$c) {
             $c['usage']['train']['rare_opener_prob'] = -0.15;
+        }));
+        $rejects('kunci usage.train.rare_insert_prob harus bilangan dari 0 sampai 1', $changed(function (&$c) {
+            $c['usage']['train']['rare_insert_prob'] = 3;
         }));
         $rejects('kunci fonts.*.missing harus daftar', $changed(function (&$c) {
             $c['fonts'][1]['missing'] = 'U+A98E';
@@ -623,16 +695,71 @@ class DatasetPageTest extends TestCase
         $rejects('lineage.runs dan corpus.length_histogram tidak boleh kosong', $changed(function (&$c) {
             $c['lineage']['runs'] = [];
         }));
-        // Lolos daftar kunci tetapi tidak bisa ditampilkan: uji tampil saat impor menolaknya.
-        $rejects('Kartu data tidak bisa ditampilkan halamannya', $changed(function (&$c) {
+        // Isi daftar yang dicetak apa adanya (kode karakter yang tidak ada di font, catatan font, calon peran) harus
+        // teks, dan angka data pendukung harus bilangan bulat: "Tidak punya 7", "-1 karakter + blank" bukan kartu yang sah.
+        $rejects('kunci fonts.*.missing.* harus teks', $changed(function (&$c) {
             $c['fonts'][1]['missing'] = [['bukan', 'kode']];
+        }));
+        $rejects('kunci fonts.*.missing.* harus teks', $changed(function (&$c) {
+            $c['fonts'][1]['missing'] = [7];
+        }));
+        $rejects('kunci fonts.*.notes.* harus teks', $changed(function (&$c) {
+            $c['fonts'][0]['notes'] = ['Catatan pertama.', 2];
+        }));
+        $rejects('kunci datasets.*.planned.* harus teks', $changed(function (&$c) {
+            $c['datasets'][2]['planned'] = [['train']];
         }));
         $rejects('kunci rare.scheduled_lines.* harus bilangan yang tidak negatif', $changed(function (&$c) {
             $c['rare']['scheduled_lines'] = ['min' => 'satu', 'max' => 2, 'mean' => 1.5];
         }));
-        $rejects('Kartu data tidak bisa ditampilkan halamannya', $changed(function (&$c) {
+        // Rata-rata boleh pecahan, tetapi tetap bukan angka dalam tanda kutip.
+        $rejects('kunci rare.scheduled_lines.* harus bilangan yang tidak negatif', $changed(function (&$c) {
+            $c['rare']['scheduled_lines'] = ['min' => 1, 'max' => 14, 'mean' => '5.9'];
+        }));
+        $rejects('kunci support.*.characters harus bilangan bulat yang tidak negatif', $changed(function (&$c) {
             $c['support'][0] = ['key' => 'charset', 'characters' => ['bukan', 'angka'], 'classes' => 93];
         }));
+        $rejects('kunci support.*.characters harus bilangan bulat yang tidak negatif', $changed(function (&$c) {
+            $c['support'][0]['characters'] = -1;
+        }));
+        $rejects('kunci support.*.classes harus bilangan bulat yang tidak negatif', $changed(function (&$c) {
+            $c['support'][0]['classes'] = '93';
+        }));
+        $rejects('kunci support.*.order harus bilangan bulat yang tidak negatif', $changed(function (&$c) {
+            $c['support'][1]['order'] = 5.5;
+        }));
+        $rejects('kunci support.*.lines harus bilangan bulat yang tidak negatif', $changed(function (&$c) {
+            $c['support'][2]['lines'] = 'lima puluh';
+        }));
+        $rejects('kunci support.*.file harus teks', $changed(function (&$c) {
+            $c['support'][0]['file'] = ['data/tokenizer.json'];
+        }));
+
+        // Jaring terakhir: sebelum disimpan, halaman dirender sekali dengan kartu CALON (bukan kartu yang tersimpan, bukan
+        // halaman kosong). Apa pun yang gagal di situ (di sini: galat buatan saat tampilan disusun) membatalkan impor
+        // dan kartu lama dipertahankan.
+        $rendered = [];
+        View::composer('livewire.pages.dataset', function ($view) use (&$rendered) {
+            $rendered[] = $view->getData()['card']['generated'] ?? null;
+        });
+        $newer = ['generated' => '2026-10-09T10:00:00'] + $this->card();
+        $this->import($newer);
+        $this->assertSame(['2026-10-09T10:00:00'], $rendered);
+        Event::forget('composing: livewire.pages.dataset');
+        View::composer('livewire.pages.dataset', function () {
+            throw new LogicException('halaman rusak');
+        });
+        $rejects('Kartu data tidak bisa ditampilkan halamannya (halaman rusak); kartu sebelumnya dipertahankan. Penyebabnya kartu itu, atau '
+            .'berkas dan tabel web lain yang dibaca halamannya.', $this->card());
+        $this->assertSame('2026-10-09T10:00:00', DatasetReport::sole()->generated_at);
+        Event::forget('composing: livewire.pages.dataset');
+        $this->import($this->card());
+
+        // Batas porsi tidak berlaku untuk jarak (em) dan batas-batasnya sendiri sah: jarak 1,5 em, peluang 0 dan 1.
+        $wide = $this->card();
+        $wide['lineage']['runs'][1] = ['track_max' => 1.5, 'track_prob' => 1, 'drop_space_prob' => 0] + $wide['lineage']['runs'][1];
+        $this->import($wide);
+        $this->import($this->card());
 
         // Kartu tanpa kunci pilihan sama sekali tetap diterima (ekspor lama): yang pilihan memang boleh tidak ada.
         $bare = $this->card();
@@ -676,6 +803,37 @@ class DatasetPageTest extends TestCase
         $this->assertStringContainsString('Kartu data tidak bisa disimpan karena keadaan database web', $caught->getMessage());
         $this->assertStringContainsString('php artisan migrate', $caught->getMessage());
         $this->artisan('aksara:datasets', ['--path' => $this->dir])->expectsOutputToContain('php artisan migrate')->assertFailed();
+
+        // aksara:import: hasil OCR tersimpan, tetapi kartu data tidak bisa disimpan. Perintahnya keluar dengan kode gagal,
+        // dan kegagalan itu tidak tertimpa oleh kartu sesudahnya (di sini kartu metode, yang berkasnya tidak ada).
+        $this->writeResults();
+        $this->artisan('aksara:import', ['--path' => $this->dir])
+            ->expectsOutputToContain('Kartu halaman Dataset tidak diimpor. Kartu data tidak bisa disimpan karena keadaan database web')
+            ->expectsOutputToContain('Kartu halaman Metode (methods.json) tidak ada di folder itu')
+            ->assertFailed();
+    }
+
+    public function test_a_card_that_cannot_be_stored_fails_the_results_import_even_when_the_next_card_is_fine(): void
+    {
+        // Kartu data tidak bisa disimpan (tabelnya belum dimigrasi), kartu metode sesudahnya berhasil diimpor: perintahnya
+        // tetap keluar dengan kode gagal. Kegagalan kartu pertama tidak tertimpa oleh keberhasilan kartu berikutnya.
+        Schema::drop('dataset_reports');
+        $this->writeResults();
+        $this->write($this->card());
+        file_put_contents($this->dir.'/methods.json', json_encode([
+            'schema' => 1, 'generated' => '2026-10-06T00:00:00', 'results_generated' => '2026-10-06T00:00:00',
+            'official' => ['run' => 'fase7_track', 'pipeline' => 'crnn_fase7_track'],
+            'model' => ['classes' => 93, 'height' => 96, 'conv_layers' => 7, 'lstm_layers' => 2,
+                'parameters' => ['total' => 5, 'cnn' => 1, 'proj' => 1, 'rnn' => 2, 'head' => 1]],
+            'groups' => [], 'planned' => [],
+        ]));
+        $this->artisan('aksara:import', ['--path' => $this->dir])
+            ->expectsOutputToContain('Kartu halaman Dataset tidak diimpor. Kartu data tidak bisa disimpan karena keadaan database web')
+            ->expectsOutputToContain('Kartu metode diimpor: 0 butir di 0 kelompok, 0 direncanakan, model 5 parameter, run fase7_track.')
+            ->doesntExpectOutputToContain('PERINGATAN')
+            ->assertFailed();
+        $this->assertSame('fase7_track', MethodReport::sole()->official_run);
+        $this->assertSame('crnn_fase7_track', Pipeline::official()->key);  // hasil OCR tetap diimpor
     }
 
     public function test_the_data_card_has_its_own_schema_number(): void

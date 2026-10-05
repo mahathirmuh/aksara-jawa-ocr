@@ -292,8 +292,10 @@ def test_build_describes_a_fake_repo(tmp_path):
     assert usage["test"]["others"] == []
     assert (first["fonts_source"], last["fonts_source"]) == ("folder", "folder")
     assert usage["test"]["gates"][1]["augment"] == "heavy" and usage["test"]["gates"][0]["fonts"] == ["javatext.ttf"]
-    assert usage["real"] == {"lines": 3, "reports": 2, "gates": [{"code": "G3", "lines": 3, "fonts": [], "split": None,
-                                                                  "augment": None, "source": "out/eval/runB_G3_full.json"}]}
+    assert usage["real"] == {"lines": 3, "reports": 2, "others": [],
+                             "gates": [{"code": "G3", "lines": 3, "fonts": [], "split": None, "augment": None,
+                                        "source": "out/eval/runB_G3_full.json"}]}
+    assert first["font_names"] is None and last["font_names"] is None  # log lama tidak mencatat nama font
 
     rare = card["rare"]
     assert (rare["codepoints"], rare["javanese"], rare["charset"]) == (2, 4, 5)  # RARE (1 baris) dan NEVER (0 baris)
@@ -658,46 +660,90 @@ def test_other_readers_of_the_test_split_and_font_counts_from_logs(tmp_path):
     (root / "out/beam/x.json").write_text(json.dumps({"clean_heldout_font": {"lines": 300}, "real": {"lines": 3}}), encoding="utf-8")
     (root / "out/beam/rusak.json").write_text("{bukan json", encoding="utf-8")
     (root / "out/beam/tanpa.json").write_text(json.dumps({"dev": {"lines": 300}}), encoding="utf-8")
+    # d01: laporan tanpa hasil per font (hanya "semua") tetap dihitung barisnya: ini evaluasi penuh, bukan tes cepat.
+    (root / "out/eval/lain2_G1_10k.json").write_text(json.dumps(
+        {"goal": "G1", "split": "test", "results": {"semua": {"lines": OFFICIAL_LINES}}}), encoding="utf-8")
 
     card = ed.build(root, "runB", root / "ujifont")
+    assert (card["usage"]["test"]["quick"], card["usage"]["test"]["quick_max_lines"], card["usage"]["test"]["full"]) == (2, 100, 2)
+    # N11: evaluasi di luar out/eval yang membaca SEMUA baris data nyata ikut tercatat.
+    assert card["usage"]["real"]["others"] == [{"kind": "beam", "file": "out/beam/x.json", "lines": 3}]
+    assert card["usage"]["real"]["reports"] == 2
     assert card["usage"]["test"]["others"] == [
         {"kind": "rare_synthetic", "file": "out/compare/fase7/rare_synthetic.json", "lines": 50, "checkpoints": 2},
         {"kind": "rare_synthetic", "file": "out/compare/rare_synthetic.json", "lines": 2000, "checkpoints": 3},
         {"kind": "beam", "file": "out/beam/x.json", "lines": 300, "checkpoints": 1}]
 
-    # F08: log run yang lebih baru mencatat daftar font; jumlahnya dipakai apa adanya walau folder sudah berubah.
+    # F08 / N02: log run yang lebih baru mencatat NAMA fontnya. Jumlahnya dipakai apa adanya walau folder sudah berubah,
+    # peran latih di tabel font hanya untuk nama yang tercatat, dan selisihnya dengan folder diperingatkan.
     ckpt = root / "out/checkpoints/runB"
-    names = [font.name for font in TRAIN_FONTS] + ["Salinan.ttf", "SudahDihapus.ttf"]
-    write_log(ckpt / "log.jsonl", [{**start(0), "fonts": names}, {"step": 10, "val_cer": 0.05}, {"step": 10, "event": "end"}])
-    train = ed.build(root, "runB", root / "ujifont")["usage"]["train"]
-    assert (train["fonts"], train["extra_fonts"], train["fonts_source"]) == (4, 2, "log")
-    # Run yang dilanjutkan: daftar font proses TERAKHIR yang dipakai (proses itulah yang menulis checkpoint-nya).
-    write_log(ckpt / "log.jsonl", [{**start(0), "fonts": names}, {"step": 5, "val_cer": 0.1},
-                                   {**start(5), "fonts": names[:3]}, {"step": 10, "val_cer": 0.05}, {"step": 10, "event": "end"}])
-    train = ed.build(root, "runB", root / "ujifont")["usage"]["train"]
-    assert (train["fonts"], train["extra_fonts"], train["fonts_source"]) == (3, 1, "log")
+    core = [font.name for font in TRAIN_FONTS]
+    names = core + ["Salinan.ttf", "SudahDihapus.ttf"]
+    ending = [{"step": 10, "val_cer": 0.05}, {"step": 10, "event": "end"}]
+    write_log(ckpt / "log.jsonl", [{**start(0), "fonts": names}, *ending])
+    card = ed.build(root, "runB", root / "ujifont")
+    train = card["usage"]["train"]
+    assert (train["fonts"], train["extra_fonts"], train["fonts_source"], train["font_names"]) == (4, 2, "log", names)
+    assert card["warnings"] == ["Run runB: log mencatat 4 font latih, tetapi 1 di antaranya tidak ada lagi di folder font "
+                                "(SudahDihapus.ttf); font itu tidak ada di tabel font kartu ini."]
+    assert sorted(f["file"] for f in card["fonts"] if "train" in f["roles"]) == sorted(core + ["Salinan.ttf"])
+    # Font yang ditambahkan ke folder SESUDAH run dilatih tidak diberi peran latih, dan itu diperingatkan.
+    write_log(ckpt / "log.jsonl", [{**start(0), "fonts": core}, *ending])
+    card = ed.build(root, "runB", root / "ujifont")
+    assert (card["usage"]["train"]["fonts"], card["usage"]["train"]["extra_fonts"]) == (2, 0)
+    assert card["warnings"] == ["Run runB: folder font sekarang memuat 1 font yang tidak tercatat di log run itu (Salinan.ttf); "
+                                "font itu tidak diberi peran latih."]
+    roles = {f["file"]: f["roles"] for f in card["fonts"]}
+    assert roles["Salinan.ttf"] == [] and all(roles[name] == ["train", "val"] for name in core)
+    assert "shared_with_test" not in next(f for f in card["fonts"] if f["file"] == "Salinan.ttf")
+    # Run yang dilanjutkan: daftar proses TERAKHIR sebelum langkah checkpoint yang dipakai (proses itulah yang menulis
+    # checkpoint-nya). Proses yang mulai tepat di langkah checkpoint baru melanjutkannya: daftarnya bukan milik
+    # checkpoint ini.
+    write_log(ckpt / "log.jsonl", [{**start(0), "fonts": names}, {"step": 5, "val_cer": 0.1}, {**start(5), "fonts": names[:3]},
+                                   *ending, {**start(10), "fonts": core[:1]}])
+    card = ed.build(root, "runB", root / "ujifont")
+    train = card["usage"]["train"]
+    assert (train["fonts"], train["extra_fonts"], train["fonts_source"]) == (3, 1, "log") and card["warnings"] == []
+    assert ed.logged_fonts([{**start(10), "fonts": core}], 10) is None and ed.logged_fonts([start(0)], 10) is None
+    assert ed.logged_fonts([{**start(9), "fonts": core}, {**start(10), "fonts": []}], 10) == core
+    # Proses tanpa baris sintetis mencatat daftar kosong: tidak ada yang dibandingkan dengan folder.
+    write_log(ckpt / "log.jsonl", [{**start(0), "fonts": []}, *ending])
+    card = ed.build(root, "runB", root / "ujifont")
+    assert (card["usage"]["train"]["fonts"], card["usage"]["train"]["font_names"]) == (0, []) and card["warnings"] == []
+    assert not any("train" in f["roles"] for f in card["fonts"]) and {f["file"]: f["roles"] for f in card["fonts"]}[core[0]] == ["val"]
 
     (root / "out/results").mkdir()
     manifest = {"pipelines": [{"key": "crnn_b", "config": "crnn:runB@10 (lanjutan runA@6) · 5 font · aug fase5 · greedy"},
                               {"key": "crnn_a", "config": "crnn:runA@6 · 2 font · greedy"},
                               {"key": "vlm", "config": "vlm:frontier · zero-shot"}]}
+
+    def record(config_b: str, config_a: str = "crnn:runA@6 · 2 font · greedy") -> list[str]:
+        manifest["pipelines"][0]["config"], manifest["pipelines"][1]["config"] = config_b, config_a
+        (root / "out/results/manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        return ed.build(root, "runB", root / "ujifont")["warnings"]
+
     (root / "out/results/manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     assert ed.recorded_fonts(root) == {"runB": 5, "runA": 2}
-    # Jumlah dari log tidak diperingatkan sebagai "folder sudah berubah", walau ekspor hasil mencatat jumlah lain:
-    # peringatan itu hanya untuk jumlah yang dihitung dari folder sekarang.
-    write_log(ckpt / "log.jsonl", [{**start(0), "fonts": names}, {"step": 10, "val_cer": 0.05}, {"step": 10, "event": "end"}])
+    # Jumlah dari log tidak dibandingkan dengan hitungan ekspor hasil: nama-namanya sudah dibandingkan sendiri di atas.
+    write_log(ckpt / "log.jsonl", [{**start(0), "fonts": core + ["Salinan.ttf"]}, *ending])
     card = ed.build(root, "runB", root / "ujifont")
-    assert card["usage"]["train"]["fonts"] == 4 and card["warnings"] == []
+    assert card["usage"]["train"]["fonts"] == 3 and card["warnings"] == []
 
-    # Tanpa daftar di log, jumlahnya dari folder sekarang; bila ekspor hasil mencatat jumlah lain, itu diperingatkan.
-    write_log(ckpt / "log.jsonl", [start(0), {"step": 10, "val_cer": 0.05}, {"step": 10, "event": "end"}])
+    # Tanpa daftar di log, jumlahnya dari folder sekarang. Bila ekspor hasil mencatat jumlah lain, itu diperingatkan:
+    # untuk run resmi maupun run sebelumnya di rantai (d05), dan juga bila folder kini berisi LEBIH banyak font (d06).
+    write_log(ckpt / "log.jsonl", [start(0), *ending])
     card = ed.build(root, "runB", root / "ujifont")
-    assert card["usage"]["train"]["fonts"] == 3 and card["usage"]["train"]["fonts_source"] == "folder"
+    train = card["usage"]["train"]
+    assert (train["fonts"], train["fonts_source"], train["font_names"]) == (3, "folder", None)
     assert card["warnings"] == ["Run runB: ekspor hasil mencatat 5 font latih, tetapi folder font sekarang berisi 3; jumlah dan "
                                 "daftar font di kartu ini mengikuti folder sekarang, bukan font yang dipakai saat run itu dilatih."]
-    manifest["pipelines"][0]["config"] = "crnn:runB@10 · 3 font · greedy"
-    (root / "out/results/manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-    assert ed.build(root, "runB", root / "ujifont")["warnings"] == []
+    warnings = record("crnn:runB@10 · 2 font · greedy", "crnn:runA@6 · 7 font · greedy")
+    assert [w.split(";")[0] for w in warnings] == [
+        "Run runA: ekspor hasil mencatat 7 font latih, tetapi folder font sekarang berisi 2",
+        "Run runB: ekspor hasil mencatat 2 font latih, tetapi folder font sekarang berisi 3"]
+    assert record("crnn:runB@10 · 3 font · greedy") == []
+    # d07: daftar font bercacat (CLAUDE.md, tiga cacat data training) dipakai kartu metode; isinya dijaga di sini.
+    assert ed.FONT_DEFECTS == ("BasaJan.ttf", "NewKramawirya.ttf") and set(ed.FONT_DEFECTS) <= set(ed.FONT_NOTES)
 
 
 def test_shared_advances_count_only_glyphs_both_fonts_have():

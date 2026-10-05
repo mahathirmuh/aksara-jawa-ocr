@@ -44,10 +44,10 @@ class MethodImporter extends CardImporter
         return [
             // Waktu ekspor hasil yang dikutip buktinya: halaman membandingkannya dengan hasil yang sedang diimpor.
             'results_generated' => 'text',
-            'model.classes' => 'count', 'model.height' => 'count', 'model.conv_layers' => 'count', 'model.lstm_layers' => 'count',
-            'model.bidirectional' => 'bool?',
-            'model.parameters.total' => 'count', 'model.parameters.cnn' => 'count', 'model.parameters.proj' => 'count',
-            'model.parameters.rnn' => 'count', 'model.parameters.head' => 'count',
+            'model.classes' => 'int', 'model.height' => 'int', 'model.conv_layers' => 'int', 'model.lstm_layers' => 'int',
+            'model.bidirectional' => 'bool?', 'chain_complete' => 'bool?',
+            'model.parameters.total' => 'int', 'model.parameters.cnn' => 'int', 'model.parameters.proj' => 'int',
+            'model.parameters.rnn' => 'int', 'model.parameters.head' => 'int',
             'groups' => 'list', 'groups.*.key' => 'text', 'groups.*.title' => 'text', 'groups.*.intro' => 'string',
             'groups.*.methods' => 'list',
             $method.'key' => 'text', $method.'name' => 'text', $method.'kind' => 'text', $method.'status' => 'text',
@@ -58,7 +58,11 @@ class MethodImporter extends CardImporter
         ];
     }
 
-    /** Pengaturan = pasangan [label, nilai] berupa teks; kunci kelompok dan kunci butir tidak boleh berulang. */
+    /**
+     * Pengaturan = pasangan [label, nilai] berupa teks; bukti harus punya sumber; kunci kelompok dan kunci butir tidak
+     * boleh berulang, dan kunci butir tahap lanjutan milik halaman (Metode::WEB_KEYS) tidak boleh dipakai kartu: kunci
+     * itu id dan penanda di halaman, dan ubin menghitung butir menurut kuncinya.
+     */
     protected function check(array $card): void
     {
         $groups = array_column($card['groups'], 'key');
@@ -71,7 +75,14 @@ class MethodImporter extends CardImporter
                 if (isset($seen[$method['key']])) {
                     throw new RuntimeException("Kartu metode tidak sah: kunci butir {$method['key']} berulang.");
                 }
+                if (in_array($method['key'], Metode::WEB_KEYS, true)) {
+                    throw new RuntimeException("Kartu metode tidak sah: kunci butir {$method['key']} milik butir tahap lanjutan yang ditulis halaman.");
+                }
                 $seen[$method['key']] = true;
+                // Kotak "Terukur" selalu menyebut sumbernya: bukti tanpa sumber bukan bukti yang bisa diperiksa.
+                if (($method['evidence'] ?? null) && ! ($method['evidence_source'] ?? null)) {
+                    throw new RuntimeException("Kartu metode tidak sah: butir {$method['key']} punya bukti tanpa sumbernya (evidence_source).");
+                }
                 foreach ($method['settings'] as $pair) {
                     if (! is_array($pair) || ! array_is_list($pair) || count($pair) !== 2 || ! is_string($pair[0]) || ! is_string($pair[1])) {
                         throw new RuntimeException("Kartu metode tidak sah: pengaturan butir {$method['key']} harus pasangan [label, nilai] berupa teks.");

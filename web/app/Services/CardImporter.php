@@ -29,7 +29,8 @@ abstract class CardImporter
     public const FILE = '';
 
     private const TYPES = [
-        'number' => 'angka', 'count' => 'bilangan yang tidak negatif', 'string' => 'teks', 'text' => 'teks yang tidak kosong',
+        'number' => 'angka', 'count' => 'bilangan yang tidak negatif', 'int' => 'bilangan bulat yang tidak negatif',
+        'share' => 'bilangan dari 0 sampai 1', 'string' => 'teks', 'text' => 'teks yang tidak kosong',
         'bool' => 'benar/salah', 'list' => 'daftar', 'map' => 'objek',
     ];
 
@@ -50,8 +51,10 @@ abstract class CardImporter
 
     /**
      * Bentuk kartu: kunci (notasi titik, "*" = setiap butir daftar atau objek) => tipe. Tipe: number, count (bilangan
-     * >= 0), string, text (teks tidak kosong), bool, list, map; akhiran "?" = boleh tidak ada atau null (untuk nilai
-     * yang ekspornya menulis null bila tidak dihitung, dan untuk kunci pilihan yang tetap harus bertipe benar bila ada).
+     * >= 0, boleh pecahan: rata-rata, jarak), int (bilangan bulat >= 0: jumlah baris, lapis, parameter), share (bilangan
+     * dari 0 sampai 1: porsi dan peluang), string, text (teks tidak kosong), bool, list, map; akhiran "?" = boleh tidak
+     * ada atau null (untuk nilai yang ekspornya menulis null bila tidak dihitung, dan untuk kunci pilihan yang tetap
+     * harus bertipe benar bila ada).
      *
      * @return array<string, string>
      */
@@ -173,6 +176,8 @@ abstract class CardImporter
         return match ($type) {
             'number' => is_int($value) || is_float($value),
             'count' => (is_int($value) || is_float($value)) && $value >= 0,
+            'int' => is_int($value) && $value >= 0,
+            'share' => (is_int($value) || is_float($value)) && $value >= 0 && $value <= 1,
             'string' => is_string($value),
             'text' => is_string($value) && trim($value) !== '',
             'bool' => is_bool($value),

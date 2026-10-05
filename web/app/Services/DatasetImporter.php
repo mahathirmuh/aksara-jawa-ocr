@@ -44,36 +44,37 @@ class DatasetImporter extends CardImporter
     {
         $typed = fn (string $type, string $prefix, array $keys) => array_fill_keys(array_map(fn ($key) => $prefix.$key, $keys), $type);
 
-        // "count" = bilangan yang tidak negatif (jumlah baris, langkah, peluang); akhiran "?" = kunci pilihan, yang bila
-        // ada tetap harus bertipe benar (halaman memilih kalimatnya dari nilai-nilai itu).
-        return $typed('count', 'corpus.', ['articles', 'candidates', 'roundtrip_passed', 'roundtrip_pass_rate', 'duplicates', 'injected',
-            'lines', 'leaked_lines'])
-            + ['corpus.other' => 'number?', 'corpus.max_roundtrip_cer' => 'count?', 'corpus.split_buckets' => 'map?',
-                'corpus.split_buckets.*' => 'count?', 'corpus.min_count' => 'map?', 'corpus.min_count.*' => 'count?',
-                'corpus.length_histogram' => 'list', 'corpus.length_histogram.*.range' => 'text', 'corpus.length_histogram.*.lines' => 'count',
-                'splits' => 'list', 'splits.*.key' => 'string', 'splits.*.lines' => 'count', 'splits.*.share' => 'count']
-            + $typed('count', 'usage.train.', ['steps', 'batch_size', 'samples', 'pool', 'seed'])
+        // "int" = bilangan bulat tidak negatif (jumlah baris, langkah, font); "share" = porsi atau peluang, dari 0 sampai
+        // 1; "count" = bilangan tidak negatif yang boleh pecahan (rata-rata, jarak dalam em); akhiran "?" = kunci
+        // pilihan, yang bila ada tetap harus bertipe benar (halaman memilih kalimatnya dari nilai-nilai itu).
+        return $typed('int', 'corpus.', ['articles', 'candidates', 'roundtrip_passed', 'duplicates', 'injected', 'lines', 'leaked_lines'])
+            + ['corpus.roundtrip_pass_rate' => 'share', 'corpus.other' => 'number?', 'corpus.max_roundtrip_cer' => 'share?',
+                'corpus.split_buckets' => 'map?', 'corpus.split_buckets.*' => 'count?', 'corpus.min_count' => 'map?', 'corpus.min_count.*' => 'int?',
+                'corpus.length_histogram' => 'list', 'corpus.length_histogram.*.range' => 'text', 'corpus.length_histogram.*.lines' => 'int',
+                'splits' => 'list', 'splits.*.key' => 'string', 'splits.*.lines' => 'int', 'splits.*.share' => 'share']
+            + $typed('int', 'usage.train.', ['steps', 'batch_size', 'samples', 'pool', 'seed'])
             // Jadwal baris sintetis tidak dihitung untuk run --overfit / --real-train: ekspor menulis null.
-            + ['usage.train.distinct_lines' => 'count?', 'lineage.distinct_lines' => 'count?', 'lineage.runs.*.distinct_lines' => 'count?',
+            + ['usage.train.distinct_lines' => 'int?', 'lineage.distinct_lines' => 'int?', 'lineage.runs.*.distinct_lines' => 'int?',
                 'usage.train.real_train' => 'bool?', 'usage.train.real_val' => 'bool?',
-                'usage.train.rare_insert_prob' => 'count?', 'usage.train.rare_opener_prob' => 'count?',
-                'usage.val.lines' => 'count', 'usage.val.steps' => 'list', 'usage.val.steps.*' => 'count', 'usage.val.fonts' => 'count',
-                'usage.test.lines' => 'count', 'usage.test.gates' => 'list', 'usage.test.gates.*.code' => 'text',
-                'usage.test.quick' => 'count?', 'usage.test.quick_max_lines' => 'count?', 'usage.test.full' => 'count?',
-                'usage.test.others' => 'list?', 'usage.test.others.*.kind' => 'text?', 'usage.test.others.*.lines' => 'count?',
-                'usage.real.lines' => 'count', 'usage.real.reports' => 'count?',
+                'usage.train.rare_insert_prob' => 'share?', 'usage.train.rare_opener_prob' => 'share?',
+                'usage.val.lines' => 'int', 'usage.val.steps' => 'list', 'usage.val.steps.*' => 'int', 'usage.val.fonts' => 'int',
+                'usage.test.lines' => 'int', 'usage.test.gates' => 'list', 'usage.test.gates.*.code' => 'text',
+                'usage.test.quick' => 'int?', 'usage.test.quick_max_lines' => 'int?', 'usage.test.full' => 'int?',
+                'usage.test.others' => 'list?', 'usage.test.others.*.kind' => 'text?', 'usage.test.others.*.lines' => 'int?',
+                'usage.real.lines' => 'int', 'usage.real.reports' => 'int?', 'usage.real.others' => 'list?',
                 'lineage.complete' => 'bool', 'lineage.runs' => 'list', 'lineage.runs.*.run' => 'text', 'lineage.runs.*.augment' => 'text',
                 'lineage.runs.*.real_train' => 'bool?']
-            + $typed('count', 'lineage.', ['steps', 'samples', 'pool'])
-            + $typed('count', 'lineage.runs.*.', ['steps', 'samples', 'pool', 'seed', 'fonts', 'drop_space_prob', 'track_prob', 'track_max',
-                'rare_insert_prob', 'rare_opener_prob'])
-            + ['rare.codepoints' => 'count', 'rare.javanese' => 'count', 'rare.train_lines' => 'map', 'rare.train_lines.*' => 'count?',
+            + $typed('int', 'lineage.', ['steps', 'samples', 'pool'])
+            + $typed('int', 'lineage.runs.*.', ['steps', 'samples', 'pool', 'seed', 'fonts'])
+            + $typed('share', 'lineage.runs.*.', ['drop_space_prob', 'track_prob', 'rare_insert_prob', 'rare_opener_prob'])
+            + ['lineage.runs.*.track_max' => 'count']
+            + ['rare.codepoints' => 'int', 'rare.javanese' => 'int', 'rare.train_lines' => 'map', 'rare.train_lines.*' => 'count?',
                 'rare.scheduled_lines' => 'map', 'rare.scheduled_lines.*' => 'count?',
-                'datasets' => 'list', 'datasets.*.count' => 'count', 'datasets.*.shareable' => 'bool', 'datasets.*.roles' => 'map',
-                'datasets.*.roles.*' => 'count', 'datasets.*.gates' => 'list', 'datasets.*.gates.*' => 'string',
-                'datasets.*.status' => 'string?', 'datasets.*.pending' => 'count?', 'datasets.*.verified' => 'count?',
-                'datasets.*.articles' => 'count?', 'datasets.*.pages' => 'count?', 'datasets.*.source_url' => 'string?',
-                'datasets.*.planned' => 'list?']
+                'datasets' => 'list', 'datasets.*.count' => 'int', 'datasets.*.shareable' => 'bool', 'datasets.*.roles' => 'map',
+                'datasets.*.roles.*' => 'int', 'datasets.*.gates' => 'list', 'datasets.*.gates.*' => 'string',
+                'datasets.*.status' => 'string?', 'datasets.*.pending' => 'int?', 'datasets.*.verified' => 'int?',
+                'datasets.*.articles' => 'int?', 'datasets.*.pages' => 'int?', 'datasets.*.source_url' => 'string?',
+                'datasets.*.planned' => 'list?', 'datasets.*.planned.*' => 'string?']
             + $typed('text', 'datasets.*.', ['key', 'name', 'unit'])
             + $typed('string', 'datasets.*.', ['content', 'source', 'license', 'share_note'])
             // Wadah (daftar) diperiksa sebelum isinya, supaya pesannya menyebut kunci yang salah bentuk.
@@ -81,10 +82,15 @@ class DatasetImporter extends CardImporter
             + $typed('text', 'fonts.*.', ['file', 'group'])
             + ['fonts.*.license' => 'string', 'fonts.*.roles' => 'list', 'fonts.*.roles.*' => 'string', 'fonts.*.in_repo' => 'bool',
                 'fonts.*.available' => 'bool?', 'fonts.*.drops_space' => 'bool?', 'fonts.*.missing' => 'list?', 'fonts.*.notes' => 'list?',
+                // Isi daftar itu dicetak apa adanya di catatan font (kode karakter yang tidak ada, catatan repo).
+                'fonts.*.missing.*' => 'string?', 'fonts.*.notes.*' => 'string?',
                 'fonts.*.review' => 'string?', 'fonts.*.shared_with_test' => 'map?', 'fonts.*.shared_with_test.family' => 'bool?',
-                'fonts.*.shared_with_test.font' => 'string?', 'fonts.*.shared_with_test.same' => 'count?',
-                'fonts.*.shared_with_test.of' => 'count?',
-                'support' => 'list', 'support.*.key' => 'string', 'warnings' => 'list', 'warnings.*' => 'string'];
+                'fonts.*.shared_with_test.font' => 'string?', 'fonts.*.shared_with_test.same' => 'int?',
+                'fonts.*.shared_with_test.of' => 'int?',
+                'support' => 'list', 'support.*.key' => 'string', 'support.*.file' => 'string?']
+            // Angka data pendukung milik repo OCR yang dicetak halaman (charset, model bahasa karakter, uji buta VLM).
+            + $typed('int?', 'support.*.', ['characters', 'classes', 'order', 'lines'])
+            + ['warnings' => 'list', 'warnings.*' => 'string'];
     }
 
     protected function check(array $card): void

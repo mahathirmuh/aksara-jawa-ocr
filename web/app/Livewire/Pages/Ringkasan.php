@@ -53,8 +53,8 @@ class Ringkasan extends Component
         $pageOf = Line::pluck('source_id', 'external_id');
         $perPage = $annotations->groupBy(fn ($a) => $pageOf[$a->external_id] ?? '?')
             ->map(fn ($rows) => SpeechLevel::classify($rows->pluck('transliteration')->join(' '))['level'] ?? 'tak tentu');
-        $speechEval = SpeechLevel::evaluate($annotations->whereNotNull('speech_level')
-            ->map(fn ($a) => [$a->speech_level, SpeechLevel::classify($a->transliteration)['level']])->values()->all());
+        $speechEval = SpeechLevel::evaluate(LineAnnotation::scorableSpeechLabels()
+            ->map(fn ($a) => [$a->speech_level, SpeechLevel::classify($a->transliteration)['level']])->all());
 
         return view('livewire.pages.ringkasan', [
             'import' => ResultImport::latest('id')->first(),

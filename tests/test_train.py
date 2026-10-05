@@ -68,6 +68,41 @@ def test_weighted_chunk_losses_equal_full_batch_loss():
     assert torch.allclose(total, full, atol=1e-5)
 
 
+def test_start_record_lists_the_fonts_the_process_renders_with(tmp_path):
+    """Event start log mencatat nama font perender data sintetis proses itu; kartu data dan kartu metode membacanya."""
+    import json
+    from pathlib import Path
+
+    from src.dataset import TRAIN_FONTS
+    from src.train import parse_args, start_record
+
+    extra = tmp_path / "extra"
+    extra.mkdir()
+    for name in ("B.otf", "A.ttf", "catatan.md"):
+        (extra / name).write_bytes(b"")
+    core = [Path(font).name for font in TRAIN_FONTS]
+    args = parse_args(["--run", "uji", "--extra-fonts", str(extra), "--train-lines", "100"])
+    record = start_record(args, 5, 123, "cpu")
+    assert record == {"event": "start", "step": 5, "args": vars(args), "params": 123, "device": "cpu",
+                      "fonts": core + ["A.ttf", "B.otf"]}
+    assert json.loads(json.dumps(record)) == record  # bisa ditulis ke log.jsonl apa adanya
+    assert start_record(parse_args(["--run", "uji", "--overfit", "32"]), 0, 1, "cpu")["fonts"] == core
+    # --overfit merender baris sintetis berapa pun --train-lines (build_datasets mengambil N baris pertama).
+    assert start_record(parse_args(["--run", "uji", "--overfit", "32", "--train-lines", "0"]), 0, 1, "cpu")["fonts"] == core
+    # Proses tanpa baris sintetis (--train-lines 0 dengan --real-train) tidak merender dengan font apa pun: daftarnya
+    # kosong, bukan daftar font inti.
+    real = parse_args(["--run", "uji", "--extra-fonts", str(extra), "--train-lines", "0", "--real-train", "labels.tsv"])
+    assert start_record(real, 0, 1, "cpu")["fonts"] == []
+    # main() tidak bisa dijalankan di test (ia melatih model), jadi tempat catatan itu ditulis dijaga lewat sumbernya,
+    # dan font yang dicatat harus daftar yang sama dengan yang dipakai merender (training_fonts di build_datasets).
+    import inspect
+
+    from src import train
+
+    assert "log(start_record(args, step, n_params, device))" in inspect.getsource(train.main)
+    assert "train_fonts = training_fonts(args)" in inspect.getsource(train.build_datasets)
+
+
 def test_training_fonts_are_core_fonts_plus_the_extra_folder(tmp_path):
     # Daftar ini dicatat di event start log; kartu data dan kartu metode membacanya dari sana.
     import shutil

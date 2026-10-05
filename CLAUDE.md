@@ -301,8 +301,8 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     ejaan aksara lema kamus, bukan dari ingatan: sama di 2.173 dari 2.231 lema berejaan baku (97,4%; mode korpus 93,1%; entri varian ejaan tidak dihitung). Angka itu
     konstanta `AksaraWriter::DICTIONARY_AGREEMENT`, dijaga test dan ikut berubah bila kamus dibangun ulang.
     (3) e tanpa tanda: 53% kata ber-e benar bila semua dibaca pepet; leksikon `web/database/dictionaries/jv-taling.json`
-    (8.714 kata, `web/tools/taling_lexicon.py`, dari artikel Wikipedia Jawa yang bertanda kuat) menaikkannya ke 90% pada
-    artikel yang ditahan. Aturan "e akhir kata = é" tidak menambah apa-apa di atas leksikon.
+    (8.714 kata, `web/tools/taling_lexicon.py`: 8.615 dari artikel Wikipedia Jawa yang bertanda kuat, 99 dari lema
+    kamus Wiktionary bahasa Inggris) menaikkannya ke 90% pada artikel yang ditahan. Aturan "e akhir kata = é" tidak menambah apa-apa di atas leksikon.
     (4) **NLLB tidak mengenal "ê":** "pêkên" -> "ke sana", "sêga" -> "tiga buah"; tanpa tanda -> "pasar", "nasi".
     `TranslationService::forModel()` membuang tanda itu di semua panggilan langsung (Terjemahan, Demo). Batch
     `aksara:translate` BELUM (inputs() masih mengirim ê, juga dari transliterasi manusia), jadi chrF 36,2 / 19,4 yang
@@ -393,10 +393,15 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     pertama; angka 200 di versi sebelumnya menghitung pasangan baris x font) dan 2 evaluasi penuh run lain juga
     membacanya, dan 3 evaluasi di luar `out/eval` (dua laporan aksara langka sintetis 2.000 baris, beam + LM 300 baris;
     kunci kartu `usage.test.others`) mengambil barisnya secara ACAK dari seluruh bagian uji, jadi baris di luar 10.000
-    pertama pun pernah dibaca. NusaAksara sudah dievaluasi 36 kali (laporan G3 di `out/eval`); halaman menyebut
-    angka-angka itu. Jumlah font tiap run: dari log run bila mencatatnya (`src.train` kini menulis daftar font di event
-    `start`; run lama tidak), kalau tidak dari folder font SEKARANG (`fonts_source`), dan ekspor memperingatkan bila
-    ekspor hasil mencatat jumlah lain.
+    pertama pun pernah dibaca. NusaAksara sudah dievaluasi paling sedikit 37 kali (36 laporan G3 di `out/eval` + laporan
+    beam + LM di `out/beam`, kunci kartu `usage.real.others`; pembacaan yang tidak meninggalkan laporan tidak
+    terhitung, karena itu halaman menulis "paling sedikit"); halaman menyebut angka-angka itu. Font tiap run: dari log
+    run bila mencatatnya (`src.train.start_record` menulis NAMA font perender data latih di event `start`; run sebelum
+    2026-10-06 tidak), kalau tidak dari folder font SEKARANG (`fonts_source`, `font_names`), dan ekspor memperingatkan
+    bila ekspor hasil mencatat jumlah lain. Yang dibaca adalah event `start` proses terakhir yang mulai SEBELUM langkah
+    checkpoint (proses itulah yang menulisnya; proses yang mulai tepat di langkah itu baru melanjutkannya). Bila log run
+    resmi mencatat nama font, peran "latih" di tabel font hanya untuk nama yang tercatat, dan kartu memperingatkan font
+    tercatat yang sudah tidak ada di folder serta font di folder yang tidak tercatat.
     Kalimat dan batasan di halaman dipilih dari isi kartu, supaya tetap benar untuk kartu run lain: font uji
     sekeluarga dengan font latih; data nyata tanpa bagian validasi; aksara langka HANYA bila run resmi tidak memakai
     sisipan aksara langka; jumlah run di rantai, seed, kelengkapan rantai. Nilai `null` (jadwal baris run `--overfit` /
@@ -406,10 +411,16 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     **Impor kartu (`App\Services\CardImporter`, dasar `DatasetImporter` dan `MethodImporter`):** dua pengaman supaya
     kartu yang salah ditolak saat impor, bukan menjadi HTTP 500 saat halaman dibuka (tinjauan 2026-10-05: 55 dari 78
     kartu "satu kunci dibuang" diterima versi pertama lalu membuat halaman 500). (1) `shape()`: kunci wajib dan
-    tipenya (notasi titik, `*` = setiap butir; tipe `number`, `count` = bilangan tidak negatif, `string`, `text` = teks
-    tidak kosong, `bool`, `list`, `map`; akhiran `?` = boleh tidak ada atau null tetapi harus bertipe benar bila ada;
-    wadah didaftar sebelum isinya supaya pesannya menyebut kunci yang salah), ditambah `check()` tiap kartu (urutan
-    bagian; pasangan pengaturan; kunci kelompok dan butir tidak boleh berulang, dan "web" milik halaman). (2) uji
+    tipenya (notasi titik, `*` = setiap butir; tipe `number`, `count` = bilangan tidak negatif yang boleh pecahan
+    (rata-rata, jarak dalam em), `int` = bilangan bulat tidak negatif (jumlah baris, langkah, lapis, parameter: "1,5
+    baris" atau 1e30 langkah bukan kartu yang sah), `share` = bilangan dari 0 sampai 1 (porsi dan peluang: "bagian
+    latih 250%" bukan kartu yang sah), `string`, `text` = teks tidak kosong, `bool`, `list`, `map`; akhiran `?` = boleh
+    tidak ada atau null tetapi harus bertipe benar bila ada; wadah didaftar sebelum isinya supaya pesannya menyebut
+    kunci yang salah; isi daftar yang dicetak apa adanya dan angka data pendukung ikut bertipe), ditambah `check()`
+    tiap kartu (urutan bagian; pasangan pengaturan; bukti harus punya sumber, yang juga dijaga `entry()` di skrip
+    ekspor; kunci kelompok dan butir tidak boleh berulang; kelompok "web" dan kunci butir `Metode::WEB_KEYS` milik
+    halaman). Yang TIDAK ditolak (kartu disunting tangan): angka sah yang salah nilainya, dan kunci pilihan yang
+    dibuang (mis. `shared_with_test`, yang menghilangkan satu batasan dari halaman). (2) uji
     tampil: halaman dirender sekali dengan kartu calon di dalam transaksi (`preview()`, lewat `viewData()` statis
     komponennya); gagal karena apa pun = batal, kartu lama dipertahankan. Pengaman ini menangkap kartu yang RUSAK,
     bukan angka yang salah. `aksara:import` yang hasil OCR-nya berhasil tetapi sebuah kartunya ditolak menulis
@@ -468,20 +479,23 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     dibangun dari `model_config` checkpoint resmi dan dimuati bobotnya (4.590.909 parameter: CNN + proyeksi 1.913.568,
     BiLSTM 2.629.632, keluaran 47.709; 7 lapis konvolusi, tinggi 96 -> 3, langkah lebar 4, 93 kelas), argumen pelatihan
     dari checkpoint. Kalimat tentang kode (pengoptimal, jadwal, rugi, pemotongan gradien di `src.train.main`; persentil
-    latar dan tinta di `src.dataset.to_tensor`; penghalusan Witten-Bell di `src.charlm`) dicocokkan dengan sumbernya
-    lewat `CODE_FACTS` (**ekspor BERHENTI bila kode itu berubah**: perbarui `CODE_FACTS` dan butirnya). Bukti dari
-    `out/results/manifest.json`, `out/compare/<A>_vs_<B>.json`, dan `out/compare/spacing_synthetic.json`; yang
-    berkasnya tidak ada dilewati. Kalimat yang bergantung pada resep run (operasi augmentasi, rantai run, perangkat,
-    beam + LM pada checkpoint resmi atau belum) disusun dari argumen dan hasilnya, bukan teks tetap. Ekspor juga
-    berhenti bila manifest menetapkan pipeline resmi lain (manifest lama tanpa kunci `official` = `crnn_fonts`), dibuat
-    dengan `--limit`, run-nya tidak dikenal `export_results.py`, jumlah kelas checkpoint beda dari tokenizer, atau
-    jumlah parameter di log beda dari model.
+    latar dan tinta di `src.dataset.to_tensor`; rumus penghalusan Witten-Bell di `src.charlm.CharLM.prob`, bukan kata
+    di docstring modulnya) dicocokkan dengan sumbernya lewat `CODE_FACTS` (**ekspor BERHENTI bila kode itu berubah**:
+    perbarui `CODE_FACTS` dan butirnya). Bukti dari `out/results/manifest.json`, `out/compare/<A>_vs_<B>.json`, dan
+    `out/compare/spacing_synthetic.json`; yang berkasnya tidak ada dilewati. Kalimat yang bergantung pada resep run
+    (operasi augmentasi, rantai run, perangkat, beam + LM pada checkpoint resmi atau belum) disusun dari argumen dan
+    hasilnya, bukan teks tetap. Ekspor juga berhenti bila manifest menetapkan pipeline resmi lain (manifest lama tanpa
+    kunci `official` = `crnn_fonts`), dibuat dengan `--limit`, run-nya tidak dikenal `export_results.py`, jumlah kelas
+    checkpoint beda dari tokenizer, jumlah parameter di log beda dari model, atau laporan gerbang resmi G1/G2/G3 run
+    itu tidak ada atau tidak sah (`gate_reports`, sama dengan kartu data).
     **Aturan kartu metode yang lahir dari tinjauan kedua (2026-10-06, 29 temuan; jangan dikembalikan):**
-    (a) bukti selisih antar-run hanya dari berkas pembanding yang CER kedua sisinya SAMA dengan manifest sekarang
-    (berkas dari ekspor lama tidak dikutip), dan hanya terhadap run kontrol perlakuan itu: `CONTROLS` berkunci
-    perlakuan (`fonts`: fase5_fonts lawan fase5_core; `tracking`: fase7_track lawan fase7_ctrl; `rare`:
-    fase7_track_rare lawan fase7_track, fase6_rare lawan fase6_ctrl), dan run kontrol jarak diperiksa memang dilatih
-    TANPA jarak (`tracking_control`); bukti milik run lain disebut "bukan model resmi".
+    (a) selisih antar-run selalu dihitung dari CER manifest; selang kepercayaannya hanya diambil dari berkas
+    pembanding yang CER kedua sisinya SAMA dengan manifest sekarang (berkas dari ekspor lama tidak dikutip). Sebuah run
+    hanya disebut kontrol untuk perlakuan di barisnya: `CONTROLS` berkunci perlakuan (`fonts`: fase5_fonts lawan
+    fase5_core; `tracking`: fase7_track lawan fase7_ctrl; `rare`: fase7_track_rare lawan fase7_track, fase6_rare lawan
+    fase6_ctrl) dan hanya berisi CALON: pasangan baru dikutip sesudah `control_run` memeriksa kedua checkpoint (ada di
+    mesin ini, langkah sama, perlakuan hidup di run dan mati di kontrol, resep data `data_recipe` sama kecuali
+    `TREATMENT_KEYS` perlakuan itu, `TRAINING_KEYS` sama); bukti milik run lain disebut "bukan model resmi".
     (b) Label sintetis tidak disebut "pasti benar": butir render membawa catatan font latih bercacat (BasaJan,
     CarakanJawa, NewKramawirya: `FONT_DEFECTS` + font tanpa glyph sebuah karakter charset), dan butir buang-spasi
     menyebut font berspasi sempit (3 dari 10: spasi selalu dibuang, jadi porsi baris tanpa spasi sekitar 65%, bukan
@@ -494,8 +508,34 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     (e) Rantai checkpoint yang terpotong (checkpoint leluhur sudah dihapus) tidak dilaporkan "dari bobot acak"
     (`chain_complete`); kalimat OneCycle dihitung dari langkah yang DIRENCANAKAN (3 dari 4 run sebelum run resmi
     dihentikan sebelum siklusnya selesai).
-    (f) Jumlah font tiap run: log -> ekspor hasil -> folder sekarang, dan bila folder sudah berubah itu disebut.
+    (f) Font tiap run: nama di log -> jumlah di ekspor hasil (hanya bila tidak bertentangan dengan argumen
+    checkpoint: run tanpa `--extra-fonts` tidak bisa punya lebih dari font inti) -> folder sekarang, dan bila folder
+    sudah berubah itu disebut.
     (g) Evaluasi jarak menyebut juga batasnya (di luar rentang latih 0,6 em: 67,5 spasi palsu per 100 batas).
+    **Aturan dari tinjauan verifikasi (putaran ketiga, 2026-10-06: 22 temuan baru, tidak ada yang berat; kebanyakan
+    "kartu harus tetap benar untuk run dan mesin lain"):**
+    (h) "Font yang pernah dilihat model" = gabungan font SEMUA run di rantai (`chain_fonts`), bukan font run terakhir:
+    catatan keluarga font (G1/G2, evaluasi tertarget) dan catatan font bercacat dihitung dari gabungan itu, dan font
+    yang hanya dipakai run sebelumnya disebut "(font run X di rantai)".
+    (i) Yang tidak bisa dihitung DISEBUT, bukan didiamkan: font uji yang berkasnya tidak ada di mesin ini, font latih
+    yang tercatat di log tetapi sudah tidak ada di folder ("cacat font hanya bisa diperiksa pada M dari N font"),
+    laporan evaluasi sintetis yang tidak bisa dicocokkan dengan checkpoint sekarang ("angkanya tidak dikutip").
+    (j) Laporan `scripts/eval_spacing.py` hanya dikutip sebagai "model resmi" bila `report_matches`: langkah checkpoint
+    di laporan sama dengan checkpoint sekarang, dan sidik berkasnya (12 heksadesimal SHA-1) sama bila laporan
+    mencatatnya; begitu juga untuk run kontrolnya.
+    (k) Aturan "spasi selalu dibuang pada font berspasi sempit" lahir 2026-09-14, SESUDAH `base`, `fase5_quick`,
+    `fase5_core`, `fase5_fonts` dilatih (`RUNS_BEFORE_NARROW_SPACE_RULE`): butir buang-spasi tidak boleh membaca aturan
+    itu dari kode sekarang untuk run-run tersebut. Kartu sekarang mencatat bahwa `fase5_fonts` di rantai dilatih
+    sebelum aturan itu ada (labelnya masih memuat spasi yang nyaris tidak tampak di font berspasi sempit).
+    (l) Kalimat pembanding disusun dari nilai, bukan teks tetap: "Yang berubah" tiap run dibandingkan nilai demi nilai
+    dengan run sebelumnya (`data_recipe`; "argumen data sama, langkah tambahan" bila memang sama); kalimat OneCycle
+    memakai jumlah langkah di jadwal checkpoint (`planned_steps`), juga untuk run `--epochs`; "ablasi satu seed" hanya
+    bila seed semua run tercatat dan sama; kalimat sisipan aksara langka mengikuti hasilnya ("tetapi hanya" bila
+    presisi < 50%; penutupnya "Karena itu tidak dipakai di run resmi", kecuali bila G3 run bersisipan lebih baik secara
+    nyata: saat itu hanya "Run resmi tidak memakainya").
+    (m) `src.train` menulis daftar font kosong di event `start` bila proses tidak merender baris sintetis
+    (`--train-lines 0` dengan `--real-train`); daftar kosong berarti "tidak ada yang dibandingkan", bukan "tidak ada
+    font".
     Sisi web: alur bercabang (arti dan tingkat tutur sama-sama dari teks Latin, bukan berurutan); langkah bermodel
     ditandai warna DAN tulisan "ML"; ubin keempat menghitung model hasil belajar yang DIPAKAI (CRNN, NLLB-200) dan
     menyebut model bahasa n-gram terpisah sebagai "tersedia"; bukti alih aksara menyebut "huruf saja" dan "masukannya
@@ -528,7 +568,7 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     `phpunit.xml` memaksa SQLite in-memory (`force="true"`, jadi `DB_*` yang tertinggal di shell diabaikan) dan
     `tests/TestCase.php::createApplication` menolak database bernama `its_aksara` sebelum migrasi. Test memakai folder
     sementara untuk `storage/app/mt` (dulu `TranslationTest` menimpa hasil NLLB; dipulihkan dari DB lewat
-    `php artisan aksara:translate --dump`). 164 test lolos di SQLite dan di PostgreSQL uji (2026-10-06, sesudah perbaikan tinjauan kedua menu Dataset dan Metode); 329 test Python.
+    `php artisan aksara:translate --dump`). 167 test lolos di SQLite dan di PostgreSQL uji (2026-10-06, sesudah perbaikan tinjauan ketiga menu Dataset dan Metode); 330 test Python.
     **Port:** Laravel 8010, layanan model 8011, layanan terjemahan 8012 — 8000/8001, 5173, dan 8020 dipakai proyek
     lain milik user di laptop yang sama (jangan dihentikan; cek dulu siapa yang mendengarkan sebelum memakai sebuah
     port, dan beri skrip sementara port 8030 ke atas). Test tetap bisa di SQLite in-memory

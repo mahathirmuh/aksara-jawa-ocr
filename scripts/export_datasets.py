@@ -293,6 +293,17 @@ class Schedule:
         return [[pool[i] for i in batch] for batch in taken]
 
 
+def logged_fonts(rows: list[dict], step: int) -> list[str] | None:
+    """Nama font perender data latih seperti dicatat src.train di event start, dari proses terakhir yang mulai SEBELUM
+    langkah checkpoint: proses itulah yang menulis checkpoint-nya (proses yang mulai tepat di langkah itu baru
+    melanjutkannya, dan fontnya bisa lain). None = log run ini belum mencatat daftar font (run sebelum 2026-10-06)."""
+    for row in reversed(rows):
+        if (row.get("event") == "start" and isinstance(row.get("step"), int) and row["step"] < step
+                and isinstance(row.get("fonts"), list)):
+            return [str(name) for name in row["fonts"]]
+    return None
+
+
 def run_usage(link: dict, schedule: Schedule, root: Path, warnings: list[str]) -> tuple[dict, set[int] | None]:
     """Data latih yang dipakai satu run di rantai: kumpulan baris, sampel, baris berbeda yang dijadwalkan."""
     args, step, run = link["args"], link["step"], link["run"]
@@ -344,7 +355,7 @@ def run_usage(link: dict, schedule: Schedule, root: Path, warnings: list[str]) -
     core = len(font_files(root / "fonts"))
     # Daftar font yang sebenarnya dipakai hanya ada di log run yang lebih baru (src.train mencatatnya di event start).
     # Tanpa itu jumlahnya dihitung dari folder font SEKARANG, yang bisa sudah berubah sejak run itu dilatih.
-    logged = next((row["fonts"] for row in reversed(starts) if isinstance(row.get("fonts"), list)), None)
+    logged = logged_fonts(rows, step)
     if logged is not None:
         fonts, extra = len(logged), sum(1 for name in logged if name not in CORE_FONTS)
     else:
@@ -365,6 +376,7 @@ def run_usage(link: dict, schedule: Schedule, root: Path, warnings: list[str]) -
         "real_val": bool(args.get("real_val")),
         "fonts": fonts,
         "fonts_source": "log" if logged is not None else "folder",
+        "font_names": logged,
         "extra_fonts": extra,
         "augment": args.get("augment") or "none",
         "drop_space_prob": args.get("drop_space_prob") or 0.0,
@@ -449,6 +461,21 @@ def other_readers(root: Path) -> list[dict]:
             lines, checkpoints = (report.get("clean_heldout_font") or {}).get("lines"), 1
         if isinstance(lines, int) and lines > 0:
             readers.append({"kind": kind, "file": relative(path, root), "lines": lines, "checkpoints": checkpoints})
+    return readers
+
+
+def other_real_readers(root: Path) -> list[dict]:
+    """Evaluasi di luar out/eval yang juga membaca data uji nyata: scripts/beam_eval.py menyimpan hasil seluruh baris
+    nyata di blok "real" laporannya (out/beam/*.json). Tanpa ini "sudah dievaluasi N kali" hanya menghitung out/eval."""
+    readers = []
+    for path in sorted((root / "out/beam").glob("*.json")):
+        try:
+            report = read_json(path)
+        except (OSError, ValueError):
+            continue
+        lines = (report.get("real") or {}).get("lines") if isinstance(report, dict) else None
+        if isinstance(lines, int) and lines > 0:
+            readers.append({"kind": "beam", "file": relative(path, root), "lines": lines})
     return readers
 
 
@@ -575,8 +602,10 @@ def missing_glyphs(path: Path, charset: list[str]) -> list[str]:
 
 
 def font_cards(root: Path, official_args: dict, test_fonts: list[str], charset: list[str], test_font_dir: Path,
-               warnings: list[str]) -> list[dict]:
-    """Font per peran untuk run resmi: latih + validasi (inti), latih (tambahan), uji, dan yang tidak dipakai."""
+               warnings: list[str], logged: list[str] | None = None) -> list[dict]:
+    """Font per peran untuk run resmi: latih + validasi (inti), latih (tambahan), uji, dan yang tidak dipakai.
+    `logged` = nama font yang dicatat log run resmi (None bila log-nya belum mencatat): bila ada, peran latih hanya
+    diberikan ke nama-nama itu, bukan ke semua isi folder font sekarang."""
     sources = font_sources(root / "fonts/extra/SOURCES.md")
     extra_dir = (root / official_args["extra_fonts"]).resolve() if official_args.get("extra_fonts") else None
     reference = {}
@@ -600,14 +629,15 @@ def font_cards(root: Path, official_args: dict, test_fonts: list[str], charset: 
                 info = CORE_FONTS.get(name)
                 if info is None:
                     raise SystemExit(f"font inti {name} belum punya catatan lisensi di CORE_FONTS (scripts/export_datasets.py)")
-                roles = ["train", "val"]
+                roles = ["train", "val"] if logged is None or name in logged else ["val"]
             else:
                 info = sources.get(name)
                 if info is None:
                     raise SystemExit(f"font {folder}/{name} tidak ada di tabel fonts/extra/SOURCES.md")
                 if info["folder"] != Path(folder).name:
                     raise SystemExit(f"font {name} ada di {folder}, tetapi SOURCES.md mencatat folder {info['folder']}")
-                roles = ["train"] if extra_dir and path.parent.resolve() == extra_dir else []
+                in_folder = bool(extra_dir and path.parent.resolve() == extra_dir)
+                roles = ["train"] if in_folder and (logged is None or name in logged) else []
             card = {"file": name, "group": group, "roles": roles, "license": info["license"], "source": info["source"],
                     "in_repo": group == "core", "available": True, "notes": list(FONT_NOTES.get(name, []))}
             if info.get("status") and group != "core":
@@ -758,6 +788,21 @@ def build(root: Path = ROOT, run: str = OFFICIAL_RUN, test_font_dir: Path = TEST
                             f"{usage['fonts']}; jumlah dan daftar font di kartu ini mengikuti folder sekarang, bukan font "
                             "yang dipakai saat run itu dilatih.")
 
+    # Log run resmi mencatat NAMA fontnya: tabel font di kartu ini memberi peran latih ke nama-nama itu saja, dan
+    # selisihnya dengan folder sekarang (font yang sudah dihapus, font yang ditambahkan sesudahnya) harus terlihat.
+    logged = train["font_names"]
+    if logged:  # daftar kosong = run tanpa baris sintetis (--train-lines 0 dengan --real-train): tidak ada yang dibandingkan
+        folder = {path.name for path in font_files(root / "fonts")}
+        if official["args"].get("extra_fonts"):
+            folder |= {path.name for path in font_files(root / official["args"]["extra_fonts"])}
+        gone, added = sorted(set(logged) - folder), sorted(folder - set(logged))
+        if gone:
+            warnings.append(f"Run {run}: log mencatat {len(logged)} font latih, tetapi {len(gone)} di antaranya tidak ada "
+                            f"lagi di folder font ({', '.join(gone)}); font itu tidak ada di tabel font kartu ini.")
+        if added:
+            warnings.append(f"Run {run}: folder font sekarang memuat {len(added)} font yang tidak tercatat di log run itu "
+                            f"({', '.join(added)}); font itu tidak diberi peran latih.")
+
     real = nusaaksara_card(root / "data/real/nusaaksara/labels.tsv")
     gates = gate_reports(run, root, real["lines"])
     synthetic = [g for g in gates if g["code"] != "G3"]
@@ -780,7 +825,8 @@ def build(root: Path = ROOT, run: str = OFFICIAL_RUN, test_font_dir: Path = TEST
             "test": {"lines": max((g["lines"] for g in synthetic), default=0), "gates": synthetic,
                      "quick": others["quick"], "quick_max_lines": others["quick_max_lines"], "full": others["full"],
                      "others": other_readers(root)},
-            "real": {"lines": real["lines"], "gates": [g for g in gates if g["code"] == "G3"], "reports": others["real"]},
+            "real": {"lines": real["lines"], "gates": [g for g in gates if g["code"] == "G3"], "reports": others["real"],
+                     "others": other_real_readers(root)},
         },
         "lineage": {
             "runs": runs,
@@ -792,7 +838,7 @@ def build(root: Path = ROOT, run: str = OFFICIAL_RUN, test_font_dir: Path = TEST
         },
         "rare": rare_coverage(train_lines, charset, schedule.pool(train["pool"], train["seed"]), scheduled),
         "datasets": dataset_cards(corpus, splits, real, commons, gates, official["args"], root),
-        "fonts": font_cards(root, official["args"], test_fonts, charset, test_font_dir, warnings),
+        "fonts": font_cards(root, official["args"], test_fonts, charset, test_font_dir, warnings, logged),
         "support": support_cards(root, charset),
         "warnings": warnings,
     }

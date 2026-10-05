@@ -12,9 +12,11 @@ penjelasan singkat, pengaturan, dan bila ada bukti terukur serta catatan batasan
   pelatihan    argumen dari checkpoint tiap run di rantai
   data         preset augmentasi dari src/augment.py, ukuran render dari src/dataset.py, font dari log run (bila
                mencatatnya), ekspor hasil, atau folder font sekarang
-  bukti        gerbang, metrik, dan ablasi dari out/results/manifest.json; selisih dan selang kepercayaan dari
-               out/compare/<A>_vs_<B>.json (scripts/compare_runs.py), hanya bila CER di berkas itu sama dengan manifest;
-               evaluasi sintetis dari out/compare/spacing_synthetic.json. Bukti yang berkasnya tidak ada dilewati.
+  bukti        gerbang, metrik, ablasi, dan selisih antar-run dari out/results/manifest.json; selang kepercayaan
+               selisih itu dari out/compare/<A>_vs_<B>.json (scripts/compare_runs.py), hanya bila CER di berkas itu
+               sama dengan manifest; evaluasi sintetis dari out/compare/spacing_synthetic.json, hanya bila laporan itu
+               membaca checkpoint yang sekarang. Pasangan perlakuan-kontrol dikutip hanya bila `control_run` lolos.
+               Bukti yang berkasnya tidak ada dilewati; batasan yang tidak bisa dihitung ditulis sebagai catatan.
 Kalimat yang menyebut cara kerja kode (pengoptimal, jadwal, rugi, normalisasi kontras, penghalusan model bahasa) dijaga
 CODE_FACTS: skrip berhenti bila potongan kodenya sudah tidak ada. Dua angka yang tidak punya berkas untuk dihitung ulang
 diberi sumber "catatan pengukuran di CLAUDE.md", dan nilai gerbang G4 dikutip dari manifest dengan sumbernya.
@@ -22,6 +24,7 @@ Metode tahap lanjutan alur (alih aksara, terjemahan, tingkat tutur) milik web da
 """
 
 import argparse
+import hashlib
 import inspect
 import json
 import re
@@ -42,6 +45,7 @@ from export_datasets import (  # noqa: E402
     chain,
     font_files,
     gate_reports,
+    logged_fonts,
     missing_glyphs,
     nusaaksara_card,
     pipeline_key,
@@ -92,17 +96,29 @@ CODE_FACTS = {
     "clip": ("src.train.main", "nn.utils.clip_grad_norm_(model.parameters(), args.clip)"),
     "background": ("src.dataset.to_tensor", "background = float(np.percentile(arr, 50))"),
     "ink": ("src.dataset.to_tensor", "ink = float(np.percentile(arr, 1))"),
-    "smoothing": ("src.charlm", "Witten-Bell"),
+    # Rumus penghalusan Witten-Bell itu sendiri (bukan kata di docstring): P = (hitungan + jenis x P orde lebih rendah)
+    # / (total + jenis).
+    "smoothing": ("src.charlm.CharLM.prob", "p = (self.grams[k].get(h + ch, 0) + types * p) / (total + types)"),
 }
 # Run kontrol tiap perlakuan (CLAUDE.md, aturan analisis fase 5 sampai 7): perlakuan -> {run perlakuan: run kontrol}.
 # Kontrol sama dengan run perlakuannya kecuali SATU perlakuan itu, jadi sebuah run hanya boleh disebut kontrol untuk
-# perlakuan di barisnya (fase7_track adalah kontrol sisipan aksara langka, bukan kontrol jarak).
+# perlakuan di barisnya (fase7_track adalah kontrol sisipan aksara langka, bukan kontrol jarak). Daftar ini hanya
+# calon: sebuah pasangan baru dikutip sesudah `control_run` memeriksanya pada kedua checkpoint.
 CONTROLS = {
     "fonts": {"fase5_fonts": "fase5_core"},
     "tracking": {"fase7_track": "fase7_ctrl"},
     "rare": {"fase7_track_rare": "fase7_track", "fase6_rare": "fase6_ctrl"},
 }
 TREATMENTS = {"fonts": "font tambahan", "tracking": "jarak antar suku kata", "rare": "sisipan aksara langka"}
+# Argumen src.train milik tiap perlakuan (boleh berbeda antara run perlakuan dan kontrolnya), dan argumen pelatihan
+# yang harus sama di keduanya di samping argumen data (`data_recipe`).
+TREATMENT_KEYS = {"fonts": ("extra_fonts",), "tracking": ("track_prob", "track_max"),
+                  "rare": ("rare_insert_prob", "rare_opener_prob", "rare_max_similarity", "rare_attach")}
+TRAINING_KEYS = ("batch_size", "lr", "weight_decay", "steps")
+# Aturan "spasi selalu dibuang pada font berspasi sempit" (src.dataset.MIN_SPACE_RATIO) ditambahkan 2026-09-14, sesudah
+# run-run ini dilatih (CLAUDE.md, "Lebar spasi font tambahan"): di font berspasi sempit, labelnya masih memuat spasi
+# yang nyaris tidak tampak di citra. Hanya berakibat pada run yang memakai font semacam itu (font tambahan).
+RUNS_BEFORE_NARROW_SPACE_RULE = ("base", "fase5_quick", "fase5_core", "fase5_fonts")
 # Pipeline resmi bila manifest hasil tidak menyebutnya (ekspor sebelum kunci "official" ada); sama dengan web.
 LEGACY_OFFICIAL = "crnn_fonts"
 # Operasi augmentasi src/augment.py dengan kata sehari-hari, supaya kalimat di kartu hanya menyebut operasi yang
@@ -162,9 +178,12 @@ def entry(key: str, name: str, kind: str, status: str, summary: str, settings: l
           evidence: str | None = None, evidence_source: str | None = None, files: list[str] | None = None,
           note: str | None = None) -> dict:
     """Satu butir metode. `evidence` = hasil terukur dengan sumbernya; `note` = batasan atau keterangan yang harus
-    dibaca bersama butir itu (bukan hasil ukur)."""
+    dibaca bersama butir itu (bukan hasil ukur). Bukti tanpa sumber ditolak: halaman selalu menulis "Sumber:" di bawah
+    kotak "Terukur", dan web menolak kartu yang butirnya tidak begitu."""
     if kind not in KINDS or status not in STATUSES:
         raise ValueError(f"butir {key}: jenis {kind!r} atau status {status!r} tidak dikenal")
+    if evidence and not evidence_source:
+        raise ValueError(f"butir {key}: bukti tanpa sumber")
     return {"key": key, "name": name, "kind": kind, "status": status, "summary": summary,
             "settings": [list(pair) for pair in settings or []], "evidence": evidence,
             "evidence_source": evidence_source if evidence else None, "note": note, "files": files or []}
@@ -208,7 +227,7 @@ def model_card(checkpoint: Path) -> dict:
 def code_facts() -> dict:
     """Cara kerja kode yang disebut kartu, seperti tertulis di sumbernya; berhenti bila salah satu sudah berubah."""
     sources = {"src.train.main": inspect.getsource(train.main), "src.dataset.to_tensor": inspect.getsource(to_tensor),
-               "src.charlm": inspect.getsource(charlm)}
+               "src.charlm.CharLM.prob": inspect.getsource(charlm.CharLM.prob)}
     missing = [name for name, (where, text) in CODE_FACTS.items() if text not in sources[where]]
     start = re.search(r"OneCycleLR\([^)]*pct_start=([0-9.]+)", sources["src.train.main"])
     if missing or not start:
@@ -218,7 +237,9 @@ def code_facts() -> dict:
 
 
 class Evidence:
-    """Bukti terukur dari manifest hasil dan berkas pembanding; yang berkasnya tidak ada mengembalikan None."""
+    """Bukti terukur dari manifest hasil dan berkas pembanding; yang berkasnya tidak ada mengembalikan None. Selisih dua
+    run selalu dihitung dari CER manifest; berkas pembanding hanya menyumbang selang kepercayaannya, dan hanya bila
+    CER di berkas itu sama dengan manifest."""
 
     SCOPE = "nusaaksara_745"  # baris nyata: cakupan berkas pembanding scripts/compare_runs.py
 
@@ -282,81 +303,174 @@ class Evidence:
         return None
 
 
-def run_args(root: Path, run: str) -> dict | None:
-    """Argumen training sebuah run dari checkpoint-nya, atau None bila checkpoint-nya tidak ada di mesin ini."""
+def run_meta(root: Path, run: str) -> tuple[int, dict] | None:
+    """Langkah dan argumen training sebuah run dari checkpoint-nya, atau None bila checkpoint-nya tidak ada di mesin ini."""
     path = root / "out/checkpoints" / run / "last_snapshot.pt"
-    return checkpoint_meta(path)[1] if path.exists() else None
+    return checkpoint_meta(path) if path.exists() else None
 
 
-def tracking_control(root: Path, run: str) -> str | None:
-    """Run kontrol perlakuan jarak untuk `run`: terdaftar di CONTROLS dan checkpoint-nya memang dilatih tanpa jarak."""
-    control = CONTROLS["tracking"].get(run)
-    args = run_args(root, control) if control else None
-    return control if args is not None and not args.get("track_prob") else None
+def planned_steps(path: Path) -> int | None:
+    """Jumlah langkah yang direncanakan sebuah run, dari jadwal laju belajar di checkpoint-nya: siklus OneCycle dihitung
+    untuk total itu, juga bila run dimulai dengan --epochs (args.steps 0). None bila checkpoint tidak menyimpannya."""
+    total = (torch.load(path, map_location="cpu", weights_only=False).get("scheduler") or {}).get("total_steps")
+    return int(total) if total else None
+
+
+def file_sha(path: Path) -> str:
+    """12 heksadesimal pertama SHA-1 berkas: identitas checkpoint yang sama dengan laporan scripts/eval_spacing.py."""
+    with open(path, "rb") as handle:
+        return hashlib.file_digest(handle, "sha1").hexdigest()[:12]
+
+
+def data_recipe(args: dict) -> dict:
+    """Argumen data sebuah run dalam bentuk yang bisa dibandingkan: yang mati (None, 0, "", False) disamakan, dan
+    pengaturan yang hanya berlaku bila induknya hidup (jarak terbesar, saringan dan tempelan sisipan) dikosongkan bila
+    induknya mati."""
+    track = args.get("track_prob") or 0
+    rare = bool(args.get("rare_insert_prob") or args.get("rare_opener_prob"))
+    return {
+        "augment": args.get("augment") or "none",
+        "extra_fonts": args.get("extra_fonts") or "",
+        "drop_space_prob": args.get("drop_space_prob") or 0,
+        "track_prob": track,
+        "track_max": (args.get("track_max") or 0) if track else 0,
+        "rare_insert_prob": args.get("rare_insert_prob") or 0,
+        "rare_opener_prob": args.get("rare_opener_prob") or 0,
+        "rare_max_similarity": (args.get("rare_max_similarity") or 0) if rare else 0,
+        "rare_attach": bool(args.get("rare_attach")) if rare else False,
+        "train_lines": args.get("train_lines") or 0,
+        "seed": args.get("seed") or 0,
+        "real_train": args.get("real_train") or "",
+        "real_val": args.get("real_val") or "",
+    }
+
+
+def is_treated(kind: str, recipe: dict) -> bool:
+    """Apakah perlakuan `kind` hidup di resep data ini."""
+    return {"fonts": bool(recipe["extra_fonts"]), "tracking": recipe["track_prob"] > 0,
+            "rare": recipe["rare_insert_prob"] > 0 or recipe["rare_opener_prob"] > 0}[kind]
+
+
+def control_run(root: Path, kind: str, run: str) -> str | None:
+    """Run kontrol perlakuan `kind` untuk `run`, bila pasangan itu memang sah: terdaftar di CONTROLS, kedua checkpoint
+    ada di mesin ini, perlakuannya hidup di `run` dan mati di kontrol, jumlah langkahnya sama, dan argumen data serta
+    pelatihannya sama kecuali argumen perlakuan itu sendiri. Pasangan yang tidak lolos tidak dikutip di kartu."""
+    control = CONTROLS[kind].get(run)
+    ours, theirs = run_meta(root, run), (run_meta(root, control) if control else None)
+    if ours is None or theirs is None or ours[0] != theirs[0]:
+        return None
+    a, b = data_recipe(ours[1]), data_recipe(theirs[1])
+    same_data = all(a[key] == b[key] for key in a if key not in TREATMENT_KEYS[kind])
+    same_training = all(ours[1].get(key) == theirs[1].get(key) for key in TRAINING_KEYS)
+    return control if is_treated(kind, a) and not is_treated(kind, b) and same_data and same_training else None
 
 
 def font_facts(root: Path, link: dict, charset: list[str], recorded: dict[str, int]) -> dict:
-    """Font latih sebuah run. Jumlahnya dari log run (bila mencatat daftarnya), kalau tidak dari ekspor hasil, kalau
-    tidak dari folder font sekarang. Cacat dan lebar spasi hanya bisa diukur pada berkas yang ada di folder sekarang;
-    `current` False berarti folder itu sudah tidak sama banyaknya dengan saat run dilatih."""
+    """Font latih sebuah run. Sumbernya, berurutan: daftar NAMA di log run (bila src.train sudah mencatatnya), jumlah di
+    ekspor hasil (teks konfigurasi pipeline; hanya dipakai bila tidak bertentangan dengan argumen checkpoint), lalu
+    folder font sekarang. Cacat dan lebar spasi hanya bisa diukur pada berkas yang ada di folder sekarang (`paths`);
+    `current` False berarti berkas-berkas itu bukan persis font yang dipakai run."""
     args = link["args"]
     core = font_files(root / "fonts")
-    paths = core + (font_files(root / args["extra_fonts"]) if args.get("extra_fonts") else [])
-    logged = next((row["fonts"] for row in reversed(read_log(link["path"].parent / "log.jsonl"))
-                   if row.get("event") == "start" and isinstance(row.get("fonts"), list)), None)
+    folder = core + (font_files(root / args["extra_fonts"]) if args.get("extra_fonts") else [])
+    logged = logged_fonts(read_log(link["path"].parent / "log.jsonl"), link["step"])
+    then = recorded.get(link["run"])
+    core_count = len(core)
     if logged is not None:
-        train_count, source = len(logged), "log"
-    elif link["run"] in recorded:
-        train_count, source = recorded[link["run"]], "results"
+        # Hanya berkas yang namanya dicatat log yang diukur: font yang ditambahkan ke folder sesudahnya bukan font run ini.
+        paths = [path for path in folder if path.name in logged]
+        train_count, source, current = len(logged), "log", len(paths) == len(set(logged))
+        core_count = sum(1 for path in core if path.name in logged)
+    elif then is not None and (args.get("extra_fonts") or then == len(core)):
+        paths, train_count, source, current = folder, then, "results", len(folder) == then
     else:
-        train_count, source = len(paths), "folder"
+        paths, train_count, source, current = folder, len(folder), "folder", True
     return {
-        "train": train_count, "core": len(core), "extra": train_count - len(core), "source": source,
-        "measured": len(paths), "current": len(paths) == train_count, "paths": paths,
+        "run": link["run"], "train": train_count, "core": core_count, "extra": train_count - core_count, "source": source,
+        "measured": len(paths), "current": current, "paths": paths,
         "defects": sorted(p.stem for p in paths if p.name in FONT_DEFECTS or missing_glyphs(p, charset)),
         "narrow": sum(1 for p in paths if space_ratio(str(p)) < MIN_SPACE_RATIO),
     }
 
 
-def family_twins(paths: list[Path], gates: list[dict], test_font_dir: Path) -> list[dict]:
-    """Font uji gerbang sintetis yang sekeluarga dengan sebuah font latih (aturan kartu data: lebar maju yang sama)."""
-    twins = []
-    for name in sorted({font for gate in gates if gate["code"] != "G3" for font in gate["fonts"]}):
+def chain_fonts(facts: list[dict]) -> dict[str, dict]:
+    """Font latih di sepanjang rantai run (yang berkasnya ada di folder sekarang): nama berkas -> berkas dan run yang
+    memakainya. Model resmi mewarisi bobot semua run itu, jadi "font yang pernah dilihat model" adalah gabungannya,
+    bukan font run terakhir saja."""
+    owners: dict[str, dict] = {}
+    for fact in facts:
+        for path in fact["paths"]:
+            owners.setdefault(path.name, {"path": path, "runs": []})["runs"].append(fact["run"])
+    return owners
+
+
+def family_twins(owners: dict[str, dict], fonts: list[str], test_font_dir: Path) -> tuple[list[dict], list[str]]:
+    """Font uji `fonts` yang sekeluarga dengan sebuah font latih di rantai (aturan kartu data: lebar maju yang sama), dan
+    font uji yang berkasnya tidak ada di mesin ini (kemiripannya tidak bisa dihitung)."""
+    twins, unknown = [], []
+    for name in sorted(set(fonts)):
         path = test_font_dir / name
         if not path.exists():
+            unknown.append(Path(name).stem)
             continue
         reference = advances(path)
-        for train_path in paths:
-            shared = shared_advances(advances(train_path), reference)
+        for owner in owners.values():
+            shared = shared_advances(advances(owner["path"]), reference)
             if shared["family"]:
-                twins.append({"test": Path(name).stem, "train": train_path.stem, **shared})
-    return twins
+                twins.append({"test": Path(name).stem, "train": owner["path"].stem, "runs": owner["runs"], **shared})
+    return twins, unknown
 
 
+def family_note(twins: list[dict], subject: str, official: str, unknown: list[str], incomplete: bool) -> str | None:
+    """Batasan G1/G2: font ujinya sekeluarga dengan font latih di rantai. `official` = run resmi (font yang hanya dipakai
+    run sebelumnya di rantai disebut begitu); `unknown` = font uji yang berkasnya tidak ada di mesin ini; `incomplete`
+    = ada font latih yang berkasnya tidak ada lagi, jadi tidak ikut diperiksa. Yang tidak bisa dihitung DISEBUT, bukan
+    didiamkan."""
+    sentences = []
+    if twins:
+        parts = []
+        for test in sorted({twin["test"] for twin in twins}):
+            mine = [twin for twin in twins if twin["test"] == test]
+            names = [twin["train"] + ("" if official in twin["runs"] else f" (font run {listing(twin['runs'])} di rantai)")
+                     for twin in mine]
+            overlaps = [str(twin["same"]) for twin in mine]
+            overlap = overlaps[0] if len(set(overlaps)) == 1 else "berturut-turut " + listing(overlaps)
+            parts.append(f"font uji {test} sekeluarga dengan font latih {listing(names)} (lebar {overlap} dari "
+                         f"{mine[0]['of']} aksara, angka, dan pada persis sama)")
+        text = listing(parts)
+        sentences.append(f"{text[0].upper()}{text[1:]}, jadi {subject} mengukur generalisasi di dalam keluarga huruf itu, "
+                         "bukan ke font yang belum pernah dilihat model.")
+    if unknown:
+        sentences.append(f"Kemiripan font uji {listing(unknown)} dengan font latih tidak bisa dihitung di mesin ini: "
+                         "berkas fontnya tidak ada.")
+    if incomplete:
+        sentences.append("Sebagian font latih tidak ada lagi di folder font, jadi kemiripannya dengan font uji tidak ikut "
+                         "diperiksa.")
+    return " ".join(sentences) or None
 
-def family_note(twins: list[dict], subject: str) -> str | None:
-    """Batasan G1/G2 dan evaluasi sintetis lain: font ujinya sekeluarga dengan font latih."""
-    if not twins:
-        return None
-    parts = []
-    for test in sorted({twin["test"] for twin in twins}):
-        mine = [twin for twin in twins if twin["test"] == test]
-        widest = max(mine, key=lambda twin: twin["same"])
-        parts.append(f"font uji {test} sekeluarga dengan font latih {listing([twin['train'] for twin in mine])} (lebar "
-                     f"{widest['same']} dari {widest['of']} aksara, angka, dan pada persis sama)")
-    text = listing(parts)
-    return (f"{text[0].upper()}{text[1:]}, jadi {subject} mengukur generalisasi di dalam keluarga huruf itu, bukan ke "
-            "font yang belum pernah dilihat model.")
+
+def probe_note(twins: list[dict], unknown: list[str]) -> str | None:
+    """Batasan evaluasi sintetis tertarget: citranya dirender dengan font yang sekeluarga dengan font latih di rantai."""
+    sentences = []
+    if twins:
+        tests = sorted({twin["test"] for twin in twins})
+        trains = sorted({twin["train"] for twin in twins})
+        sentences.append(f"Citranya dirender dengan font uji {listing(tests)}, yang sekeluarga dengan font latih "
+                         f"{listing(trains)}, jadi hasilnya belum tentu berlaku untuk bentuk huruf lain.")
+    if unknown:
+        sentences.append(f"Kemiripan font perender {listing(unknown)} dengan font latih tidak bisa dihitung di mesin ini: "
+                         "berkas fontnya tidak ada.")
+    return " ".join(sentences) or None
 
 
-def probe_note(twins: list[dict]) -> str | None:
-    """Batasan evaluasi sintetis tertarget: citranya dirender dengan font uji yang sekeluarga dengan font latih."""
-    if not twins:
-        return None
-    tests = sorted({twin["test"] for twin in twins})
-    trains = sorted({twin["train"] for twin in twins})
-    return (f"Citranya dirender dengan font uji {listing(tests)}, yang sekeluarga dengan font latih {listing(trains)}, jadi "
-            "hasilnya belum tentu berlaku untuk bentuk huruf lain.")
+def report_matches(report: dict, root: Path, run: str) -> bool:
+    """Apakah laporan evaluasi sintetis memang membaca checkpoint `run` yang sekarang: langkahnya sama, dan bila laporan
+    mencatat sidik berkasnya, sidik itu sama. Laporan dari checkpoint lain tidak dikutip sebagai "model resmi"."""
+    info = (report.get("checkpoints") or {}).get(run)
+    meta = run_meta(root, run)
+    if not isinstance(info, dict) or meta is None or info.get("step") != meta[0]:
+        return False
+    return not info.get("sha1") or info["sha1"] == file_sha(root / "out/checkpoints" / run / "last_snapshot.pt")
 
 
 def spacing_note(report: dict, run: str, control: str | None, track_max: float) -> str | None:
@@ -390,11 +504,14 @@ def spacing_note(report: dict, run: str, control: str | None, track_max: float) 
     return None
 
 
-def ablation_evidence(rows: list[dict], seeds: set) -> tuple[str, str] | None:
+def ablation_evidence(rows: list[dict], seeds: list) -> tuple[str, str] | None:
     """(bukti, catatan) dari ablasi kumulatif. Yang dikutip jumlah per kelompok operasi, bukan "penurunan terbesar":
-    langkah-langkahnya saling menutupi (satu langkah naik, langkah berikutnya turun kembali) dan tiap run satu kali."""
+    langkah-langkahnya saling menutupi (satu langkah naik, langkah berikutnya turun kembali) dan tiap run satu kali.
+    `seeds` = seed tiap run ablasi menurut log-nya, None bila log run itu tidak ada: "seed yang sama" hanya ditulis
+    bila log SEMUA run ada dan seed-nya memang satu."""
     if len(rows) < 2 or any(row.get("G3") is None for row in rows):
         return None
+    same_seed = len(seeds) == len(rows) and None not in seeds and len(set(seeds)) == 1
     steps = [(b["added"], b["G3"] - a["G3"]) for a, b in zip(rows, rows[1:])]
     text = f"Ablasi {len(rows)} run: G3 {pct(rows[0]['G3'])} → {pct(rows[-1]['G3'])}."
     preset = [(name, delta) for name, delta in steps if name in PRESET_OPS]
@@ -406,7 +523,7 @@ def ablation_evidence(rows: list[dict], seeds: set) -> tuple[str, str] | None:
     else:
         text += " Selisih tiap langkah: " + ", ".join(f"{name} {points(delta)}" for name, delta in steps) + "."
     name, rise = max(steps, key=lambda step: step[1])
-    note = ("Operasi ditambahkan berurutan dan tiap run dilatih satu kali" + (" dengan seed yang sama" if len(seeds) == 1 else "")
+    note = ("Operasi ditambahkan berurutan dan tiap run dilatih satu kali" + (" dengan seed yang sama" if same_seed else "")
             + ", jadi selisih satu langkah mencampur pengaruh operasinya dengan derau antar-run"
             + (f" (menambahkan {name} malah menaikkan G3 {points(rise).lstrip('+')})" if rise > 0 else "")
             + ". G3 adalah data uji: angka ini dibaca sebagai arah, bukan dasar memilih operasi.")
@@ -480,50 +597,84 @@ def ocr_group(model: dict, tokenizer: dict, evidence: Evidence) -> dict:
     }
 
 
+def font_count(root: Path, run: str, recorded: dict[str, int]) -> int | None:
+    """Jumlah font latih sebuah run di luar rantai, untuk kalimat bukti "N lawan M font": dari log run atau dari ekspor
+    hasil saja. None bila checkpoint-nya tidak ada di mesin ini atau jumlahnya hanya bisa ditebak dari folder font
+    sekarang (kalimat bukti tidak mengarang angka dari folder yang bisa sudah berubah)."""
+    meta = run_meta(root, run)
+    if meta is None:
+        return None
+    link = {"run": run, "step": meta[0], "args": meta[1], "path": root / "out/checkpoints" / run / "last_snapshot.pt"}
+    facts = font_facts(root, link, [], recorded)
+    return facts["train"] if facts["source"] != "folder" else None
+
+
 def data_group(run: str, args: dict, fonts: dict, real: dict, evidence: Evidence, root: Path) -> dict:
+    """Butir data latih sintetis. `fonts` = fakta font run resmi (`font_facts`) ditambah "recorded" (jumlah font menurut
+    ekspor hasil) dan "chain" (fakta font run-run sebelumnya di rantai, yang bobotnya diwarisi model resmi)."""
     augment = build_augment(args.get("augment") or "none")
     low, high = RENDER_SIZE_RANGE
+    earlier = fonts.get("chain") or []
     measured = "" if fonts["current"] else f" yang ada di folder sekarang (run ini dilatih dengan {fonts['train']} font)"
+    # Catatan butir render: font bercacat run resmi, font bercacat yang hanya dipakai run sebelumnya di rantai, dan
+    # font yang tidak bisa diperiksa karena berkasnya sudah tidak ada. Yang tidak bisa diperiksa disebut, bukan didiamkan.
+    notes = []
+    if fonts["defects"]:
+        notes.append(f"{len(fonts['defects'])} dari {fonts['measured']} font latih{measured} punya cacat yang diketahui "
+                     f"({listing(fonts['defects'])}): pada font itu sebagian citra tidak sepadan dengan labelnya, atau "
+                     "pasangannya tidak menumpuk di lingkungan training. Rinciannya di halaman Dataset, bagian Font per "
+                     "peran.")
+    elif not fonts["current"]:
+        notes.append(f"Cacat font hanya bisa diperiksa pada {fonts['measured']} dari {fonts['train']} font latih: sisanya "
+                     "tidak ada lagi di folder font.")
+    inherited = sorted({stem for fact in earlier for stem in fact["defects"] if stem not in fonts["defects"]})
+    if inherited:
+        runs = [fact["run"] for fact in earlier if any(stem in inherited for stem in fact["defects"])]
+        notes.append(f"Run sebelumnya di rantai ({listing(runs)}) dilatih dengan font bercacat yang tidak dipakai run resmi "
+                     f"({listing(inherited)}); model resmi mewarisi bobotnya.")
     methods = [
         entry("render", "Render teks dengan shaping OpenType", "data", "official",
               "Teks aksara Jawa dirender dengan font lewat mesin tata huruf HarfBuzz (RAQM), supaya pasangan menumpuk "
               "dan taling pindah ke kiri seperti pada tulisan aksara Jawa yang benar. Tanpa RAQM gambar tetap keluar "
               "tetapi salah, jadi keberadaannya diperiksa di kode.",
               [("Ukuran huruf", f"{low} sampai {high} piksel, diundi per baris"), ("Tinggi citra akhir", f"{H} piksel")],
-              files=["src/render.py", "src/dataset.py"],
-              note=f"{len(fonts['defects'])} dari {fonts['measured']} font latih{measured} punya cacat yang diketahui "
-                   f"({listing(fonts['defects'])}): pada font itu sebagian citra tidak sepadan dengan labelnya, atau "
-                   "pasangannya tidak menumpuk di lingkungan training. Rinciannya di halaman Dataset, bagian Font per "
-                   "peran." if fonts["defects"] else None),
+              files=["src/render.py", "src/dataset.py"], note=" ".join(notes) or None),
     ]
 
-    # Bukti variasi font berasal dari run perlakuan dan kontrolnya sendiri (jumlah font keduanya dari ekspor hasil),
-    # bukan dari model resmi: itu disebut di kalimatnya.
+    # Bukti variasi font berasal dari run perlakuan dan kontrolnya sendiri, bukan dari model resmi: itu disebut di
+    # kalimatnya. Pasangannya diperiksa dulu (`control_run`), dan jumlah font keduanya dibaca dengan cara yang sama
+    # dengan run di rantai.
     font_evidence = None
     if fonts["extra"] > 0:
-        recorded = fonts["recorded"]
         for treated, control in CONTROLS["fonts"].items():
+            if control_run(root, "fonts", treated) != control:
+                continue
             change = evidence.g3_change(pipeline_key(treated) or "", pipeline_key(control) or "")
-            if change and treated in recorded and control in recorded:
+            counts = [font_count(root, name, fonts.get("recorded") or {}) for name in (control, treated)]
+            if change and None not in counts:
                 own = "" if treated == run else ", bukan model resmi"
-                font_evidence = (f"Pada run {control} lawan {treated} ({recorded[control]} lawan {recorded[treated]} "
-                                 f"font{own}): {change[0]}.", change[1])
+                font_evidence = (f"Pada run {control} lawan {treated} ({counts[0]} lawan {counts[1]} font{own}): "
+                                 f"{change[0]}.", change[1])
                 break
+    if fonts["current"]:
+        font_setting = f"{fonts['train']} ({fonts['core']} inti, {fonts['extra']} tambahan)"
+    elif fonts.get("source") == "log":
+        font_setting = f"{fonts['train']} (tercatat di log run; {fonts['measured']} di antaranya masih ada di folder font)"
+    else:
+        font_setting = f"{fonts['train']} (menurut ekspor hasil; folder font sekarang berisi {fonts['measured']})"
     methods.append(entry(
         "fonts", "Variasi font", "data", "official",
         f"Tiap baris dirender dengan satu font yang diundi dari {fonts['train']} font. Bentuk huruf cetakan nyata "
         "berbeda dari font mana pun, jadi model perlu melihat banyak ragam bentuk huruf.",
-        [("Font latih", f"{fonts['train']} ({fonts['core']} inti, {fonts['extra']} tambahan)" if fonts["current"]
-          else f"{fonts['train']} (tercatat saat run dilatih; folder font sekarang berisi {fonts['measured']})")],
+        [("Font latih", font_setting)],
         font_evidence[0] if font_evidence else None, font_evidence[1] if font_evidence else None,
         files=["src/dataset.py", "fonts/extra/SOURCES.md"]))
     if augment:
         ablation = evidence.manifest.get("ablation") or []
-        seeds = set()
+        seeds = []  # seed tiap run ablasi menurut log-nya; None = log run itu tidak ada di mesin ini
         for k in range(len(ablation)):
-            for row in read_log(root / f"out/checkpoints/ablation_{k}/log.jsonl"):
-                if row.get("event") == "start":
-                    seeds.add(row.get("args", {}).get("seed"))
+            starts = [row for row in read_log(root / f"out/checkpoints/ablation_{k}/log.jsonl") if row.get("event") == "start"]
+            seeds.append(starts[-1].get("args", {}).get("seed") if starts else None)
         measured_ablation = ablation_evidence(ablation, seeds)
         methods.append(entry(
             "augment", "Augmentasi degradasi citra", "data", "official",
@@ -536,7 +687,7 @@ def data_group(run: str, args: dict, fonts: dict, real: dict, evidence: Evidence
             measured_ablation[0] if measured_ablation else None, "out/results/manifest.json",
             files=["src/augment.py", "scripts/ablation.py"], note=measured_ablation[1] if measured_ablation else None))
     if args.get("track_prob"):
-        control = tracking_control(root, run)
+        control = control_run(root, "tracking", run)
         change = evidence.g3_change(pipeline_key(run) or "", pipeline_key(control) or "") if control else None
         methods.append(entry(
             "tracking", "Jarak antar suku kata acak", "data", "official",
@@ -547,23 +698,34 @@ def data_group(run: str, args: dict, fonts: dict, real: dict, evidence: Evidence
             change[1] if change else None, files=["src/render.py", "src/dataset.py"]))
     if args.get("drop_space_prob"):
         # Spasi dibuang bila undiannya kena ATAU font terpilih berspasi terlalu sempit (src/dataset.py), jadi porsi
-        # baris tanpa spasi lebih besar dari peluangnya: p + (1 - p) x porsi font berspasi sempit.
+        # baris tanpa spasi lebih besar dari peluangnya: p + (1 - p) x porsi font berspasi sempit. Aturan font
+        # berspasi sempit itu baru ada sesudah run-run di RUNS_BEFORE_NARROW_SPACE_RULE dilatih.
         chance = args["drop_space_prob"]
-        narrow = fonts["narrow"] / fonts["measured"] if fonts["measured"] else 0.0
+        ruled = run not in RUNS_BEFORE_NARROW_SPACE_RULE
+        narrow = fonts["narrow"] if ruled else 0
         settings = [("Peluang", dec(chance))]
-        if fonts["narrow"]:
-            settings += [("Selalu, pada font berspasi sempit", f"{fonts['narrow']} dari {fonts['measured']} font{measured}"),
-                         ("Porsi baris tanpa spasi", "sekitar " + pct(chance + (1 - chance) * narrow, 0))]
+        if narrow:
+            settings.append(("Selalu, pada font berspasi sempit", f"{narrow} dari {fonts['measured']} font{measured}"))
+            if fonts["current"]:  # porsinya hanya bisa dihitung bila berkas yang diukur memang font run ini
+                settings.append(("Porsi baris tanpa spasi", "sekitar " + pct(chance + (1 - chance) * narrow / fonts["measured"], 0)))
+        space_notes = []
+        if not ruled and fonts["narrow"]:
+            space_notes.append(f"Run ini dilatih sebelum aturan font berspasi sempit ada: pada {fonts['narrow']} font, label "
+                               "yang masih berspasi memuat spasi yang nyaris tidak tampak di citra.")
+        before = [fact["run"] for fact in earlier if fact["run"] in RUNS_BEFORE_NARROW_SPACE_RULE and fact["narrow"]]
+        if before:
+            space_notes.append(f"Run {listing(before)} di rantai dilatih sebelum aturan font berspasi sempit ada: di font "
+                               "itu labelnya masih memuat spasi yang nyaris tidak tampak di citra.")
         methods.append(entry(
             "drop_space", "Membuang spasi", "data", "official",
             "Pada sebagian baris, spasi dihapus dari teks sebelum dirender, sehingga konsonan penutup kata bertemu kata "
             "berikutnya sebagai pasangan. Begitulah buku cetak beraksara Jawa umumnya ditulis."
             + (" Pada font yang spasinya nyaris tak tampak, spasi selalu dibuang supaya label tidak memuat spasi yang "
-               "tidak terlihat di citra." if fonts["narrow"] else ""),
+               "tidak terlihat di citra." if narrow else ""),
             settings,
             f"{num(real['without_space'])} dari {num(real['lines'])} baris cetak nyata "
             f"({pct(real['without_space'] / real['lines'], 1)}) ditulis tanpa spasi.",
-            "data/real/nusaaksara/labels.tsv", files=["src/dataset.py"]))
+            "data/real/nusaaksara/labels.tsv", files=["src/dataset.py"], note=" ".join(space_notes) or None))
 
     rare_used = bool(args.get("rare_insert_prob") or args.get("rare_opener_prob"))
     # Sisipan aksara langka yang diuji dengan run resmi sebagai kontrolnya (run perlakuan = run resmi + sisipan).
@@ -571,7 +733,7 @@ def data_group(run: str, args: dict, fonts: dict, real: dict, evidence: Evidence
     if not rare_used:
         for treated, control in CONTROLS["rare"].items():
             a, b = pipeline_key(treated) or "", pipeline_key(control) or ""
-            if control == run and (report := evidence.compare(a, b)):
+            if control == run and control_run(root, "rare", treated) == control and (report := evidence.compare(a, b)):
                 source = f"out/compare/{a}_vs_{b}.json"
                 break
     if rare_used or report:
@@ -581,11 +743,17 @@ def data_group(run: str, args: dict, fonts: dict, real: dict, evidence: Evidence
             cer = report["cer"]
             low, high = cer["bootstrap_clusters"]["ci95"]
             same = low <= 0 <= high  # selang kepercayaan per halaman memuat nol
-            measured_rare = (f"Pada {num(report['lines'])} baris nyata, aksara langka yang terbaca benar naik dari "
-                             f"{pct(group['recall']['b'], 1)} ke {pct(group['recall']['a'], 1)}, tetapi hanya "
-                             f"{pct(group['precision']['a'], 1)} dari keluarannya benar, dan G3 "
-                             + ("tidak berbeda nyata" if same else f"berubah {points(cer['a'] - cer['b'])}")
-                             + f" ({pct(cer['a'])} melawan {pct(cer['b'])}). Karena itu tidak dipakai di run resmi.")
+            recall, precision = group["recall"], group["precision"]["a"]
+            # Kalimatnya mengikuti hasilnya: "tetapi hanya" untuk presisi di bawah separuh, dan "karena itu tidak
+            # dipakai" hanya bila G3 tidak lebih baik (alasan yang dicatat proyek: efek samping, bukan G3 terendah).
+            measured_rare = (f"Pada {num(report['lines'])} baris nyata, aksara langka yang terbaca benar "
+                             f"{'naik' if recall['a'] > recall['b'] else 'berubah'} dari {pct(recall['b'], 1)} ke "
+                             f"{pct(recall['a'], 1)}, "
+                             + (f"tetapi hanya {pct(precision, 1)} dari keluarannya benar" if precision < 0.5
+                                else f"dan {pct(precision, 1)} dari keluarannya benar")
+                             + ", dan G3 " + ("tidak berbeda nyata" if same else f"berubah {points(cer['a'] - cer['b'])}")
+                             + f" ({pct(cer['a'])} melawan {pct(cer['b'])}). "
+                             + ("Run resmi tidak memakainya." if high < 0 else "Karena itu tidak dipakai di run resmi."))
         methods.append(entry(
             "rare", "Sisipan aksara langka", "data", "official" if rare_used else "tested",
             "Menyisipkan satu aksara langka (murda, aksara swara, pada) atau pembuka baris adeg-adeg ke teks sebelum "
@@ -603,26 +771,39 @@ def data_group(run: str, args: dict, fonts: dict, real: dict, evidence: Evidence
 
 
 def recipe_changes(links: list[dict], counts: list[int]) -> str:
-    """Apa yang berubah di argumen data tiap run dibanding run sebelumnya, dari argumen di checkpoint-nya. `counts` =
-    jumlah font latih tiap run. Yang tidak tercatat di argumen (mis. aturan font berspasi sempit) tidak terlihat di
-    sini, jadi run tanpa perubahan disebut "argumen sama", bukan "resep sama"."""
-    def recipe(args: dict) -> dict:
-        return {"augment": args.get("augment") or "none",
-                "drop": bool(args.get("drop_space_prob")), "track": bool(args.get("track_prob")),
-                "rare": bool(args.get("rare_insert_prob") or args.get("rare_opener_prob"))}
-
+    """Apa yang berubah di argumen data tiap run dibanding run sebelumnya, dari argumen di checkpoint-nya (`data_recipe`,
+    dibandingkan nilai demi nilai). `counts` = jumlah font latih tiap run. Yang tidak tercatat di argumen (mis. aturan
+    font berspasi sempit) tidak terlihat di sini, jadi run tanpa perubahan disebut "argumen data sama", bukan "resep
+    sama"; argumen pelatihan (laju belajar, jumlah langkah) tidak dibandingkan di sini."""
     parts = []
     for index, (before, link) in enumerate(zip(links, links[1:])):
-        old, new = recipe(before["args"]), recipe(link["args"])
+        old, new = data_recipe(before["args"]), data_recipe(link["args"])
         changed = []
         if new["augment"] != old["augment"]:
             changed.append("tanpa augmentasi" if new["augment"] == "none" else f"augmentasi {new['augment']}")
         if counts[index + 1] != counts[index]:
             changed.append(f"{counts[index + 1]} font (dari {counts[index]})")
-        for key, label in (("drop", "buang spasi"), ("track", "jarak antar suku kata"), ("rare", "sisipan aksara langka")):
-            if new[key] != old[key]:
-                changed.append(label if new[key] else f"tanpa {label}")
-        parts.append(f"{link['run']}: {', '.join(changed) if changed else 'argumen sama, langkah tambahan'}")
+        elif new["extra_fonts"] != old["extra_fonts"]:
+            changed.append(f"font tambahan dari {new['extra_fonts']}" if new["extra_fonts"] else "tanpa font tambahan")
+        if new["drop_space_prob"] != old["drop_space_prob"]:
+            changed.append("tanpa buang spasi" if not new["drop_space_prob"] else "buang spasi" if not old["drop_space_prob"]
+                           else f"buang spasi p {dec(new['drop_space_prob'])} (dari {dec(old['drop_space_prob'])})")
+        if (new["track_prob"], new["track_max"]) != (old["track_prob"], old["track_max"]):
+            changed.append("tanpa jarak antar suku kata" if not new["track_prob"] else "jarak antar suku kata"
+                           if not old["track_prob"] else f"jarak antar suku kata p {dec(new['track_prob'])} hingga "
+                           f"{dec(new['track_max'])} em (dari p {dec(old['track_prob'])} hingga {dec(old['track_max'])} em)")
+        rare_keys = ("rare_insert_prob", "rare_opener_prob", "rare_max_similarity", "rare_attach")
+        if any(new[key] != old[key] for key in rare_keys):
+            was, now = is_treated("rare", old), is_treated("rare", new)
+            changed.append("tanpa sisipan aksara langka" if not now else "sisipan aksara langka" if not was
+                           else "sisipan aksara langka dengan pengaturan lain")
+        if new["train_lines"] != old["train_lines"]:
+            changed.append(f"kumpulan {num(new['train_lines'])} baris (dari {num(old['train_lines'])})")
+        if new["seed"] != old["seed"]:
+            changed.append(f"seed {new['seed']} (dari {old['seed']})")
+        if (new["real_train"], new["real_val"]) != (old["real_train"], old["real_val"]):
+            changed.append("data nyata ikut dipakai" if new["real_train"] or new["real_val"] else "tanpa data nyata")
+        parts.append(f"{link['run']}: {', '.join(changed) if changed else 'argumen data sama, langkah tambahan'}")
     return "; ".join(parts)
 
 
@@ -637,7 +818,7 @@ def training_group(links: list[dict], complete: bool, code: dict, device: str | 
     staged = len(links) > 1 or not complete or bool(links[0]["args"].get("init"))
     # Siklus laju belajar dihitung untuk seluruh langkah yang direncanakan (--steps); run yang dihentikan lebih awal
     # tidak menyelesaikannya.
-    planned = [link["args"].get("steps") or link["step"] for link in links]
+    planned = [link.get("planned") or link["args"].get("steps") or link["step"] for link in links]
     unfinished = [link["run"] for link, total in zip(links[:-1], planned) if link["step"] < total]
     cycle = (f"Run resmi menyelesaikan siklusnya ({num(links[-1]['step'])} langkah)." if links[-1]["step"] >= planned[-1]
              else f"Run resmi dihentikan di langkah {num(links[-1]['step'])} dari {num(planned[-1])} yang direncanakan, "
@@ -731,8 +912,11 @@ def decoding_group(official: str, evidence: Evidence, root: Path) -> dict:
     }
 
 
-def evaluation_group(run: str, args: dict, real: dict, evidence: Evidence, root: Path, twins: list[dict],
+def evaluation_group(run: str, args: dict, real: dict, evidence: Evidence, root: Path, family: dict,
                      test_fonts: list[str]) -> dict:
+    """Butir evaluasi. `family` = font latih di rantai dan kemiripannya dengan font uji gerbang: "owners"
+    (`chain_fonts`), "dir" (folder font uji), "twins" dan "unknown" (`family_twins` untuk font uji gerbang), dan
+    "incomplete" (ada font latih yang berkasnya tidak ada lagi)."""
     import compare_runs  # impor di sini: modulnya ikut memuat src.train dan numpy, hanya dibutuhkan untuk satu angka
 
     # Pengaturan bootstrap dari berkas pembanding yang sah; tanpa berkas, bawaan scripts/compare_runs.py.
@@ -744,7 +928,8 @@ def evaluation_group(run: str, args: dict, real: dict, evidence: Evidence, root:
                         + ("" if gates[code]["passed"] else " (belum tercapai)") for code in order)
     font_text = f", font {listing(test_fonts)}" if test_fonts else ""
     pairs = [(kind, treated, control) for kind, table in CONTROLS.items() for treated, control in table.items()
-             if pipeline_key(treated) in evidence.done and pipeline_key(control) in evidence.done]
+             if control_run(root, kind, treated) == control
+             and pipeline_key(treated) in evidence.done and pipeline_key(control) in evidence.done]
     kinds = [TREATMENTS[kind] for kind in CONTROLS if any(pair[0] == kind for pair in pairs)]
     blind, then = evidence.cer("blind_50", "vlm_zeroshot"), evidence.cer("blind_50", "crnn_fonts")
     ablation = evidence.manifest.get("ablation") or []
@@ -777,7 +962,7 @@ def evaluation_group(run: str, args: dict, real: dict, evidence: Evidence, root:
                ("G3, cetakan nyata", f"CER < {pct(TARGETS['G3'], 0)} pada {num(real['lines'])} baris"),
                ("G4, tokenizer", "bolak-balik 100%")],
               status + "." if order else None, "out/results/manifest.json", files=["src/evaluate.py"],
-              note=family_note(twins, "G1 dan G2")),
+              note=family_note(family["twins"], "G1 dan G2", run, family["unknown"], family["incomplete"])),
         entry("bootstrap", "Selang kepercayaan bootstrap berpasangan", "statistic", "used",
               f"Selisih dua model diberi selang kepercayaan 95% dengan mengambil ulang baris secara acak {num(resamples)} "
               "kali. Baris dari halaman yang sama saling mirip, jadi pengambilan ulang juga dilakukan per halaman, dan "
@@ -805,16 +990,22 @@ def evaluation_group(run: str, args: dict, real: dict, evidence: Evidence, root:
             [("Run", str(len(ablation)))] + ([("Langkah per run", num(ablation_steps))] if ablation_steps else []),
             files=["scripts/ablation.py"]))
     if probe:
-        probe_fonts = {Path(name).stem for name in (report.get("fonts") or {})}
+        # Font perender evaluasi ini dibaca dari laporannya sendiri (belum tentu font uji gerbang). Angkanya hanya
+        # dikutip bila laporan itu memang membaca checkpoint run resmi dan run kontrolnya yang sekarang.
+        probe_twins, probe_unknown = family_twins(family["owners"], list(report.get("fonts") or {}), family["dir"])
+        control = control_run(root, "tracking", run)
+        tied = report_matches(report, root, run) and (control is None or report_matches(report, root, control))
+        measured_probe = spacing_note(report, run, control, args.get("track_max") or 0.0) if tied else None
+        stale = None if tied else ("Laporan evaluasi yang ada di mesin ini tidak bisa dicocokkan dengan checkpoint run "
+                                   "resmi dan run kontrolnya yang sekarang, jadi angkanya tidak dikutip.")
         methods.append(entry(
             "probe", "Evaluasi sintetis tertarget", "evaluation", "used",
             "Citra uji dibuat sengaja untuk satu pertanyaan, misalnya baris tanpa spasi yang direnggangkan sedikit demi "
             "sedikit, lalu dibaca semua model pada citra yang sama. Sebuah gejala jadi bisa diuji tanpa menyentuh data "
             "uji nyata.",
             [("Jarak yang diuji", "; ".join(dec(t) for t in probe["tracking"]) + " em"), ("Baris", probe_lines)],
-            spacing_note(report, run, tracking_control(root, run), args.get("track_max") or 0.0),
-            "out/compare/spacing_synthetic.json", files=["scripts/eval_spacing.py", "scripts/eval_rare.py"],
-            note=probe_note([twin for twin in twins if twin["test"] in probe_fonts])))
+            measured_probe, "out/compare/spacing_synthetic.json", files=["scripts/eval_spacing.py", "scripts/eval_rare.py"],
+            note=" ".join(part for part in (stale, probe_note(probe_twins, probe_unknown)) if part) or None))
     if blind is not None and then is not None:
         methods.append(entry(
             "vlm_blind", "Uji buta terhadap model bahasa-visual", "evaluation", "comparator",
@@ -847,11 +1038,18 @@ def build(root: Path = ROOT, run: str = OFFICIAL_RUN, test_font_dir: Path = TEST
         raise SystemExit("jumlah kelas checkpoint berbeda dari data/tokenizer.json")
     charset = [chr(int(code[2:], 16)) for code in tokenizer["charset"]]
     recorded = recorded_fonts(root)
+    for link in links:
+        link["planned"] = planned_steps(link["path"])
     fonts = [font_facts(root, link, charset, recorded) for link in links]
     real = nusaaksara_card(root / "data/real/nusaaksara/labels.tsv")
     gates = gate_reports(run, root, real["lines"])
     test_fonts = sorted({Path(name).stem for gate in gates if gate["code"] != "G3" for name in gate["fonts"]})
-    twins = family_twins(fonts[-1]["paths"], gates, test_font_dir)
+    # Model resmi mewarisi bobot semua run di rantai, jadi font yang "pernah dilihat model" = gabungan font rantai.
+    owners = chain_fonts(fonts)
+    twins, unknown = family_twins(owners, [name for gate in gates if gate["code"] != "G3" for name in gate["fonts"]],
+                                  test_font_dir)
+    family = {"owners": owners, "dir": test_font_dir, "twins": twins, "unknown": unknown,
+              "incomplete": any(not fact["current"] for fact in fonts)}
     device = None
     for row in read_log(official["path"].parent / "log.jsonl"):
         if row.get("event") == "start":
@@ -860,10 +1058,10 @@ def build(root: Path = ROOT, run: str = OFFICIAL_RUN, test_font_dir: Path = TEST
                 raise SystemExit(f"log run {run} mencatat {row['params']} parameter, model {model['parameters']['total']}")
     groups = [
         ocr_group(model, tokenizer, evidence),
-        data_group(run, args, {**fonts[-1], "recorded": recorded}, real, evidence, root),
+        data_group(run, args, {**fonts[-1], "recorded": recorded, "chain": fonts[:-1]}, real, evidence, root),
         training_group(links, complete, code_facts(), device, [facts["train"] for facts in fonts]),
         decoding_group(key or "", evidence, root),
-        evaluation_group(run, args, real, evidence, root, twins, test_fonts),
+        evaluation_group(run, args, real, evidence, root, family, test_fonts),
     ]
     return {
         "schema": SCHEMA,

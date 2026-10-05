@@ -247,6 +247,14 @@ def training_fonts(args) -> list[Path]:
     return fonts
 
 
+def start_record(args, step: int, n_params: int, device) -> dict:
+    """Event start di log.jsonl: argumen, jumlah parameter, perangkat, dan nama font perender data latih sintetis proses
+    ini. Daftar font kosong bila proses ini tidak merender baris sintetis (--train-lines 0 dengan --real-train)."""
+    synthetic = bool(args.overfit or args.train_lines)
+    return {"event": "start", "step": step, "args": vars(args), "params": n_params, "device": str(device),
+            "fonts": [Path(font).name for font in training_fonts(args)] if synthetic else []}
+
+
 def build_datasets(args, tokenizer: Tokenizer):
     train_lines, val_lines = read_split("train"), read_split("val")
     if args.overfit:
@@ -348,8 +356,7 @@ def main(argv=None) -> None:
         f"device={device} params={n_params / 1e6:.2f}M train={len(train_ds):,} val={len(val_ds):,} "
         f"steps/epoch={steps_per_epoch} total_steps={total_steps} threads={torch.get_num_threads()}"
     )
-    log({"event": "start", "step": step, "args": vars(args), "params": n_params, "device": str(device),
-         "fonts": [Path(font).name for font in training_fonts(args)]})
+    log(start_record(args, step, n_params, device))
 
     eval_every = args.eval_every or steps_per_epoch
     started = time.time()

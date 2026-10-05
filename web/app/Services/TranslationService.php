@@ -22,6 +22,13 @@ use RuntimeException;
 class TranslationService
 {
     /**
+     * Batch `aksara:translate` masih mengirim pepet bertanda "ê" ke model (lihat forModel()), jadi chrF dan BLEU yang
+     * tersimpan kemungkinan terlalu rendah. Halaman Metode menyebutnya selama nilai ini true. Ubah menjadi false HANYA
+     * bersamaan dengan menjalankan ulang batchnya: inputs() mengikuti nilai ini, dan angka lama tidak lagi sebanding.
+     */
+    public const BATCH_KEEPS_PEPET_MARK = true;
+
+    /**
      * Teks Latin yang diterjemahkan per sumber:
      *   label       -> transliterasi manusia NusaAksara (kualitas model terjemahan saja)
      *   <pipeline>  -> transliterasi draf dari keluaran OCR pipeline itu (alur ujung ke ujung)
@@ -39,7 +46,8 @@ class TranslationService
                     : (isset($predictions[$line->id]) ? Transliterator::toLatin($predictions[$line->id]) : null);
                 if ($input) {
                     $rows[] = ['dataset' => $line->dataset, 'external_id' => $line->external_id, 'source' => $source,
-                        'input' => $input, 'reference' => $line->annotation?->translation];
+                        'input' => self::BATCH_KEEPS_PEPET_MARK ? $input : self::forModel($input),
+                        'reference' => $line->annotation?->translation];
                 }
             }
         }

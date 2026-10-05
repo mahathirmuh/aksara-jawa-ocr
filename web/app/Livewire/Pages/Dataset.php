@@ -76,6 +76,7 @@ class Dataset extends Component
             'stale' => self::stale($card),
             'tiles' => self::tiles($card, $datasets, $trainFonts, $testFonts),
             'parts' => self::parts($card, $testFonts),
+            'splitIntro' => self::splitIntro($card['corpus']),
             'footer' => self::footer($card, $trainLines),
             'funnel' => self::funnel($card['corpus']),
             'histogram' => self::histogram($card['corpus']),
@@ -188,6 +189,19 @@ class Dataset extends Component
                 'used_share' => $lines !== null && $split['lines'] ? min(1, $lines / $split['lines']) : null,
             ];
         }, $card['splits']);
+    }
+
+    /**
+     * Kalimat pembuka pembagian. "Teks uji tidak pernah dilihat saat latih" hanya ditulis bila kartu memang mencatat
+     * nol baris berteks sama di lebih dari satu bagian; kalau tidak, jumlahnya yang disebut.
+     */
+    private static function splitIntro(array $corpus): string
+    {
+        $text = nfmt($corpus['lines']).' baris teks dibagi menurut artikel asalnya, jadi satu artikel tidak pernah muncul di dua bagian';
+
+        return $corpus['leaked_lines'] > 0
+            ? $text.'. Walau begitu, '.nfmt($corpus['leaked_lines']).' baris berteks sama ada di lebih dari satu bagian.'
+            : $text.' dan teks uji tidak pernah dilihat saat latih.';
     }
 
     /** Kenapa bukan 80/20: angkanya dari kartu, dan kalimat "baru sekian persen yang dilihat" hanya bila memang begitu. */
@@ -360,12 +374,14 @@ class Dataset extends Component
         $real = $datasets->filter(fn ($d) => $d['key'] !== 'corpus');
         $tested = $real->first(fn ($d) => isset($d['roles']['test']));
         if ($tested && ! $real->contains(fn ($d) => isset($d['roles']['val']))) {
-            $reports = $card['usage']['real']['reports'] ?? 0;
+            // Laporan gerbang di out/eval ditambah evaluasi lain yang membaca seluruh data nyata (mis. beam + LM). Yang
+            // terhitung hanya yang berkasnya masih ada, jadi "paling sedikit".
+            $reports = ($card['usage']['real']['reports'] ?? 0) + count($card['usage']['real']['others'] ?? []);
             $pending = $real->first(fn ($d) => self::waiting($d) > 0);
             $limits[] = ['Data nyata tidak punya bagian validasi',
                 'Semua '.nfmt($tested['count']).' baris '.$tested['name'].' dipakai sebagai data uji, dan tidak ada data nyata untuk validasi. '
                 .'Keputusan seperti memilih run resmi ikut melihat data uji, jadi angka G3 sedikit terlalu bagus'
-                .($reports > 1 ? ' (data itu sudah dievaluasi '.nfmt($reports).' kali sepanjang proyek)' : '').'.'
+                .($reports > 1 ? ' (data itu sudah dievaluasi paling sedikit '.nfmt($reports).' kali sepanjang proyek)' : '').'.'
                 // Catatan proyek tentang NusaAksara (CLAUDE.md, keputusan 2026-09-13), bukan nilai kartu.
                 .($tested['key'] === 'nusaaksara' ? ' Data itu tidak dibelah karena sebagian besar halamannya berasal dari satu terbitan dengan '
                     .'huruf yang sama: membaginya per halaman akan membocorkan bentuk huruf ke bagian uji.' : '')
@@ -379,15 +395,19 @@ class Dataset extends Component
         $train = $card['usage']['train'];
         $inserted = ($train['rare_insert_prob'] ?? 0) > 0;
         $seen = $rare['scheduled_lines'] ?? [];
-        if ($rare['codepoints'] > 0 && ! $inserted && $train['distinct_lines'] !== null && isset($seen['min'], $seen['max'], $seen['mean'])) {
+        if ($rare['codepoints'] > 0 && ! $inserted) {
+            // Kelangkaan di korpus berlaku apa pun jadwalnya; berapa kali karakter itu dijadwalkan run resmi hanya
+            // disebut bila ekspor menghitungnya (tidak untuk run --overfit atau --real-train).
+            $scheduled = $train['distinct_lines'] !== null && isset($seen['min'], $seen['max'], $seen['mean']);
             $each = $rare['train_lines'];
             $trial = collect(self::methodCard()['groups'] ?? [])->flatMap(fn ($g) => $g['methods'] ?? [])->contains('key', 'rare');
             $limits[] = ['Aksara langka nyaris tidak terlihat saat training',
                 nfmt($rare['codepoints']).' dari '.nfmt($rare['javanese']).' karakter aksara Jawa di charset ada di '
                 .(($each['min'] ?? null) === ($each['max'] ?? null) ? 'hanya '.nfmt($each['max'] ?? 0) : nfmt($each['min'] ?? 0).'–'.nfmt($each['max'] ?? 0))
-                .' baris latih masing-masing: aksara murda dan mahaprana, aksara swara, beberapa sandhangan dan pada. Di antara '
-                .nfmt($train['distinct_lines']).' baris yang dijadwalkan run resmi, tiap karakter itu muncul di '.nfmt($seen['min']).'–'.nfmt($seen['max'])
-                .' baris, rata-rata '.self::dec($seen['mean'], 1).'.'
+                .' baris latih masing-masing: aksara murda dan mahaprana, aksara swara, beberapa sandhangan dan pada.'
+                .($scheduled ? ' Di antara '.nfmt($train['distinct_lines']).' baris yang dijadwalkan run resmi, tiap karakter itu muncul di '
+                    .nfmt($seen['min']).'–'.nfmt($seen['max']).' baris, rata-rata '.self::dec($seen['mean'], 1).'.'
+                    : ' Berapa baris di antaranya yang dijadwalkan run resmi tidak dihitung.')
                 .($trial ? ' Sisipan aksara langka saat render sudah diuji; hasilnya ada di halaman Metode.' : '')];
         }
 

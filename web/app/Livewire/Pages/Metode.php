@@ -8,6 +8,7 @@ use App\Models\Metric;
 use App\Models\Pipeline;
 use App\Models\ResultImport;
 use App\Models\TranslationRun;
+use App\Services\TranslationService;
 use App\Support\AksaraWriter;
 use App\Support\SpeechLevel;
 use App\Support\TalingRestorer;
@@ -55,6 +56,9 @@ class Metode extends Component
     /** Status yang berarti butir itu benar-benar dipakai (bukan sekadar tersedia, diuji, atau pembanding). */
     private const IN_USE = ['official', 'used'];
 
+    /** Kunci butir tahap lanjutan yang ditulis halaman ini sendiri; kartu metode tidak boleh memakainya. */
+    public const WEB_KEYS = ['translit', 'nllb', 'mt_scores', 'speech', 'aksara_writer', 'taling'];
+
     private const NLLB = 'facebook/nllb-200-distilled-600M';
 
     public function render()
@@ -78,7 +82,7 @@ class Metode extends Component
             'report' => $report,
             'card' => $card,
             'stale' => self::stale($card),
-            'tiles' => self::tiles($card['model'], collect($groups)),
+            'tiles' => self::tiles($card, collect($groups)),
             'flow' => self::flow($card['model']),
             'groups' => $groups,
             'planned' => $card['planned'],
@@ -111,15 +115,22 @@ class Metode extends Component
         return $notes;
     }
 
-    /** Empat ubin: arsitektur, ukuran model, banyaknya butir per kelompok, dan model hasil belajar yang dipakai. */
-    private static function tiles(array $model, Collection $groups): array
+    /**
+     * Empat ubin: arsitektur, ukuran model, banyaknya butir per kelompok, dan model hasil belajar yang dipakai.
+     * Nama arsitektur mengikuti kartu (CRNN = ada lapis konvolusi dan LSTM; "+ CTC" bila butirnya ada), dan "dilatih
+     * dari nol" hanya ditulis bila kartu menyatakan rantai checkpoint-nya terbaca utuh sampai bobot acak.
+     */
+    private static function tiles(array $card, Collection $groups): array
     {
+        $model = $card['model'];
         $parameters = $model['parameters'];
         $methods = $groups->flatMap(fn ($group) => $group['methods'])->keyBy('key');
+        $scratch = ($card['chain_complete'] ?? null) === true;
+        $family = ($model['conv_layers'] > 0 && $model['lstm_layers'] > 0 ? 'CRNN' : 'Model pembaca').($methods->has('ctc') ? ' + CTC' : '');
         // Model hasil belajar: pembaca aksara (satu model, tiga butir: CNN, LSTM, lapisan keluaran), model terjemahan,
         // dan model bahasa n-gram. Yang berstatus "tersedia" disebut terpisah, tidak dihitung sebagai dipakai.
         $models = array_filter([
-            'cnn' => 'CRNN (dilatih dari nol)',
+            'cnn' => $scratch ? 'CRNN (dilatih dari nol)' : 'CRNN',
             'nllb' => 'NLLB-200 (pralatih, tidak dilatih ulang)',
             'beam_lm' => 'model bahasa n-gram karakter (statistik)',
         ], fn ($key) => $methods->has($key), ARRAY_FILTER_USE_KEY);
@@ -128,8 +139,9 @@ class Metode extends Component
         $direction = ($model['bidirectional'] ?? true) ? 'BiLSTM' : 'LSTM';
 
         return [
-            ['icon' => 'ti-brain', 'title' => 'Model pembaca', 'value' => 'CRNN + CTC', 'note' => '',
-                'hint' => 'CNN '.$model['conv_layers'].' lapis → '.$direction.' '.$model['lstm_layers'].' lapis → '.$model['classes'].' kelas, dilatih dari nol'],
+            ['icon' => 'ti-brain', 'title' => 'Model pembaca', 'value' => $family, 'note' => '',
+                'hint' => 'CNN '.$model['conv_layers'].' lapis → '.$direction.' '.$model['lstm_layers'].' lapis → '.$model['classes'].' kelas'
+                    .($scratch ? ', dilatih dari nol' : '')],
             ['icon' => 'ti-adjustments-horizontal', 'title' => 'Parameter', 'value' => nfmt($parameters['total']), 'note' => '',
                 'hint' => 'CNN '.self::compact($parameters['cnn'] + $parameters['proj']).' · '.$direction.' '.self::compact($parameters['rnn'])
                     .' · keluaran '.self::compact($parameters['head'])],
@@ -175,14 +187,21 @@ class Metode extends Component
         // angkanya tidak dibaca sebagai milik model resmi.
         $official = Pipeline::official();
         $ocr = TranslationRun::forOcr($official?->key, $runs);
-        $ocrName = $ocr ? (Pipeline::where('key', $ocr->source)->value('label') ?? $ocr->source)
+        // Nama run OCR-nya memuat checkpoint yang dibacanya (dari konfigurasi pipeline), supaya "Beam + LM" tidak
+        // terbaca sebagai bacaan model resmi.
+        $ocrPipeline = $ocr ? Pipeline::where('key', $ocr->source)->first() : null;
+        $ocrRun = $ocrPipeline && preg_match('#^crnn:([\w/]+)#', (string) $ocrPipeline->config, $found) ? $found[1] : null;
+        $ocrLabel = $ocrPipeline?->label ?? $ocr?->source;
+        $ocrName = $ocr ? $ocrLabel.($ocrRun && ! str_contains((string) $ocrLabel, $ocrRun) ? ' atas checkpoint '.$ocrRun : '')
             .($official && $official->key !== $ocr->source ? ', bukan pipeline resmi' : '') : null;
         $markers = array_map('count', SpeechLevel::lexicon());
         [$same, $of] = AksaraWriter::DICTIONARY_AGREEMENT;
         $taling = TalingRestorer::meta();
-        $labeled = LineAnnotation::whereNotNull('speech_level')->whereNotNull('transliteration')->get(['transliteration', 'speech_level']);
-        $speech = SpeechLevel::evaluate($labeled->map(
+        // Label yang dinilai = kueri yang sama dengan Ringkasan; label lain (barisnya belum diimpor, atau belum punya
+        // alih aksara manusia) disebut sebagai belum bisa dinilai, bukan "belum ada label".
+        $speech = SpeechLevel::evaluate(LineAnnotation::scorableSpeechLabels()->map(
             fn ($row) => [$row->speech_level, SpeechLevel::classify($row->transliteration)['level']])->all());
+        $unscored = LineAnnotation::whereNotNull('speech_level')->count() - $speech['lines'];
         $score = fn ($run) => 'chrF '.number_format($run->chrf, 1, ',', '.').' / BLEU '.number_format($run->bleu, 1, ',', '.')
             .' pada '.nfmt($run->lines).' baris';
         $translated = array_filter([
@@ -198,11 +217,17 @@ class Metode extends Component
                     .'(spasi, tanda baca, dan huruf besar tidak dibandingkan). Masukannya label aksara, bukan keluaran OCR.' : null,
                 'tabel metrik web', ['web/app/Support/Transliterator.php']),
             self::entry('nllb', 'NLLB-200 (model terjemahan pralatih)', 'model',
-                'Model Transformer pralatih untuk 200 bahasa, versi 600 juta parameter, dijalankan lokal tanpa mengirim data '
-                .'keluar. Dipakai apa adanya, tanpa dilatih ulang, untuk bahasa Jawa ke Indonesia dan sebaliknya.',
+                'Model Transformer pralatih untuk 200 bahasa, dijalankan lokal tanpa mengirim data keluar. Dipakai apa '
+                .'adanya, tanpa dilatih ulang, untuk bahasa Jawa ke Indonesia dan sebaliknya.',
                 [['Model', $human?->model ?? $ocr?->model ?? self::NLLB], ['Lisensi', 'CC-BY-NC 4.0, hanya non-komersial']],
                 $translated ? implode(' ', $translated) : null,
-                'tabel terjemahan web', ['web/tools/nllb.py', 'web/tools/translate_batch.py']),
+                'tabel terjemahan web', ['web/tools/nllb.py', 'web/tools/translate_batch.py'],
+                // Batasan angka di atas: masukan batch masih berejaan yang tidak dikenal model.
+                $translated && TranslationService::BATCH_KEEPS_PEPET_MARK
+                    ? 'Angka ini dihitung batch yang masih mengirim pepet bertanda "ê", ejaan yang tidak dikenal model; alat Demo '
+                        .'dan Terjemahan membuang tanda itu lebih dulu. Karena itu chrF dan BLEU di atas kemungkinan terlalu rendah '
+                        .'sampai batchnya dijalankan ulang.'
+                    : null),
             self::entry('mt_scores', 'chrF dan BLEU', 'evaluation',
                 'Mengukur terjemahan mesin terhadap terjemahan manusia: chrF dari tumpang-tindih potongan karakter, BLEU dari '
                 .'tumpang-tindih kata. Dihitung pustaka sacrebleu atas semua baris sekaligus.',
@@ -215,7 +240,14 @@ class Metode extends Component
                 [['Kata penanda', collect($markers)->map(fn ($n, $level) => $level.' '.nfmt($n))->join(' · ')]],
                 $speech['lines'] ? 'Akurasi '.pct($speech['accuracy']).' pada '.nfmt($speech['lines']).' baris berlabel manusia.' : null,
                 'label di Penjelajah baris', ['web/app/Support/SpeechLevel.php'],
-                $speech['lines'] ? null : 'Belum dinilai: belum ada label manusia.'),
+                match (true) {
+                    $speech['lines'] > 0 && $unscored > 0 => nfmt($unscored).' label manusia lain belum bisa dinilai: barisnya '
+                        .'belum diimpor atau belum punya alih aksara manusia.',
+                    $speech['lines'] > 0 => null,
+                    $unscored > 0 => 'Belum dinilai: '.nfmt($unscored).' label manusia yang ada belum bisa dinilai (barisnya belum '
+                        .'diimpor atau belum punya alih aksara manusia).',
+                    default => 'Belum dinilai: belum ada label manusia.',
+                }),
             self::entry('aksara_writer', 'Alih aksara Latin ke aksara Jawa', 'rule',
                 'Kebalikan dari alih aksara ke Latin: suku kata Latin disusun menjadi aksara, sandhangan, dan pasangan menurut '
                 .'aturan ejaan. Hanya mengganti sistem tulisan, tidak menerjemahkan.',

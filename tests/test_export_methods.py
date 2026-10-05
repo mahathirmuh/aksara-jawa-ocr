@@ -23,6 +23,8 @@ from test_export_datasets import GA, KA, SECRET, fake_repo, save_ckpt, start, wr
 
 ROOT = Path(__file__).resolve().parents[1]
 RUN = "fase7_track"  # nama run sungguhan, supaya kunci pipeline dan run kontrolnya dikenal
+UNTIED = ("Laporan evaluasi yang ada di mesin ini tidak bisa dicocokkan dengan checkpoint run resmi dan run kontrolnya "
+          "yang sekarang, jadi angkanya tidak dikutip.")
 FAMILY_NOTE = ("Font uji javatext sekeluarga dengan font latih NotoSansJavanese-Regular dan Salinan (lebar 73 dari 73 "
                "aksara, angka, dan pada persis sama), jadi {} mengukur generalisasi di dalam keluarga huruf itu, bukan "
                "ke font yang belum pernah dilihat model.")
@@ -46,6 +48,12 @@ def test_entry_rejects_unknown_kind_and_status():
         em.entry("a", "A", "ajaib", "official", "x")
     with pytest.raises(ValueError):
         em.entry("a", "A", "model", "rahasia", "x")
+    # Bukti selalu membawa sumbernya: kotak "Terukur" di halaman menulis "Sumber:" di bawahnya.
+    sourced = em.entry("a", "A", "model", "official", "x", evidence="CER 1%.", evidence_source="out/results/manifest.json")
+    assert (sourced["evidence"], sourced["evidence_source"]) == ("CER 1%.", "out/results/manifest.json")
+    for missing in (None, ""):
+        with pytest.raises(ValueError, match="butir a: bukti tanpa sumber"):
+            em.entry("a", "A", "model", "official", "x", evidence="CER 1%.", evidence_source=missing)
 
 
 @pytest.mark.parametrize("name", sorted(em.CODE_FACTS))
@@ -53,9 +61,11 @@ def test_statements_about_the_code_follow_the_source(monkeypatch, name):
     code = em.code_facts()
     assert code == {"optimizer": "AdamW", "scheduler": "OneCycleLR", "pct_start": 0.1, "loss": "CTC"}
     sources = {"src.train.main": inspect.getsource(train.main), "src.dataset.to_tensor": inspect.getsource(to_tensor),
-               "src.charlm": inspect.getsource(charlm)}
+               "src.charlm.CharLM.prob": inspect.getsource(charlm.CharLM.prob)}
     where, text = em.CODE_FACTS[name]
     assert text in sources[where]
+    # Yang dijaga adalah baris KODE, bukan kata di komentar atau docstring: mengubah rumusnya harus menghentikan ekspor.
+    assert not text.lstrip().startswith(("#", '"""')) and "Witten" not in text
     # Kodenya berubah (pengoptimal diganti, rugi lain, normalisasi lain, ...): ekspor harus berhenti, bukan menulis
     # kalimat lama. Berlaku untuk TIAP potongan yang dijaga, bukan hanya yang pertama.
     monkeypatch.setitem(em.CODE_FACTS, name, (where, "potongan yang sudah tidak ada"))
@@ -122,6 +132,16 @@ def write_manifest(root: Path, manifest: dict) -> None:
     (root / "out/results/manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
+def sibling(root: Path, run: str, base: str = RUN, **changes) -> Path:
+    """Checkpoint run lain dengan argumen run `base` apa adanya kecuali `changes`: run kontrol atau run perlakuan
+    sebuah pasangan uji. Begitulah checkpoint sebenarnya: argparse menyimpan semua argumen, juga yang bawaan."""
+    saved = torch.load(root / "out/checkpoints" / base / "last_snapshot.pt", weights_only=False)
+    path = root / "out/checkpoints" / run / "last_snapshot.pt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save({"step": saved["step"], "args": {**saved["args"], "run": run, **changes}}, path)
+    return path
+
+
 def method_repo(root: Path) -> Path:
     """Repo palsu kartu data + yang dibutuhkan kartu metode: bobot model kecil, run kontrol, manifest hasil, berkas
     pembanding."""
@@ -133,9 +153,12 @@ def method_repo(root: Path) -> Path:
     write_log(root / "out/checkpoints" / RUN / "log.jsonl", [
         {"event": "start", "step": 0, "args": {}, "params": params, "device": "xpu"},
         {"step": 10, "val_cer": 0.05, "val_lines": 10}, {"step": 10, "event": "end"}])
-    # Run kontrol perlakuan jarak: sama dengan run resmi, tanpa --track-prob.
-    save_ckpt(root / "out/checkpoints/fase7_ctrl/last_snapshot.pt", 10, init="out/checkpoints/runA/last_snapshot.pt",
-              extra_fonts="fonts/extra", augment="fase5", drop_space_prob=0.5)
+    # Run kontrol perlakuan jarak: argumen run resmi apa adanya, hanya --track-prob 0 (--track-max tetap 0,3, seperti
+    # checkpoint fase7_ctrl yang sebenarnya).
+    sibling(root, "fase7_ctrl", track_prob=0.0)
+    # Pasangan uji font tambahan: sama kecuali --extra-fonts.
+    for name, extra in (("fase5_fonts", "fonts/extra"), ("fase5_core", "")):
+        save_ckpt(root / "out/checkpoints" / name / "last_snapshot.pt", 7, augment="fase5", drop_space_prob=0.5, extra_fonts=extra)
 
     tokenizer = json.loads((root / "data/tokenizer.json").read_text(encoding="utf-8"))
     tokenizer["stats"] = {"lines": 2200, "fonts": ["a.ttf", "b.ttf", "c.ttf"], "prebase": ["U+A9BA", "U+A9BB"],
@@ -286,7 +309,8 @@ def test_build_lists_methods_with_computed_settings_and_evidence(tmp_path):
     assert methods["batching"]["settings"] == [["Pengemasan LSTM", "ya"], ["Batas kolom per forward", "64.000"]]
     assert methods["staged"]["settings"] == [
         ["Rantai run", f"runA → {RUN}"], ["Jumlah langkah", "16"],
-        ["Yang berubah", f"{RUN}: augmentasi fase5, 3 font (dari 2), buang spasi, jarak antar suku kata"],
+        ["Yang berubah", f"{RUN}: augmentasi fase5, 3 font (dari 2), buang spasi, jarak antar suku kata, kumpulan 400 baris "
+                         "(dari 200)"],
         ["Perangkat", "grafis bawaan Intel (PyTorch XPU)"]]
     assert card["groups"][2]["intro"].startswith("Model dilatih bertahap di laptop tanpa kartu grafis NVIDIA. ")
     assert methods["staged"]["summary"].startswith("Model resmi bukan hasil satu kali latih. 2 run berurutan")
@@ -332,6 +356,7 @@ def test_optional_evidence_appears_only_when_its_files_exist(tmp_path):
     write_manifest(root, manifest)
     rare_groups = {"groups": {"langka": {"recall": {"a": 0.5, "b": 0.0}, "precision": {"a": 0.4}}}}
     compare_file(root, "crnn_fase7_track_rare", "crnn_fase7_track", 0.21, 0.20, [-0.01, 0.02], rare=rare_groups)
+    sibling(root, "fase7_track_rare", rare_insert_prob=0.3, rare_opener_prob=0.15)
     (root / "out/compare/spacing_synthetic.json").write_text(json.dumps(
         {"settings": {"tracking": [0.0, 0.1, 0.45], "lines": 301}}), encoding="utf-8")
     for k in range(5):
@@ -374,8 +399,8 @@ def test_optional_evidence_appears_only_when_its_files_exist(tmp_path):
     assert "rare" not in by_key(build(root))
 
     assert methods["probe"]["settings"] == [["Jarak yang diuji", "0; 0,1; 0,45 em"], ["Baris", "301"]]
-    assert methods["probe"]["evidence"] is None  # laporan tanpa hasil per run
-    assert methods["probe"]["note"] is None      # dan tanpa nama font perendernya
+    assert methods["probe"]["evidence"] is None  # laporan tanpa hasil per run, tanpa nama font perendernya,
+    assert methods["probe"]["note"] == UNTIED    # dan tanpa catatan checkpoint yang dibacanya: itu disebut
 
     # Baris yang gagal dirender dibuang evaluasinya: yang disebut adalah jumlah yang benar-benar dibaca. Buktinya
     # spasi palsu pada jarak terbesar yang masih di rentang latih run resmi (--track-max 0,3) lawan run kontrolnya,
@@ -383,7 +408,8 @@ def test_optional_evidence_appears_only_when_its_files_exist(tmp_path):
     def rows(rates):
         return [{"tracking": tracking, "false_per_boundary": rate} for tracking, rate in rates]
 
-    spacing = {"settings": {"tracking": [0.0, 0.15, 0.3, 0.45, 0.6], "lines": 301}, "fonts": {"javatext.ttf": {"lines": 300, "results": {
+    spacing = {"settings": {"tracking": [0.0, 0.15, 0.3, 0.45, 0.6], "lines": 301},
+               "checkpoints": {RUN: {"step": 10}, "fase7_ctrl": {"step": 10}}, "fonts": {"javatext.ttf": {"lines": 300, "results": {
         RUN: {"tanpa-spasi": rows([(0.0, 0.0), (0.15, 0.001), (0.3, 0.012), (0.6, 0.675), (0.45, 0.04)]), "berspasi": rows([(0.3, 0.5)])},
         "fase7_ctrl": {"tanpa-spasi": rows([(0.0, 0.0), (0.15, 0.6), (0.3, 0.925), (0.6, 0.876)])}}}}}
     (root / "out/compare/spacing_synthetic.json").write_text(json.dumps(spacing), encoding="utf-8")
@@ -417,15 +443,46 @@ def test_optional_evidence_appears_only_when_its_files_exist(tmp_path):
         "run kontrol fase7_ctrl.")
     # F06: run yang terdaftar sebagai kontrol tetapi checkpoint-nya ternyata dilatih DENGAN jarak bukan kontrol: kartu
     # tidak membandingkan dengannya, walau laporan evaluasinya memuat run itu.
-    save_ckpt(root / "out/checkpoints/fase7_ctrl/last_snapshot.pt", 10, track_prob=0.5, track_max=0.3)
+    sibling(root, "fase7_ctrl", track_prob=0.5)
     unverified = by_key(build(root))
     assert unverified["probe"]["evidence"] is None and unverified["tracking"]["evidence"] is None
-    assert unverified["probe"]["settings"] == probe["settings"]
+    assert unverified["probe"]["settings"] == probe["settings"] and unverified["probe"]["note"] == probe["note"]
+    sibling(root, "fase7_ctrl", track_prob=0.0)
+    assert by_key(build(root))["probe"]["evidence"] == probe["evidence"]
+
+    # N07: laporan yang dibuat dari checkpoint lain (langkah atau sidik berkasnya berbeda, atau tanpa catatan checkpoint)
+    # tidak dikutip sebagai "model resmi", dan itu disebut di catatannya.
+    path = root / "out/compare/spacing_synthetic.json"
+    official = root / "out/checkpoints" / RUN / "last_snapshot.pt"
+    for checkpoints in ({RUN: {"step": 3}, "fase7_ctrl": {"step": 10}}, {RUN: {"step": 10}, "fase7_ctrl": {"step": 4}},
+                        {RUN: {"step": 10, "sha1": "000000000000"}, "fase7_ctrl": {"step": 10}}, {"fase7_ctrl": {"step": 10}}):
+        path.write_text(json.dumps({**spacing, "checkpoints": checkpoints}), encoding="utf-8")
+        stale = by_key(build(root))["probe"]
+        assert stale["evidence"] is None and stale["note"] == UNTIED + " " + probe["note"], checkpoints
+    path.write_text(json.dumps({**spacing, "checkpoints": {RUN: {"step": 10, "sha1": em.file_sha(official)},
+                                                             "fase7_ctrl": {"step": 10}}}), encoding="utf-8")
+    assert by_key(build(root))["probe"]["evidence"] == probe["evidence"]
+    assert len(em.file_sha(official)) == 12 and em.report_matches({}, root, RUN) is False
+    assert em.report_matches({"checkpoints": {"tidak_ada": {"step": 1}}}, root, "tidak_ada") is False
+    # Font perender evaluasi dibaca dari laporannya sendiri, bukan disamakan dengan font uji gerbang.
+    other_font = json.loads(json.dumps(spacing))
+    other_font["fonts"] = {"lain.ttf": other_font["fonts"]["javatext.ttf"]}
+    path.write_text(json.dumps(other_font), encoding="utf-8")
+    assert by_key(build(root))["probe"]["note"] == ("Kemiripan font perender lain dengan font latih tidak bisa dihitung di "
+                                                    "mesin ini: berkas fontnya tidak ada.")
+    # c10: rentang jarak yang dilatihkan dibaca dari argumen run resmi, bukan angka tetap 0,3.
+    saved = torch.load(official, weights_only=False)
+    torch.save({**saved, "args": {**saved["args"], "track_max": 0.15}}, official)
+    sibling(root, "fase7_ctrl", track_prob=0.0)
+    path.write_text(json.dumps(spacing), encoding="utf-8")
+    assert by_key(build(root))["probe"]["evidence"].startswith("Baris tanpa spasi yang direnggangkan 0,15 em: 0,1 spasi palsu")
 
 
 def data_methods(root: Path, run: str, args: dict, fonts: dict | None = None) -> dict:
-    """Butir kelompok data untuk sebuah resep, dengan fakta font bawaan: 2 font inti, tanpa cacat, tanpa spasi sempit."""
-    facts = {"train": 2, "core": 2, "extra": 0, "measured": 2, "current": True, "defects": [], "narrow": 0, "recorded": {}}
+    """Butir kelompok data untuk sebuah resep, dengan fakta font bawaan: 2 font inti dari folder, tanpa cacat, tanpa
+    spasi sempit, tanpa run sebelumnya di rantai."""
+    facts = {"run": run, "train": 2, "core": 2, "extra": 0, "source": "folder", "measured": 2, "current": True,
+             "defects": [], "narrow": 0, "recorded": {}, "chain": []}
     real = em.nusaaksara_card(root / "data/real/nusaaksara/labels.tsv")
     group = em.data_group(run, args, {**facts, **(fonts or {})}, real, em.Evidence(root), root)
     return {m["key"]: m for m in group["methods"]}
@@ -447,16 +504,36 @@ def test_data_sentences_follow_the_recipe_and_the_fonts(tmp_path):
     # Run tanpa font tambahan: tidak ada klaim tentang variasi font, walau berkas pembandingnya ada.
     plain = data_methods(root, RUN, {"augment": "none"})
     assert set(plain) == {"render", "fonts"}  # tanpa augmentasi, jarak, buang spasi, dan sisipan
+    assert plain["render"]["note"] is None
     assert plain["fonts"]["settings"] == [["Font latih", "2 (2 inti, 0 tambahan)"]]
     assert plain["fonts"]["evidence"] is None and plain["fonts"]["evidence_source"] is None
     recorded = {"fase5_core": 2, "fase5_fonts": 10}
     # ... juga bila ekspor hasil mencatat jumlah font kedua run uji itu: run ini sendiri tidak memakai font tambahan.
     assert data_methods(root, RUN, {"augment": "none"}, {"recorded": recorded})["fonts"]["evidence"] is None
     # Run perlakuan font itu sendiri yang resmi: buktinya miliknya, tanpa "bukan model resmi".
-    own = data_methods(root, "fase5_fonts", {"augment": "none"}, {"train": 10, "extra": 8, "measured": 10, "recorded": recorded})
+    extra = {"train": 3, "extra": 1, "measured": 3, "recorded": recorded}
+    own = data_methods(root, "fase5_fonts", {"augment": "none"}, {**extra, "train": 10, "extra": 8, "measured": 10})
     assert own["fonts"]["evidence"].startswith("Pada run fase5_core lawan fase5_fonts (2 lawan 10 font): G3 60,00% → 40,00% ")
-    # Tanpa catatan jumlah font kedua run di ekspor hasil, kalimat "N lawan M font" tidak dikarang dari folder.
-    assert data_methods(root, RUN, {"augment": "none"}, {"train": 3, "extra": 1, "measured": 3})["fonts"]["evidence"] is None
+    other = data_methods(root, RUN, {"augment": "none"}, extra)
+    assert other["fonts"]["evidence"].startswith("Pada run fase5_core lawan fase5_fonts (2 lawan 10 font, bukan model resmi): ")
+    # Tanpa catatan jumlah font kedua run (log atau ekspor hasil), kalimat "N lawan M font" tidak dikarang dari folder.
+    assert data_methods(root, RUN, {"augment": "none"}, {**extra, "recorded": {}})["fonts"]["evidence"] is None
+    assert data_methods(root, RUN, {"augment": "none"}, {**extra, "recorded": {"fase5_core": 2}})["fonts"]["evidence"] is None
+    # N05: jumlah di ekspor hasil yang bertentangan dengan argumen checkpoint (run tanpa --extra-fonts tetapi dicatat 3
+    # font) tidak dipakai.
+    wrong = {"fase5_core": 3, "fase5_fonts": 10}
+    assert data_methods(root, RUN, {"augment": "none"}, {**extra, "recorded": wrong})["fonts"]["evidence"] is None
+    # N06: pasangan yang bukan perlakuan-kontrol sungguhan tidak dikutip: jumlah langkah berbeda, argumen data atau
+    # pelatihan lain ikut berbeda, "kontrol" yang ikut memakai perlakuannya, atau checkpoint yang tidak ada.
+    core = root / "out/checkpoints/fase5_core/last_snapshot.pt"
+    for step, changes in ((4, {}), (7, {"augment": "none"}), (7, {"lr": 1e-3}), (7, {"extra_fonts": "fonts/extra"}), (7, {"seed": 3})):
+        save_ckpt(core, step, **{"augment": "fase5", "drop_space_prob": 0.5, "extra_fonts": "", **changes})
+        assert em.control_run(root, "fonts", "fase5_fonts") is None, (step, changes)
+        assert data_methods(root, RUN, {"augment": "none"}, extra)["fonts"]["evidence"] is None
+    save_ckpt(core, 7, augment="fase5", drop_space_prob=0.5, extra_fonts="")
+    assert em.control_run(root, "fonts", "fase5_fonts") == "fase5_core"
+    assert em.control_run(root, "fonts", "run_lain") is None and em.control_run(root, "rare", "fase6_rare") is None
+    assert em.control_run(root, "tracking", "fase5_fonts") is None  # terdaftar untuk perlakuan lain saja
 
     # F01: font latih bercacat disebut di butir render, dengan jumlahnya.
     flawed = data_methods(root, RUN, {"augment": "none"}, {"train": 10, "extra": 8, "measured": 10, "defects": ["BasaJan", "Carakan"]})
@@ -464,24 +541,54 @@ def test_data_sentences_follow_the_recipe_and_the_fonts(tmp_path):
         "2 dari 10 font latih punya cacat yang diketahui (BasaJan dan Carakan): pada font itu sebagian citra tidak sepadan "
         "dengan labelnya, atau pasangannya tidak menumpuk di lingkungan training. Rinciannya di halaman Dataset, bagian "
         "Font per peran.")
-    # F08: folder font sudah berubah sejak run dilatih: jumlah yang tercatat tetap disebut, dan ukuran pada folder
-    # sekarang diberi keterangan.
+    # N01: font bercacat yang hanya dipakai run sebelumnya di rantai ikut disebut, karena model resmi mewarisi bobotnya.
+    chain = [{"run": "runA", "defects": ["BasaJan", "Carakan"], "narrow": 0}, {"run": "runB", "defects": ["Carakan"], "narrow": 0}]
+    inherited = data_methods(root, RUN, {"augment": "none"}, {"defects": ["Carakan"], "train": 3, "extra": 1, "measured": 3, "chain": chain})
+    assert inherited["render"]["note"].startswith("1 dari 3 font latih punya cacat yang diketahui (Carakan): ")
+    assert inherited["render"]["note"].endswith(" Run sebelumnya di rantai (runA) dilatih dengan font bercacat yang tidak "
+                                                "dipakai run resmi (BasaJan); model resmi mewarisi bobotnya.")
+    assert data_methods(root, RUN, {"augment": "none"}, {"chain": chain})["render"]["note"] == (
+        "Run sebelumnya di rantai (runA dan runB) dilatih dengan font bercacat yang tidak dipakai run resmi (BasaJan dan "
+        "Carakan); model resmi mewarisi bobotnya.")
+    # F08 / N05: folder font sudah berubah sejak run dilatih. Jumlah yang tercatat tetap disebut dengan sumbernya, dan
+    # ukuran pada folder sekarang diberi keterangan.
     moved = data_methods(root, RUN, {"augment": "none", "drop_space_prob": 0.5},
-                         {"train": 10, "extra": 8, "measured": 9, "current": False, "defects": ["Carakan"], "narrow": 3})
+                         {"train": 10, "extra": 8, "measured": 9, "current": False, "source": "results", "defects": ["Carakan"], "narrow": 3})
     assert moved["fonts"]["summary"].startswith("Tiap baris dirender dengan satu font yang diundi dari 10 font. ")
-    assert moved["fonts"]["settings"] == [["Font latih", "10 (tercatat saat run dilatih; folder font sekarang berisi 9)"]]
+    assert moved["fonts"]["settings"] == [["Font latih", "10 (menurut ekspor hasil; folder font sekarang berisi 9)"]]
     assert moved["render"]["note"].startswith("1 dari 9 font latih yang ada di folder sekarang (run ini dilatih dengan 10 "
                                               "font) punya cacat yang diketahui (Carakan): ")
-    # F14: spasi juga selalu dibuang pada font berspasi sempit, jadi porsinya lebih besar dari peluangnya:
-    # 0,5 + 0,5 x 3/9 = 67%.
+    # N10: porsi baris tanpa spasi tidak dihitung dari berkas yang bukan lagi font run itu.
     assert moved["drop_space"]["settings"] == [
         ["Peluang", "0,5"], ["Selalu, pada font berspasi sempit", "3 dari 9 font yang ada di folder sekarang (run ini "
-                                                                 "dilatih dengan 10 font)"],
-        ["Porsi baris tanpa spasi", "sekitar 67%"]]
+                                                                 "dilatih dengan 10 font)"]]
     assert "spasi selalu dibuang" in moved["drop_space"]["summary"]
-    narrow = data_methods(root, RUN, {"augment": "none", "drop_space_prob": 0.5}, {"train": 10, "extra": 8, "measured": 10, "narrow": 3})
+    logged = data_methods(root, RUN, {"augment": "none"}, {"train": 10, "extra": 8, "measured": 9, "current": False, "source": "log"})
+    assert logged["fonts"]["settings"] == [["Font latih", "10 (tercatat di log run; 9 di antaranya masih ada di folder font)"]]
+    # N09: tidak ada cacat yang terlihat, tetapi sebagian berkas font sudah tidak ada: itu disebut, bukan didiamkan.
+    assert logged["render"]["note"] == ("Cacat font hanya bisa diperiksa pada 9 dari 10 font latih: sisanya tidak ada lagi di "
+                                        "folder font.")
+    # F14: spasi juga selalu dibuang pada font berspasi sempit, jadi porsinya lebih besar dari peluangnya:
+    # 0,5 + 0,5 x 3/10 = 65%.
+    wide = {"train": 10, "extra": 8, "measured": 10, "narrow": 3}
+    narrow = data_methods(root, RUN, {"augment": "none", "drop_space_prob": 0.5}, wide)
     assert narrow["drop_space"]["settings"] == [["Peluang", "0,5"], ["Selalu, pada font berspasi sempit", "3 dari 10 font"],
                                                 ["Porsi baris tanpa spasi", "sekitar 65%"]]
+    assert "spasi selalu dibuang" in narrow["drop_space"]["summary"] and narrow["drop_space"]["note"] is None
+    # N04: aturan font berspasi sempit baru ada sesudah fase5_fonts dilatih. Kartu untuk run itu tidak mengaku memakainya,
+    # dan kartu run sesudahnya menyebut run di rantainya yang dilatih sebelum aturan itu ada (hanya yang memakai font
+    # berspasi sempit).
+    assert set(em.RUNS_BEFORE_NARROW_SPACE_RULE) == {"base", "fase5_quick", "fase5_core", "fase5_fonts"}
+    early = data_methods(root, "fase5_fonts", {"augment": "none", "drop_space_prob": 0.5}, wide)["drop_space"]
+    assert early["settings"] == [["Peluang", "0,5"]] and "spasi selalu dibuang" not in early["summary"]
+    assert early["note"] == ("Run ini dilatih sebelum aturan font berspasi sempit ada: pada 3 font, label yang masih berspasi "
+                             "memuat spasi yang nyaris tidak tampak di citra.")
+    chain = [{"run": "fase5_quick", "defects": [], "narrow": 0}, {"run": "fase5_fonts", "defects": [], "narrow": 3},
+             {"run": "fase6_ctrl", "defects": [], "narrow": 3}]
+    later = data_methods(root, RUN, {"augment": "none", "drop_space_prob": 0.5}, {**wide, "chain": chain})["drop_space"]
+    assert later["settings"][-1] == ["Porsi baris tanpa spasi", "sekitar 65%"]
+    assert later["note"] == ("Run fase5_fonts di rantai dilatih sebelum aturan font berspasi sempit ada: di font itu labelnya "
+                             "masih memuat spasi yang nyaris tidak tampak di citra.")
 
     # Run resmi yang memakai sisipan aksara langka: butirnya bagian dari model resmi dengan peluangnya, dan kalimat
     # "diuji lalu tidak dipakai" tidak boleh muncul walau berkas pembanding uji itu ada.
@@ -490,6 +597,7 @@ def test_data_sentences_follow_the_recipe_and_the_fonts(tmp_path):
     write_manifest(root, manifest)
     compare_file(root, "crnn_fase7_track_rare", "crnn_fase7_track", 0.21, 0.20, [-0.01, 0.02], rare={"groups": {"langka": {
         "recall": {"a": 0.5, "b": 0.0}, "precision": {"a": 0.4}}}})
+    sibling(root, "fase7_track_rare", rare_insert_prob=0.3, rare_opener_prob=0.15)
     rare = data_methods(root, "fase7_track_rare", {"augment": "none", "rare_insert_prob": 0.3, "rare_opener_prob": 0.15})["rare"]
     assert (rare["status"], rare["evidence"], rare["evidence_source"]) == ("official", None, None)
     assert rare["settings"] == [["Peluang sisip", "0,3"], ["Peluang pembuka", "0,15"]]
@@ -498,11 +606,36 @@ def test_data_sentences_follow_the_recipe_and_the_fonts(tmp_path):
     assert opener["settings"] == [["Peluang sisip", "0"], ["Peluang pembuka", "0,15"]]
     # Run lain yang BUKAN kontrol uji sisipan itu tidak mengutip hasilnya.
     assert "rare" not in data_methods(root, "fase7_ctrl", {"augment": "none"})
-    assert data_methods(root, RUN, {"augment": "none"})["rare"]["status"] == "tested"
+    tested = data_methods(root, RUN, {"augment": "none"})["rare"]
+    assert tested["status"] == "tested" and tested["evidence"].endswith(
+        "tetapi hanya 40,0% dari keluarannya benar, dan G3 tidak berbeda nyata (21,00% melawan 20,00%). Karena itu tidak "
+        "dipakai di run resmi.")
     # Run kontrol uji itu sendiri, bila kelak dilatih DENGAN sisipan: butirnya "dipakai", jadi hasil uji yang berakhir
     # "karena itu tidak dipakai di run resmi" tidak dikutip.
     used = data_methods(root, RUN, {"augment": "none", "rare_insert_prob": 0.3})["rare"]
     assert (used["status"], used["evidence"], used["evidence_source"]) == ("official", None, None)
+    # N06: run "perlakuan" yang checkpoint-nya ternyata tanpa sisipan bukan pasangan uji, jadi hasilnya tidak dikutip.
+    sibling(root, "fase7_track_rare")
+    assert em.control_run(root, "rare", "fase7_track_rare") is None and "rare" not in data_methods(root, RUN, {"augment": "none"})
+    sibling(root, "fase7_track_rare", rare_insert_prob=0.3, rare_opener_prob=0.15)
+    assert em.control_run(root, "rare", "fase7_track_rare") == RUN
+    # N10: kalimatnya mengikuti hasilnya. Presisi tinggi tidak ditulis "tetapi hanya", recall yang turun tidak ditulis
+    # "naik", dan G3 yang nyata lebih baik tidak diberi "karena itu tidak dipakai".
+    manifest["metrics"][-1]["cer"] = 0.14
+    write_manifest(root, manifest)
+    compare_file(root, "crnn_fase7_track_rare", "crnn_fase7_track", 0.14, 0.20, [-0.09, -0.03], rare={"groups": {"langka": {
+        "recall": {"a": 0.5, "b": 0.6}, "precision": {"a": 0.95}}}})
+    assert data_methods(root, RUN, {"augment": "none"})["rare"]["evidence"] == (
+        "Pada 3 baris nyata, aksara langka yang terbaca benar berubah dari 60,0% ke 50,0%, dan 95,0% dari keluarannya benar, "
+        "dan G3 berubah −6,00 poin (14,00% melawan 20,00%). Run resmi tidak memakainya.")
+    # G3 yang nyata lebih BURUK tetap berakhir "karena itu tidak dipakai".
+    manifest["metrics"][-1]["cer"] = 0.26
+    write_manifest(root, manifest)
+    compare_file(root, "crnn_fase7_track_rare", "crnn_fase7_track", 0.26, 0.20, [0.03, 0.09], rare={"groups": {"langka": {
+        "recall": {"a": 0.5, "b": 0.0}, "precision": {"a": 0.5}}}})
+    assert data_methods(root, RUN, {"augment": "none"})["rare"]["evidence"].endswith(
+        "naik dari 0,0% ke 50,0%, dan 50,0% dari keluarannya benar, dan G3 berubah +6,00 poin (26,00% melawan 20,00%). "
+        "Karena itu tidak dipakai di run resmi.")
 
     # F06: bukti jarak hanya terhadap run kontrol yang memang dilatih TANPA jarak. fase7_track_rare (jarak + sisipan)
     # tidak punya kontrol jarak sendiri: fase7_track adalah kontrol sisipannya dan dilatih dengan jarak.
@@ -510,12 +643,22 @@ def test_data_sentences_follow_the_recipe_and_the_fonts(tmp_path):
     assert data_methods(root, RUN, tracked)["tracking"]["evidence"].startswith("Terhadap run kontrol fase7_ctrl (jumlah langkah sama, tanpa jarak): ")
     both = data_methods(root, "fase7_track_rare", {**tracked, "rare_insert_prob": 0.3})["tracking"]
     assert both["evidence"] is None and both["settings"] == [["Peluang", "0,5"], ["Jarak tambahan", "0 sampai 0,3 em"]]
-    assert em.tracking_control(root, "fase7_track_rare") is None and em.tracking_control(root, RUN) == "fase7_ctrl"
-    # Run kontrol yang ternyata dilatih dengan jarak, atau yang checkpoint-nya tidak ada: tidak dipakai.
-    save_ckpt(root / "out/checkpoints/fase7_ctrl/last_snapshot.pt", 10, track_prob=0.5, track_max=0.3)
-    assert em.tracking_control(root, RUN) is None and data_methods(root, RUN, tracked)["tracking"]["evidence"] is None
-    (root / "out/checkpoints/fase7_ctrl/last_snapshot.pt").unlink()
-    assert em.tracking_control(root, RUN) is None
+    assert em.control_run(root, "tracking", "fase7_track_rare") is None and em.control_run(root, "tracking", RUN) == "fase7_ctrl"
+    # Run kontrol yang ternyata dilatih dengan jarak, dengan jumlah langkah lain, dengan argumen data lain, atau yang
+    # checkpoint-nya tidak ada: tidak dipakai (N06: "jumlah langkah sama" hanya ditulis sesudah diperiksa).
+    sibling(root, "fase7_ctrl", track_prob=0.5)
+    assert em.control_run(root, "tracking", RUN) is None and data_methods(root, RUN, tracked)["tracking"]["evidence"] is None
+    control = sibling(root, "fase7_ctrl", track_prob=0.0)
+    saved = torch.load(control, weights_only=False)
+    torch.save({**saved, "step": 4}, control)
+    assert em.control_run(root, "tracking", RUN) is None and data_methods(root, RUN, tracked)["tracking"]["evidence"] is None
+    sibling(root, "fase7_ctrl", track_prob=0.0, drop_space_prob=0.0)
+    assert em.control_run(root, "tracking", RUN) is None
+    # --track-max kontrol tidak berarti apa-apa selama --track-prob-nya 0 (begitulah checkpoint fase7_ctrl sebenarnya).
+    sibling(root, "fase7_ctrl", track_prob=0.0, track_max=0.9)
+    assert em.control_run(root, "tracking", RUN) == "fase7_ctrl"
+    control.unlink()
+    assert em.control_run(root, "tracking", RUN) is None
 
 
 def test_ablation_evidence_does_not_rank_single_steps():
@@ -523,20 +666,25 @@ def test_ablation_evidence_does_not_rank_single_steps():
         return [{"added": name, "G3": value} for name, value in steps]
 
     # Operasi preset dan tiruan pindaian bercampur urutannya: tiap langkah disebut apa adanya, tanpa dijumlahkan.
-    mixed = em.ablation_evidence(rows(("(kontrol)", 0.75), ("tight", 0.60), ("rotate", 0.58), ("stroke", 0.50)), {0, 1})
+    mixed = em.ablation_evidence(rows(("(kontrol)", 0.75), ("tight", 0.60), ("rotate", 0.58), ("stroke", 0.50)), [0, 1, 0, 0])
     assert mixed[0] == ("Ablasi 4 run: G3 75,00% → 50,00%. Selisih tiap langkah: tight −15,00 poin, rotate −2,00 poin, "
                         "stroke −8,00 poin.")
     # Tidak ada langkah yang naik: catatannya tidak menyebut kenaikan. Seed berbeda-beda: tidak disebut sama.
     assert mixed[1] == ("Operasi ditambahkan berurutan dan tiap run dilatih satu kali, jadi selisih satu langkah mencampur "
                         "pengaruh operasinya dengan derau antar-run. G3 adalah data uji: angka ini dibaca sebagai arah, "
                         "bukan dasar memilih operasi.")
-    only_preset = em.ablation_evidence(rows(("(kontrol)", 0.75), ("rotate", 0.80), ("blur", 0.70)), {0})
+    three = rows(("(kontrol)", 0.75), ("rotate", 0.80), ("blur", 0.70))
+    only_preset = em.ablation_evidence(three, [0, 0, 0])
     assert only_preset[0] == "Ablasi 3 run: G3 75,00% → 70,00%. Selisih tiap langkah: rotate +5,00 poin, blur −10,00 poin."
     assert "dengan seed yang sama" in only_preset[1] and "(menambahkan rotate malah menaikkan G3 5,00 poin)" in only_preset[1]
+    # N10: "seed yang sama" hanya bila log SEMUA run ablasi ada dan seed-nya satu. Log yang hilang, log pertama saja,
+    # atau satu run berseed lain: tidak disebut sama.
+    for seeds in ([0, None, 0], [0], [0, 0], [0, 0, 1], [1, 0, 0], [None, None, None], []):
+        assert "dengan seed yang sama" not in em.ablation_evidence(three, seeds)[1], seeds
     # Satu baris, atau baris tanpa G3: tidak ada bukti.
-    assert em.ablation_evidence(rows(("(kontrol)", 0.75)), {0}) is None
-    assert em.ablation_evidence(rows(("(kontrol)", 0.75), ("rotate", None)), {0}) is None
-    assert em.ablation_evidence([], set()) is None
+    assert em.ablation_evidence(rows(("(kontrol)", 0.75)), [0]) is None
+    assert em.ablation_evidence(rows(("(kontrol)", 0.75), ("rotate", None)), [0, 0]) is None
+    assert em.ablation_evidence([], []) is None
 
 
 def test_fonts_are_counted_from_the_log_then_the_results_then_the_folder(tmp_path, monkeypatch):
@@ -545,42 +693,123 @@ def test_fonts_are_counted_from_the_log_then_the_results_then_the_folder(tmp_pat
     charset = [" ", KA, GA]
     recorded = em.recorded_fonts(root)
     assert recorded == {"fase5_core": 2, "fase5_fonts": 3, "fase6_ctrl": 3, "fase7_track": 3, "fase7_ctrl": 3}
+    core = [font.name for font in TRAIN_FONTS]
+    log = links[-1]["path"].parent / "log.jsonl"
 
-    facts = em.font_facts(root, links[-1], charset, recorded)
-    assert (facts["train"], facts["core"], facts["extra"], facts["source"], facts["measured"], facts["current"]) == (3, 2, 1, "results", 3, True)
-    assert facts["defects"] == [] and facts["narrow"] == 0
-    assert [path.name for path in facts["paths"]] == [font.name for font in TRAIN_FONTS] + ["Salinan.ttf"]
+    def facts(link=None, **kwargs):
+        got = em.font_facts(root, link or links[-1], kwargs.get("charset", charset), kwargs.get("recorded", recorded))
+        return got, (got["train"], got["core"], got["extra"], got["source"], got["measured"], got["current"])
+
+    full, numbers = facts()
+    assert numbers == (3, 2, 1, "results", 3, True) and full["run"] == RUN
+    assert full["defects"] == [] and full["narrow"] == 0
+    assert [path.name for path in full["paths"]] == core + ["Salinan.ttf"]
     # Run tanpa catatan di ekspor hasil: dari folder sekarang.
-    first = em.font_facts(root, links[0], charset, recorded)
-    assert (first["train"], first["source"], first["current"]) == (2, "folder", True)
-    # Log run yang mencatat daftar fontnya didahulukan dari keduanya.
-    names = [font.name for font in TRAIN_FONTS] + ["Salinan.ttf", "SudahDihapus.ttf"]
-    write_log(links[-1]["path"].parent / "log.jsonl", [{**start(0), "fonts": names}, {"step": 10, "event": "end"}])
-    logged = em.font_facts(root, links[-1], charset, recorded)
-    assert (logged["train"], logged["extra"], logged["source"], logged["measured"], logged["current"]) == (4, 2, "log", 3, False)
+    assert facts(links[0])[1] == (2, 2, 0, "folder", 2, True)
+    # N05: jumlah di ekspor hasil yang bertentangan dengan argumen checkpoint tidak dipakai (run tanpa --extra-fonts
+    # yang dicatat 3 font), dan folder yang isinya lebih banyak atau lebih sedikit dari catatan bukan "sama".
+    assert facts(links[0], recorded={"runA": 3})[1] == (2, 2, 0, "folder", 2, True)
+    assert facts(links[0], recorded={"runA": 2})[1] == (2, 2, 0, "results", 2, True)
+    assert facts(recorded={RUN: 5})[1] == (5, 2, 3, "results", 3, False)
+    assert facts(recorded={RUN: 2})[1] == (2, 2, 0, "results", 3, False)
+
+    # Log run yang mencatat NAMA fontnya didahulukan dari keduanya, dan hanya berkas bernama itu yang diukur.
+    write_log(log, [{**start(0), "fonts": core + ["Salinan.ttf", "SudahDihapus.ttf"]}, {"step": 10, "event": "end"}])
+    assert facts()[1] == (4, 2, 2, "log", 3, False)
+    # N02: jumlahnya sama dengan folder tetapi namanya lain: folder itu BUKAN font run ini.
+    write_log(log, [{**start(0), "fonts": core + ["Lain.ttf"]}, {"step": 10, "event": "end"}])
+    renamed, numbers = facts()
+    assert numbers == (3, 2, 1, "log", 2, False) and [path.name for path in renamed["paths"]] == core
+    # Folder berisi LEBIH banyak daripada yang dicatat log (font ditambahkan sesudah run): yang tidak tercatat tidak diukur.
+    write_log(log, [{**start(0), "fonts": core}, {"step": 10, "event": "end"}])
+    fewer, numbers = facts()
+    assert numbers == (2, 2, 0, "log", 2, True) and [path.name for path in fewer["paths"]] == core
+    # Run yang dilanjutkan: daftar proses TERAKHIR sebelum langkah checkpoint yang dipakai. Proses yang mulai tepat di
+    # langkah checkpoint (10) baru melanjutkannya, jadi daftarnya bukan milik checkpoint ini.
+    write_log(log, [{**start(0), "fonts": core}, {**start(5), "fonts": core + ["Salinan.ttf"]},
+                    {"step": 10, "event": "end"}, {**start(10), "fonts": core[:1]}])
+    assert facts()[1] == (3, 2, 1, "log", 3, True)
+    write_log(log, [start(0), {"step": 10, "event": "end"}, {**start(10), "fonts": core[:1]}])
+    assert facts()[1] == (3, 2, 1, "results", 3, True)
+    # Proses tanpa baris sintetis mencatat daftar kosong: itu bukan "tidak tercatat".
+    write_log(log, [{**start(0), "fonts": []}, {"step": 10, "event": "end"}])
+    assert facts()[1] == (0, 0, 0, "log", 0, True)
+    write_log(log, [{**start(0), "fonts": core + ["Salinan.ttf", "SudahDihapus.ttf"]}, {"step": 10, "event": "end"}])
 
     # Cacat = font di daftar cacat yang diketahui atau yang tidak punya glyph sebuah karakter charset; spasi sempit =
     # aturan src.dataset (celah kata hasil shaping di bawah ambang).
     monkeypatch.setattr(em, "FONT_DEFECTS", ("Salinan.ttf",))
     monkeypatch.setattr(em, "space_ratio", lambda path: 0.05 if Path(path).name == TRAIN_FONTS[1].name else 0.2)
-    measured = em.font_facts(root, links[-1], charset + ["꧎"], recorded)  # U+A9CE: tidak ada di font mana pun
+    measured = facts(charset=charset + ["꧎"])[0]  # U+A9CE: tidak ada di font mana pun
     assert measured["defects"] == sorted(path.stem for path in measured["paths"]) and measured["narrow"] == 1
-    assert em.font_facts(root, links[-1], charset, recorded)["defects"] == ["Salinan"]
+    assert facts()[0]["defects"] == ["Salinan"]
 
     # Font uji yang sekeluarga dengan font latih: salinan font inti pertama (73 dari 73 lebar maju sama).
-    gates = [{"code": "G1", "fonts": ["javatext.ttf"]}, {"code": "G2", "fonts": ["javatext.ttf"]}, {"code": "G3", "fonts": []}]
-    twins = em.family_twins(measured["paths"], gates, root / "ujifont")
-    assert [(twin["test"], twin["train"], twin["same"], twin["of"]) for twin in twins] == [
-        ("javatext", TRAIN_FONTS[0].stem, 73, 73), ("javatext", "Salinan", 73, 73)]
-    assert em.family_note(twins, "G1 dan G2") == FAMILY_NOTE.format("G1 dan G2")
-    # Font uji tidak ada di mesin ini, atau tidak sekeluarga dengan font latih mana pun: tidak ada catatan.
-    assert em.family_twins(measured["paths"], gates, root / "tidak-ada") == [] and em.family_note([], "G1 dan G2") is None
-    assert em.family_twins([TRAIN_FONTS[1]], gates, root / "ujifont") == []
-    # Yang diperiksa hanya font uji gerbang SINTETIS: javatext yang ada di mesin tetapi tidak dipakai G1/G2 run ini
-    # tidak ikut, dan gerbang data nyata tidak punya font uji.
-    others = [{"code": "G1", "fonts": ["lain.ttf"]}, {"code": "G3", "fonts": ["javatext.ttf"]}]
-    assert em.family_twins(measured["paths"], others, root / "ujifont") == []
-    assert em.probe_note([]) is None
+    owners = em.chain_fonts([measured])
+    assert {name: owner["runs"] for name, owner in owners.items()} == {name: [RUN] for name in core + ["Salinan.ttf"]}
+    twins, unknown = em.family_twins(owners, ["javatext.ttf", "javatext.ttf"], root / "ujifont")
+    assert unknown == [] and [(twin["test"], twin["train"], twin["same"], twin["of"], twin["runs"]) for twin in twins] == [
+        ("javatext", TRAIN_FONTS[0].stem, 73, 73, [RUN]), ("javatext", "Salinan", 73, 73, [RUN])]
+    assert em.family_note(twins, "G1 dan G2", RUN, [], False) == FAMILY_NOTE.format("G1 dan G2")
+    # Tidak sekeluarga dengan font latih mana pun: tidak ada catatan.
+    assert em.family_twins(em.chain_fonts([{"run": RUN, "paths": [TRAIN_FONTS[1]]}]), ["javatext.ttf"], root / "ujifont") == ([], [])
+    assert em.family_note([], "G1 dan G2", RUN, [], False) is None and em.probe_note([], []) is None
+    # N09: font uji yang berkasnya tidak ada di mesin ini, atau font latih yang berkasnya sudah tidak ada: kemiripannya
+    # tidak bisa dihitung, dan itu DITULIS (dulu catatannya hilang begitu saja).
+    assert em.family_twins(owners, ["javatext.ttf"], root / "tidak-ada") == ([], ["javatext"])
+    missing = "Kemiripan font uji javatext dengan font latih tidak bisa dihitung di mesin ini: berkas fontnya tidak ada."
+    assert em.family_note([], "G1 dan G2", RUN, ["javatext"], False) == missing
+    gone = "Sebagian font latih tidak ada lagi di folder font, jadi kemiripannya dengan font uji tidak ikut diperiksa."
+    assert em.family_note([], "G1 dan G2", RUN, [], True) == gone
+    assert em.family_note(twins, "G1 dan G2", RUN, ["lain"], True) == " ".join([
+        FAMILY_NOTE.format("G1 dan G2"), missing.replace("javatext", "lain"), gone])
+    assert em.probe_note([], ["javatext"]) == ("Kemiripan font perender javatext dengan font latih tidak bisa dihitung di "
+                                               "mesin ini: berkas fontnya tidak ada.")
+
+    # N01: yang "pernah dilihat model" adalah font seluruh rantai. Run resmi yang sendiri hanya memakai font lain tetap
+    # mendapat catatan bila run sebelumnya di rantai dilatih dengan font sekeluarga, dan itu disebut milik run mana.
+    earlier = {"run": "runA", "paths": [TRAIN_FONTS[0], root / "fonts/extra/Salinan.ttf"]}
+    last = {"run": RUN, "paths": [TRAIN_FONTS[1]]}
+    owners = em.chain_fonts([earlier, last])
+    assert [(name, owner["runs"]) for name, owner in owners.items()] == [
+        (TRAIN_FONTS[0].name, ["runA"]), ("Salinan.ttf", ["runA"]), (TRAIN_FONTS[1].name, [RUN])]
+    chained, _ = em.family_twins(owners, ["javatext.ttf"], root / "ujifont")
+    assert em.family_note(chained, "G1 dan G2", RUN, [], False) == (
+        f"Font uji javatext sekeluarga dengan font latih {TRAIN_FONTS[0].stem} (font run runA di rantai) dan Salinan (font "
+        "run runA di rantai) (lebar 73 dari 73 aksara, angka, dan pada persis sama), jadi G1 dan G2 mengukur generalisasi di "
+        "dalam keluarga huruf itu, bukan ke font yang belum pernah dilihat model.")
+    both = em.chain_fonts([earlier, {"run": RUN, "paths": [TRAIN_FONTS[0], TRAIN_FONTS[1]]}])
+    assert both[TRAIN_FONTS[0].name]["runs"] == ["runA", RUN]
+    shared, _ = em.family_twins(both, ["javatext.ttf"], root / "ujifont")
+    assert em.family_note(shared, "G1 dan G2", RUN, [], False).startswith(
+        f"Font uji javatext sekeluarga dengan font latih {TRAIN_FONTS[0].stem} dan Salinan (font run runA di rantai) (lebar ")
+    # N10: tiap font latih disebut dengan tumpang-tindihnya sendiri, bukan yang terbesar untuk semuanya.
+    two = [{"test": "uji", "train": "A", "runs": [RUN], "same": 72, "of": 73}, {"test": "uji", "train": "B", "runs": [RUN], "same": 66, "of": 73}]
+    assert em.family_note(two, "G1", RUN, [], False).startswith(
+        "Font uji uji sekeluarga dengan font latih A dan B (lebar berturut-turut 72 dan 66 dari 73 aksara, angka, dan pada "
+        "persis sama), jadi G1 mengukur ")
+    assert em.probe_note(two, []) == ("Citranya dirender dengan font uji uji, yang sekeluarga dengan font latih A dan B, jadi "
+                                      "hasilnya belum tentu berlaku untuk bentuk huruf lain.")
+
+    # Dari ujung ke ujung: run resmi yang sendiri tanpa font tambahan, melanjutkan runA yang dilatih dengan font tambahan
+    # sekeluarga font uji. Font inti pertama tetap dipakai run resmi; Salinan hanya dipakai runA.
+    write_log(log, [start(0), {"step": 10, "event": "end"}])
+    saved = torch.load(links[0]["path"], weights_only=False)
+    torch.save({**saved, "args": {**saved["args"], "extra_fonts": "fonts/extra"}}, links[0]["path"])
+    saved = torch.load(links[-1]["path"], weights_only=False)
+    torch.save({**saved, "args": {**saved["args"], "extra_fonts": ""}}, links[-1]["path"])
+    manifest = manifest_of(root)
+    for pipeline in manifest["pipelines"]:
+        pipeline["config"] = pipeline["config"].replace(" · 3 font", "")
+    write_manifest(root, manifest)
+    gates = by_key(em.build(root, RUN, root / "ujifont"))["gates"]
+    assert gates["note"].startswith(f"Font uji javatext sekeluarga dengan font latih {TRAIN_FONTS[0].stem} dan Salinan (font run "
+                                    "runA di rantai) (lebar 73 dari 73 ")
+    # Font uji tidak ada di mesin ini: catatannya tidak hilang, melainkan menyebut tidak bisa dihitung.
+    assert by_key(em.build(root, RUN, root / "tidak-ada"))["gates"]["note"] == missing
+    # Font latih yang dicatat log tetapi berkasnya sudah dihapus: kemiripannya tidak ikut diperiksa, dan itu disebut.
+    write_log(log, [{**start(0), "fonts": core + ["SudahDihapus.ttf"]}, {"step": 10, "event": "end"}])
+    assert by_key(em.build(root, RUN, root / "ujifont"))["gates"]["note"].endswith(" " + gone)
 
 
 def test_gates_and_beam_evidence_follow_what_the_results_contain(tmp_path):
@@ -591,7 +820,8 @@ def test_gates_and_beam_evidence_follow_what_the_results_contain(tmp_path):
     model = em.model_card(root / "out/checkpoints" / RUN / "last_snapshot.pt")
 
     def evaluation(twins=(), fonts=()):
-        group = em.evaluation_group(RUN, {"track_max": 0.3}, real, em.Evidence(root), root, list(twins), list(fonts))
+        family = {"owners": {}, "dir": root / "ujifont", "twins": list(twins), "unknown": [], "incomplete": False}
+        group = em.evaluation_group(RUN, {"track_max": 0.3}, real, em.Evidence(root), root, family, list(fonts))
         return {m["key"]: m for m in group["methods"]}
 
     # Hasil tanpa gerbang G4 (ekspor lama): tokenizer tidak diberi bukti, dan G4 tidak disebut di daftar gerbang.
@@ -632,6 +862,19 @@ def test_gates_and_beam_evidence_follow_what_the_results_contain(tmp_path):
     planned = [dict(p, status="planned") if p["key"] == "crnn_fase7_ctrl" else p for p in manifest["pipelines"]]
     write_manifest(root, {**manifest, "pipelines": planned})
     assert evaluation()["control"]["settings"] == [["Kontrol font tambahan", "fase5_core (untuk fase5_fonts)"]]
+    # Hasil kedua run ada di manifest, tetapi checkpoint "kontrol"-nya bukan kontrol yang sah (dilatih dengan jarak juga,
+    # atau sampai langkah lain): pasangan itu tidak disebut run kontrol. Daftar CONTROLS hanya calon.
+    write_manifest(root, manifest)
+    both = [["Kontrol font tambahan", "fase5_core (untuk fase5_fonts)"], ["Kontrol jarak antar suku kata", "fase7_ctrl (untuk fase7_track)"]]
+    assert evaluation()["control"]["settings"] == both
+    sibling(root, "fase7_ctrl")
+    assert evaluation()["control"]["settings"] == both[:1]
+    ctrl = sibling(root, "fase7_ctrl", track_prob=0.0)
+    saved = torch.load(ctrl, weights_only=False)
+    torch.save({**saved, "step": saved["step"] + 1}, ctrl)
+    assert evaluation()["control"]["settings"] == both[:1]
+    sibling(root, "fase7_ctrl", track_prob=0.0)
+    assert evaluation()["control"]["settings"] == both
 
     # Beam + LM sudah diukur pada checkpoint resmi: angka itu yang dikutip, bukan angka fase5_fonts.
     extra = [{"scope": "nusaaksara_745", "pipeline": "crnn_fase7_track_beam", "lines": 3, "cer": 0.18, "better": 2, "worse": 1}]
@@ -646,6 +889,28 @@ def test_gates_and_beam_evidence_follow_what_the_results_contain(tmp_path):
     write_manifest(root, {**manifest, "metrics": [m for m in manifest["metrics"] if not m["pipeline"].endswith("_beam")]})
     none = em.decoding_group("crnn_fase7_track", em.Evidence(root), root)["methods"][0]
     assert (none["evidence"], none["evidence_source"], none["status"]) == (None, None, "available")
+
+    # c06: persen gerbang G4 dibaca dari manifest, bukan diketik.
+    low = dict(manifest["gates"][3], value=0.95)
+    write_manifest(root, {**manifest, "gates": manifest["gates"][:3] + [low]})
+    order = {m["key"]: m for m in em.ocr_group(model, tokenizer, em.Evidence(root))["methods"]}["visual_order"]
+    assert order["evidence"].startswith("Gerbang G4, 95%: ")
+    write_manifest(root, manifest)
+
+    # Berkas pembanding hanya dipakai bila dihitung dari prediksi yang sama dengan manifest: CER kedua sisinya harus
+    # persis sama (c09) dan kedua pipeline-nya harus ada di manifest (c01). Pengaturan bootstrap hanya dikutip dari
+    # berkas yang lolos pemeriksaan itu (c05). Selisihnya sendiri selalu dari manifest.
+    evidence = em.Evidence(root)
+    compare_file(root, "crnn_fase7_track", "crnn_fase7_ctrl", 0.20, 0.30, [-0.12, -0.07])
+    assert evidence.compare("crnn_fase7_track", "crnn_fase7_ctrl")["cer"]["a"] == 0.20
+    assert evidence.bootstrap()["resamples"] == 2000
+    compare_file(root, "crnn_fase7_track", "crnn_fase7_ctrl", 0.2005, 0.30, [-0.12, -0.07])  # beda 0,05 poin: ekspor lain
+    assert evidence.compare("crnn_fase7_track", "crnn_fase7_ctrl") is None
+    assert evidence.g3_change("crnn_fase7_track", "crnn_fase7_ctrl") == ("G3 30,00% → 20,00% (−10,00 poin)", "out/results/manifest.json")
+    compare_file(root, "crnn_x", "crnn_y", 0.10, 0.20, [-0.12, -0.07])  # pipeline yang tidak ada di manifest
+    assert evidence.compare("crnn_x", "crnn_y") is None and evidence.compare("crnn_tidak", "crnn_ada") is None
+    assert evidence.bootstrap() is None
+    assert evaluation()["bootstrap"]["settings"][0] == ["Pengambilan ulang", em.num(resamples)]
 
 
 def test_build_stops_when_results_do_not_belong_to_the_run(tmp_path):
@@ -739,6 +1004,27 @@ def test_training_sentences_follow_the_chain_and_the_logged_device(tmp_path):
                                                    "siklusnya selesai.")
     assert ["Langkah direncanakan run resmi", "1.500"] in methods["onecycle"]["settings"]
 
+    # N10: jumlah langkah yang direncanakan dibaca dari jadwal di checkpoint ("planned"), juga untuk run yang dimulai
+    # dengan --epochs (args.steps 0) lalu dihentikan lebih awal: run itu TIDAK menyelesaikan siklusnya.
+    epochs = [{**links[-1], "args": {**links[-1]["args"], "steps": 0}, "planned": 60}]
+    _, methods = training(epochs)
+    assert methods["onecycle"]["summary"].endswith("Run resmi dihentikan di langkah 10 dari 60 yang direncanakan, sebelum "
+                                                   "siklusnya selesai.")
+    assert ["Langkah direncanakan run resmi", "60"] in methods["onecycle"]["settings"]
+    _, methods = training([{**links[0], "planned": 60}, links[-1]])
+    assert "1 dari 1 run sebelumnya di rantai (runA) dihentikan" in methods["onecycle"]["summary"]
+    # Tanpa jadwal di checkpoint dan tanpa --steps: langkah yang dicapai dianggap rencananya.
+    _, methods = training([{**links[-1], "args": {**links[-1]["args"], "steps": 0}}])
+    assert methods["onecycle"]["summary"].endswith("Run resmi menyelesaikan siklusnya (10 langkah).")
+    path = links[-1]["path"]
+    assert em.planned_steps(path) is None
+    saved = torch.load(path, weights_only=False)
+    torch.save({**saved, "scheduler": {"total_steps": 60, "last_epoch": 10}}, path)
+    assert em.planned_steps(path) == 60
+    assert by_key(build(root))["onecycle"]["summary"].endswith("Run resmi dihentikan di langkah 10 dari 60 yang direncanakan, "
+                                                               "sebelum siklusnya selesai.")
+    torch.save(saved, path)
+
     # Run eksperimen --no-pack: kartu menyebut LSTM tidak dikemas.
     loose = [{**link, "args": {**link["args"], "packed": False}} for link in links]
     assert training(loose)[1]["batching"]["settings"][0] == ["Pengemasan LSTM", "tidak"]
@@ -761,9 +1047,32 @@ def test_recipe_changes_name_what_was_added_removed_or_left_alone():
     links = [link("a", augment="fase5", drop_space_prob=0.5, track_prob=0.5), link("b", augment="fase5", drop_space_prob=0.5),
              link("c", augment="fase5", drop_space_prob=0.5), link("d", augment="none", rare_opener_prob=0.15)]
     assert em.recipe_changes(links, [3, 3, 3, 2]) == (
-        "b: tanpa jarak antar suku kata; c: argumen sama, langkah tambahan; "
+        "b: tanpa jarak antar suku kata; c: argumen data sama, langkah tambahan; "
         "d: tanpa augmentasi, 2 font (dari 3), tanpa buang spasi, sisipan aksara langka")
     assert em.recipe_changes(links[:1], [3]) == ""
+    # N06: nilai yang berubah ikut disebut; "argumen data sama" hanya bila SEMUA argumen data sama.
+    before = link("x", augment="fase5", drop_space_prob=0.5, track_prob=0.5, track_max=0.3, train_lines=400,
+                  rare_insert_prob=0.3, extra_fonts="fonts/extra")
+    after = link("y", augment="fase5", drop_space_prob=1.0, track_prob=0.9, track_max=0.6, train_lines=500, seed=3,
+                 rare_insert_prob=0.1, extra_fonts="fonts/lain", real_train="data/real/labels.tsv")
+    assert em.recipe_changes([before, after], [3, 3]) == (
+        "y: font tambahan dari fonts/lain, buang spasi p 1 (dari 0,5), jarak antar suku kata p 0,9 hingga 0,6 em (dari p 0,5 "
+        "hingga 0,3 em), sisipan aksara langka dengan pengaturan lain, kumpulan 500 baris (dari 400), seed 3 (dari 0), "
+        "data nyata ikut dipakai")
+    for key, value in (("drop_space_prob", 0.6), ("track_max", 0.4), ("rare_insert_prob", 0.2), ("train_lines", 401), ("seed", 1)):
+        changed = em.recipe_changes([before, link("y", **{**before["args"], key: value})], [3, 3])
+        assert "argumen data sama" not in changed and changed.startswith("y: "), key
+    # Argumen pelatihan (laju belajar, jumlah langkah) bukan argumen data, dan pengaturan yang induknya mati (jarak
+    # terbesar tanpa peluang jarak, tempelan sisipan tanpa sisipan) tidak berarti apa-apa.
+    same = [link("p", augment="fase5", lr=5e-4, steps=1500, track_max=0.3),
+            link("q", augment="fase5", lr=3e-4, steps=600, track_max=0.9, rare_attach=True, rare_max_similarity=0.9)]
+    assert em.recipe_changes(same, [2, 2]) == "q: argumen data sama, langkah tambahan"
+    off = [link("p", augment="fase5", extra_fonts="fonts/extra", real_val="x"), link("q", augment="fase5")]
+    assert em.recipe_changes(off, [3, 3]) == "q: tanpa font tambahan, tanpa data nyata"
+    assert em.data_recipe({}) == em.data_recipe({"track_max": 0.3, "rare_attach": True, "rare_max_similarity": 0.9, "augment": None})
+    assert em.data_recipe({"track_prob": 0.5, "track_max": 0.3})["track_max"] == 0.3
+    assert set(em.TREATMENT_KEYS) == set(em.CONTROLS) == set(em.TREATMENTS)
+    assert all(key in em.data_recipe({}) for keys in em.TREATMENT_KEYS.values() for key in keys)
 
 
 def test_main_writes_the_card(tmp_path, monkeypatch, capsys):
@@ -817,6 +1126,34 @@ def test_real_card_points_at_things_that_exist():
             assert (ROOT / "out/checkpoints" / control / "last_snapshot.pt").exists(), control
     assert str(card["model"]["classes"]) in methods["head"]["summary"]
     assert "pasti benar" not in json.dumps(card, ensure_ascii=False)
+
+    # N03: bukti yang berkasnya ada di mesin ini memang muncul di kartu. Test ini dulu tidak memeriksa satu bukti pun,
+    # jadi pemeriksaan pasangan kontrol yang salah bisa mengosongkan bukti di kartu sungguhan tanpa ketahuan (repo
+    # palsu tidak menirukan semua argumen checkpoint yang sebenarnya).
+    compare = ROOT / "out/compare"
+    if OFFICIAL_RUN == "fase7_track":
+        controls = dict(methods["control"]["settings"])
+        assert controls["Kontrol jarak antar suku kata"] == "fase7_ctrl (untuk fase7_track)"
+        assert controls["Kontrol font tambahan"] == "fase5_core (untuk fase5_fonts)"
+        assert methods["tracking"]["evidence"].startswith("Terhadap run kontrol fase7_ctrl (jumlah langkah sama, tanpa jarak): G3 ")
+        assert methods["fonts"]["evidence"].startswith("Pada run fase5_core lawan fase5_fonts (2 lawan 10 font, bukan model resmi): G3 ")
+        if (compare / "crnn_fase7_track_vs_crnn_fase7_ctrl.json").exists():
+            assert "selang kepercayaan 95% per halaman" in methods["tracking"]["evidence"]
+        if (compare / "crnn_fase7_track_rare_vs_crnn_fase7_track.json").exists():
+            assert controls["Kontrol sisipan aksara langka"].startswith("fase7_track (untuk fase7_track_rare)")
+            assert methods["rare"]["status"] == "tested" and "dari keluarannya benar" in methods["rare"]["evidence"]
+        if (compare / "spacing_synthetic.json").exists():
+            assert methods["probe"]["evidence"].startswith("Baris tanpa spasi yang direnggangkan 0,3 em: ")
+        assert dict(methods["staged"]["settings"])["Yang berubah"].endswith("fase6_ctrl: argumen data sama, langkah tambahan; "
+                                                                             "fase7_track: jarak antar suku kata")
+        # Batasan yang dicatat proyek (CLAUDE.md), bila berkas fontnya ada di mesin ini: font latih bercacat, font uji
+        # sekeluarga dengan font latih, dan run di rantai yang dilatih sebelum aturan font berspasi sempit.
+        if all((ROOT / "fonts/extra" / name).exists() for name in ("BasaJan.ttf", "NewKramawirya.ttf", "CarakanJawa.otf")):
+            assert "BasaJan" in methods["render"]["note"] and "NewKramawirya" in methods["render"]["note"]
+            assert methods["drop_space"]["note"].startswith("Run fase5_fonts di rantai dilatih sebelum aturan font berspasi sempit ada")
+            if (em.TEST_FONT_DIR / "javatext.ttf").exists():
+                assert methods["gates"]["note"].startswith("Font uji javatext sekeluarga dengan font latih CarakanJawa (lebar 72 dari 73 ")
+                assert methods["probe"]["note"].startswith("Citranya dirender dengan font uji javatext, yang sekeluarga dengan font latih CarakanJawa")
 
     dump = json.dumps(card, ensure_ascii=False)
     with (ROOT / "data/real/nusaaksara/labels.tsv").open(encoding="utf-8", newline="") as f:

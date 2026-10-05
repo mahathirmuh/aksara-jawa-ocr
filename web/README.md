@@ -35,8 +35,9 @@ powershell -ExecutionPolicy Bypass -File web\services.ps1 start    # juga: statu
 Setelah model baru atau eksperimen baru: jalankan ulang `export_results.py` lalu `php artisan aksara:import`.
 Kartu halaman Dataset dan Metode bisa diperbarui sendiri: `export_datasets.py` lalu `php artisan aksara:datasets`,
 `export_methods.py` lalu `php artisan aksara:methods`. Kartu metode mengutip angka dari `out/results/manifest.json`,
-jadi diekspor sesudah `export_results.py`; bukti selisih antar-run dan evaluasi tertarget dibacanya dari
-`out/compare/` (`scripts/compare_runs.py`, `scripts/eval_spacing.py`) bila berkasnya ada dan cocok dengan manifest.
+jadi diekspor sesudah `export_results.py`; selang kepercayaan selisih antar-run dibacanya dari `out/compare/`
+(`scripts/compare_runs.py`) bila CER di berkas itu sama dengan manifest, dan evaluasi tertarget
+(`scripts/eval_spacing.py`) bila laporannya membaca checkpoint yang sekarang.
 Ketiga perintah impor langsung menulis "PERINGATAN" bila kartu yang baru diimpor tidak sejalan dengan hasil OCR yang
 diimpor (kartu untuk run lain, atau buktinya dari ekspor hasil yang lain), dengan skrip dan perintah yang perlu
 diulang.
@@ -74,7 +75,8 @@ php artisan aksara:translate                        # sumber: transliterasi manu
   pangkat. Tidak memakai aksara murda/swara. Ejaannya sama dengan 2.173 dari 2.231 lema berejaan baku di kamus bahasa Jawa (97,4%;
   `tests/Unit/AksaraWriterTest.php` menjaga angka itu).
 - `App\Support\TalingRestorer` memulihkan é/è pada kata tanpa tanda memakai `database/dictionaries/jv-taling.json`
-  (8.714 kata dari Wikipedia bahasa Jawa; pada artikel yang ditahan, kata ber-e yang benar naik dari 53% ke 90%).
+  (8.714 kata: 8.615 dari Wikipedia bahasa Jawa dan 99 dari lema kamus Wiktionary bahasa Inggris; pada artikel
+  Wikipedia yang ditahan, kata ber-e yang benar naik dari 53% ke 90%).
   Membangun ulang leksikon butuh snapshot Wikipedia proyek (`../data/raw/jvwiki-20231101.parquet`).
 - Arah balik (`Transliterator::toLatin`) tetap draf: ꦲ di tengah kata selalu dibaca "h" dan teks tanpa spasi tidak
   punya batas kata.
@@ -144,7 +146,7 @@ dibangun ulang dari file. Cadangkan labelnya:
 | Perbandingan | CER per pipeline (745 baris, 50 baris uji buta), pipeline yang direncanakan, hasil sintetis |
 | Ablasi | 12 run augmentasi Fase 5 |
 | Dataset | Kartu data: besar korpus, pembagian latih / validasi / uji dengan arti tiap bagian dan berapa yang dipakai run resmi, asal korpus (dari artikel ke baris, sebaran panjang), rantai checkpoint run resmi (langkah, sampel, baris berbeda), daftar dataset (peran, sumber, lisensi, boleh disebar atau tidak), font per peran dengan catatannya, batasan data, dan data pendukung |
-| Metode | Daftar metode dan machine learning yang dipakai, per tahap: pembaca aksara (CNN, BiLSTM, lapisan keluaran, CTC, decoding greedy, tokenizer urutan visual, normalisasi kontras), data latih sintetis (render, variasi font, augmentasi, jarak antar suku kata, buang spasi, sisipan aksara langka), pelatihan (AdamW, OneCycle, pemotongan gradien, batch per panjang, pelatihan bertahap), koreksi sesudah baca (beam search + model bahasa karakter), evaluasi dan statistik (CER, gerbang, bootstrap berpasangan, run kontrol, ablasi, evaluasi sintetis tertarget, uji buta VLM), lalu tahap lanjutan alur milik web (alih aksara, NLLB-200, chrF/BLEU, tingkat tutur, pemulih tanda é). Tiap butir punya jenis, status (dipakai model resmi, dipakai, tersedia, diuji lalu tidak dipakai, pembanding), penjelasan, pengaturan, berkas kodenya, dan bila ada: bukti terukur dengan sumbernya serta catatan batasan (mis. font uji yang sekeluarga dengan font latih, font latih bercacat, ablasi satu seed). Di atasnya: empat angka pokok dan alur dari citra ke teks Latin, yang lalu bercabang ke arti dan tingkat tutur; di bawahnya: metode yang direncanakan |
+| Metode | Daftar metode dan machine learning yang dipakai, per tahap: pembaca aksara (CNN, BiLSTM, lapisan keluaran, CTC, decoding greedy, tokenizer urutan visual, normalisasi kontras), data latih sintetis (render, variasi font, augmentasi, jarak antar suku kata, buang spasi, sisipan aksara langka), pelatihan (AdamW, OneCycle, pemotongan gradien, batch per panjang, pelatihan bertahap), koreksi sesudah baca (beam search + model bahasa karakter), evaluasi dan statistik (CER, gerbang, bootstrap berpasangan, run kontrol, ablasi, evaluasi sintetis tertarget, uji buta VLM), lalu tahap lanjutan alur milik web (alih aksara, NLLB-200, chrF/BLEU, tingkat tutur, pemulih tanda é). Tiap butir punya jenis, status (dipakai model resmi, dipakai, tersedia, diuji lalu tidak dipakai, pembanding), penjelasan, berkas kodenya, dan bila ada: pengaturan, bukti terukur dengan sumbernya, serta catatan batasan (mis. font uji yang sekeluarga dengan font latih, font latih bercacat, ablasi satu seed, angka terjemahan yang dihitung dengan ejaan yang tidak dikenal modelnya). Di atasnya: empat angka pokok dan alur dari citra ke teks Latin, yang lalu bercabang ke arti dan tingkat tutur; di bawahnya: metode yang direncanakan |
 | Penjelajah baris | Citra, label, transliterasi, arti, tingkat tutur, dan keluaran tiap pipeline dengan beda per suku kata; arahkan kursor ke suku kata CRNN greedy untuk melihat kolom citra yang dibacanya |
 | Kesalahan aksara | Aksara tertukar, hilang, tambahan |
 | Demo | Unggah potongan satu baris → FastAPI `/predict`, dengan skor CTC dan LM setiap kandidat |
@@ -204,11 +206,18 @@ yang tidak dihitung ekspor (`null`, misalnya jadwal baris run `--real-train`) di
 `payload` bertipe `json`, bukan `jsonb`: jsonb PostgreSQL mengurutkan ulang kunci objek, dan halaman tidak boleh
 bergantung pada urutan kunci (peran selalu diurutkan latih, validasi, uji). Kartu memuat kunci pipeline run yang
 dihitungnya; bila berbeda dari `Pipeline::official()`, halaman menampilkan peringatan "Kartu data dan hasil OCR
-tidak sejalan", tanpa menebak sisi mana yang tertinggal. Dua kunci yang ditambahkan sesudah tinjauan 2026-10-06:
+tidak sejalan", tanpa menebak sisi mana yang tertinggal. Kunci yang ditambahkan sesudah tinjauan 2026-10-06:
 `usage.test.others` (evaluasi di luar `out/eval` yang mengambil barisnya secara acak dari seluruh bagian uji:
 aksara langka sintetis dan beam + LM; karena itu halaman tidak lagi menyiratkan hanya N baris pertama yang pernah
-dibaca) dan `fonts_source` per run (`log` bila log training mencatat daftar fontnya, `folder` bila jumlahnya
-dihitung dari folder font sekarang; yang kedua diperingatkan bila ekspor hasil mencatat jumlah lain).
+dibaca), `usage.real.others` (evaluasi di luar `out/eval` yang membaca seluruh data nyata: laporan beam + LM; halaman
+menjumlahkannya dengan laporan `out/eval` dan menulis "paling sedikit N kali", karena pembacaan yang tidak
+meninggalkan laporan tidak terhitung), serta `fonts_source` dan `font_names` per run (`log` bila log training mencatat
+nama font perender data latihnya, dan nama itulah yang ditulis; `folder` bila jumlahnya dihitung dari folder font
+sekarang, yang diperingatkan bila ekspor hasil mencatat jumlah lain). Bila log run resmi mencatat nama font, peran
+"latih" di tabel font hanya diberikan kepada nama yang tercatat, dan kartu memperingatkan font tercatat yang sudah
+tidak ada di folder serta font di folder yang tidak tercatat. Kalimat pembuka pembagian menulis "teks uji tidak pernah
+dilihat saat latih" hanya bila kartu mencatat nol baris berteks sama di lebih dari satu bagian; kalau tidak,
+jumlahnya yang disebut.
 
 **Kartu metode (skema 1, kontrak sendiri):** `../out/results/methods.json` dari `scripts/export_methods.py`, diimpor
 `php artisan aksara:methods` (atau ikut `aksara:import`) ke tabel `method_reports`. Isinya `model` (arsitektur dan
@@ -217,18 +226,32 @@ jumlah parameter, dihitung dari model yang dibangun dari checkpoint run resmi), 
 `[label, nilai]`, `evidence`, `evidence_source`, `note`, `files[]`), `planned[]`, dan `chain_complete` (rantai
 checkpoint run resmi terbaca utuh atau tidak). `evidence` = hasil ukur, `note` = batasan yang harus dibaca bersama
 butir itu; keduanya boleh kosong. Penjelasan, pengaturan, bukti, dan catatan butir milik repo OCR disusun Python:
-angka dan pengaturannya dibaca dari checkpoint, kode, log, dan berkas hasil (selisih antar-run hanya dikutip dari
-berkas pembanding yang CER-nya sama dengan manifest, dan hanya terhadap run kontrol perlakuan itu), sedangkan
-kalimat penjelasannya ditulis tangan di skrip. Web menampilkannya apa adanya dan hanya menambah kelompok "Tahap
-lanjutan alur" dari tabel dan konstanta web sendiri (`Metode::webGroup()`). Kartu memuat `results_generated` (waktu
-ekspor hasil yang dikutip buktinya): bila berbeda dari hasil yang diimpor, atau kartu dibuat untuk run lain, halaman
-menampilkan peringatan "Kartu metode dan hasil tidak sejalan".
+angka dan pengaturannya dibaca dari checkpoint, kode, log, dan berkas hasil, sedangkan kalimat penjelasannya ditulis
+tangan di skrip. Aturan kutipnya: selisih antar-run selalu dihitung dari manifest; selang kepercayaannya hanya diambil
+dari berkas pembanding yang CER-nya sama dengan manifest; sebuah run hanya disebut "run kontrol" bila kedua
+checkpoint-nya ada dan memang berbeda di satu perlakuan itu saja (langkah, argumen pelatihan, dan resep data sama);
+evaluasi sintetis hanya dikutip bila laporannya membaca checkpoint yang sekarang (langkahnya sama, dan sidik
+berkasnya sama bila laporan mencatatnya), dan bila tidak, catatan butirnya menyebut bahwa angkanya tidak dikutip.
+Bukti selalu membawa sumbernya: skrip menolak butir berbukti tanpa sumber, dan impor menolak kartu yang begitu.
+Web menampilkannya apa adanya dan hanya menambah kelompok "Tahap lanjutan alur" dari tabel dan konstanta web sendiri
+(`Metode::webGroup()`); kunci butir kelompok itu (`Metode::WEB_KEYS`) tidak boleh dipakai butir kartu, dan impor
+menolak kartu yang memakainya. Kartu memuat `results_generated` (waktu ekspor hasil yang dikutip buktinya): bila
+berbeda dari hasil yang diimpor, atau kartu dibuat untuk run lain, halaman menampilkan peringatan "Kartu metode dan
+hasil tidak sejalan". Angka terjemahan di butir NLLB-200 disertai catatan selama batch terjemahan masih mengirim
+pepet bertanda "ê" ke model (`TranslationService::BATCH_KEEPS_PEPET_MARK`): ejaan itu tidak dikenal model, jadi chrF
+dan BLEU-nya kemungkinan terlalu rendah sampai batchnya dijalankan ulang. Angka tingkat tutur dihitung pada label
+yang sama dengan Ringkasan (`LineAnnotation::scorableSpeechLabels()`), dan label yang belum bisa dinilai disebut
+jumlahnya.
 
 **Dua pengaman impor kartu** (`App\Services\CardImporter`, dasar `DatasetImporter` dan `MethodImporter`): (1) bentuk:
 tiap kunci di `shape()` wajib ada dan bertipe benar (notasi titik, `*` = setiap butir; tipe `number`, `count` =
-bilangan tidak negatif, `string`, `text` = teks tidak kosong, `bool`, `list`, `map`; akhiran `?` = boleh tidak ada
-atau `null`, tetapi harus bertipe benar bila ada), dengan pesan yang menyebut kuncinya, ditambah pemeriksaan khusus
-tiap kartu (`check()`: urutan bagian, pasangan pengaturan, kunci kelompok dan butir yang tidak boleh berulang);
+bilangan tidak negatif yang boleh pecahan (rata-rata, jarak), `int` = bilangan bulat tidak negatif (jumlah baris,
+langkah, lapis, parameter), `share` = bilangan dari 0 sampai 1 (porsi dan peluang), `string`, `text` = teks tidak
+kosong, `bool`, `list`, `map`; akhiran `?` = boleh tidak ada atau `null`, tetapi harus bertipe benar bila ada), dengan
+pesan yang menyebut kuncinya. Isi daftar yang dicetak apa adanya (kode karakter yang tidak ada di sebuah font, catatan
+font, calon peran dataset) dan angka data pendukung ikut bertipe. Ditambah pemeriksaan khusus tiap kartu (`check()`:
+urutan bagian, pasangan pengaturan, bukti yang harus punya sumber, kunci kelompok dan butir yang tidak boleh berulang
+atau memakai kunci butir milik web);
 (2) uji tampil: sebelum kartu lama diganti, halaman dirender sekali dengan kartu calon di dalam transaksi, dan impor
 dibatalkan bila render gagal karena apa pun. Kartu yang ditolak tidak pernah mengganti kartu yang sudah ada.
 Pengaman ini menangkap kartu yang RUSAK; kartu yang bentuknya sah tetapi angkanya salah (disunting tangan) tetap
