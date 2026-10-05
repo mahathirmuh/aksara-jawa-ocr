@@ -268,6 +268,15 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     tanpa kepala memotret); dua jebakannya: `app('livewire')->flushState()` harus dipanggil di antara dua render
     dalam satu proses (kalau tidak, hanya halaman pertama yang mendapat skrip Livewire sehingga grafik kosong), dan
     jendela Edge tidak bisa lebih sempit dari ~500 px (tampilan ponsel dipotret lewat iframe 390 px).
+    Salinan statis tidak menjalankan permintaan Livewire. **Uji interaksi di browser sungguhan tanpa menyentuh
+    database situs (dipakai 2026-10-05 untuk halaman Kamus):** proses diberi `DB_CONNECTION=sqlite`,
+    `DB_DATABASE=<berkas di folder sementara>`, `SESSION_DRIVER=file`, `CACHE_STORE=array` (variabel proses menang
+    atas `web/.env` selama tidak ada cache konfigurasi; pastikan dulu lewat tinker bahwa nama databasenya berkas
+    itu), lalu `migrate`, akun uji, `aksara:dictionary`; server = `php -S 127.0.0.1:<port>
+    ../vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php` DIJALANKAN DARI `web/public`
+    (perutenya memuat `index.php` dari folder kerja); Edge `--headless=new --remote-debugging-port` dikemudikan skrip
+    Node lewat WebSocket bawaan (masuk, klik, `Input.insertText`, baca DOM). Sebelum memakai sebuah port, cek tidak
+    ada proses lama yang masih mendengarkan di situ.
     **Menu Kamus (permintaan user 2026-10-05, "isinya mengenai kamus/dictionary"; isinya keputusan Claude, belum
     dikonfirmasi):** `web/app/Livewire/Pages/Kamus.php` menampilkan tiga rujukan yang memang ada di alur: kamus
     aksara (charset `data/tokenizer.json`, lewat `App\Support\AksaraCatalog`; bacaan Latin = draf Transliterator),
