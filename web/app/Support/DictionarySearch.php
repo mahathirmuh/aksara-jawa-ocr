@@ -23,11 +23,12 @@ final class DictionarySearch
     public const MAX_WORDS = 8;
 
     /**
-     * @param  string  $term  kata atau frasa seperti diketik (boleh berawalan tanda hubung: "-an", "ke- -an")
+     * @param  string  $term  kata seperti diketik (boleh berawalan tanda hubung: "-an")
      * @param  string|null  $aksara  ejaan aksara yang juga dicocokkan langsung (kueri beraksara, kamus Jawa)
+     * @param  string|null  $phrase  bentuk lain kueri yang didahulukan bila ada entrinya ("kupu kupu" diketik -> "kupu-kupu")
      * @return array{matches: Collection<int, DictionaryEntry>, total: int, reverse: Collection<int, DictionaryEntry>, reverse_total: int}
      */
-    public static function search(string $dictionary, string $term, int $limit, ?string $aksara = null): array
+    public static function search(string $dictionary, string $term, int $limit, ?string $aksara = null, ?string $phrase = null): array
     {
         $needle = DictionaryEntry::normalize(self::unquote($term));
         $empty = ['matches' => collect(), 'total' => 0, 'reverse' => collect(), 'reverse_total' => 0];
@@ -35,6 +36,12 @@ final class DictionarySearch
             return $empty;
         }
         $base = fn (): Builder => DictionaryEntry::where('dictionary', $dictionary);
+        // "-an" dicari sebagai imbuhan. Kata biasa yang kebetulan didahului tanda hubung ("-rumah") dicari tanpa tanda itu,
+        // tetapi hanya bila kata itu memang ada: kamus tanpa entri "-an" tidak lalu menampilkan semua kata berawalan "an".
+        $bare = ltrim($needle, '- ');
+        if ($bare !== $needle && $bare !== '' && ! $base()->where('lookup', $needle)->exists() && $base()->where('lookup', $bare)->exists()) {
+            $needle = $bare;
+        }
         $like = self::escape($needle);
         $contains = mb_strlen($needle) >= self::MIN_CONTAINS;
         // Entri yang katanya cocok: memuat kata itu (>= 3 huruf) atau berawalan kata itu.
@@ -43,6 +50,11 @@ final class DictionarySearch
         $bySpelling = fn (Builder $query): Builder => $query->where('aksara', $aksara);
 
         $matches = $aksara !== null ? self::ranked($bySpelling($base()), $limit) : collect();
+        // Bentuk lain kueri (kata ulang bertanda hubung) hanya mengubah urutan: entrinya sudah termasuk yang cocok dengan katanya.
+        $joined = $phrase === null ? '' : DictionaryEntry::normalize(self::unquote($phrase));
+        if ($needle !== '' && $joined !== '' && $joined !== $needle && str_starts_with($joined, $needle)) {
+            $matches = $matches->concat(self::ranked($base()->where('lookup', $joined), $limit));
+        }
         if ($needle !== '') {
             $matches = $matches->concat(self::ranked($base()->where('lookup', $needle), $limit));
             $matches = $matches->concat(self::ranked($base()->where('lookup', '<>', $needle)
@@ -121,12 +133,20 @@ final class DictionarySearch
     /**
      * Buang tanda kutip yang MEMBUNGKUS kata atau frasa ('rumah', ‘omah’ lan ‘griya’); apostrof yang bagian dari kata
      * (Al-Qur'an, furu') tidak disentuh karena tidak punya pasangan pembuka.
+     *
+     * Semua pola memakai /u: trim() dengan daftar karakter bekerja per BYTE dan memotong huruf non-ASCII di tepi
+     * ("śrī", teks berawalan "—"). Deretan kutip dicocokkan posesif (++) supaya teks berisi ribuan kutip tetap linear.
      */
     public static function unquote(string $text): string
     {
-        $text = preg_replace('/(?<![\p{L}\p{N}])[\'‘’`]+([^\'‘’`]*[\p{L}\p{N}])[\'’`]+(?![\p{L}\p{N}])/u', '$1', $text) ?? $text;
+        // Sepasang kutip tunggal yang membungkus SELURUH teks, sedangkan kutip di dalamnya hanya apostrof di tengah
+        // kata: 'Al-Qur'an' -> Al-Qur'an.
+        // Tanda (\p{M}) ikut dihitung huruf: kata beraksara Jawa berakhir dengan sandhangan atau pangkon.
+        $whole = '/^\s*[\'‘`]((?:[^\'‘’`]|(?<=[\p{L}\p{M}\p{N}])[\'’`](?=[\p{L}\p{N}]))*+)(?<=[\p{L}\p{M}\p{N}])[\'’`]\s*$/us';
+        $text = preg_replace($whole, '$1', $text) ?? $text;
+        $text = preg_replace('/(?<![\p{L}\p{M}\p{N}\'‘’`])[\'‘’`]++([^\'‘’`]*[\p{L}\p{M}\p{N}])[\'’`]++(?![\p{L}\p{N}])/u', '$1', $text) ?? $text;
 
-        return trim($text, " \t\n\r\0\x0B\"“”«»");
+        return preg_replace('/^[\s"“”«»]+|[\s"“”«»]+$/u', '', $text) ?? $text;
     }
 
     /** Arti berbahasa Indonesia didahulukan, lalu kata yang lebih pendek. */

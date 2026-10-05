@@ -27,10 +27,15 @@ final class AksaraWriter
 {
     /**
      * Seberapa sering aturan ini (ejaan baku) menghasilkan ejaan aksara yang sama dengan lema kamus bahasa Jawa:
-     * [sama, dari]. Dijaga tests/Unit/AksaraWriterTest terhadap database/dictionaries/jv.jsonl.gz; sisanya nama
-     * beraksara murda/swara dan lema yang é-nya tidak ditandai.
+     * [sama, dari]. Dihitung pada lema berejaan baku; entri yang hanya varian ejaan ("dated spelling of ...",
+     * "nonstandard spelling of ...", "romanization of ...") tidak ikut, karena ejaan Latinnya memang bukan ejaan baku.
+     * Dijaga tests/Unit/AksaraWriterTest terhadap database/dictionaries/jv.jsonl.gz; sisanya nama beraksara
+     * murda/swara dan lema yang é-nya tidak ditandai.
      */
-    public const DICTIONARY_AGREEMENT = [2154, 2212];
+    public const DICTIONARY_AGREEMENT = [2173, 2231];
+
+    /** Arti pertama entri kamus yang hanya menunjuk ejaan lain (lihat DICTIONARY_AGREEMENT). */
+    public const SPELLING_VARIANT = '/^(?:\([^()]*\) )?(?:(?:\w+ )?(?:spelling|form) of |romanization of )/u';
 
     private const CONSONANTS = [
         'ng' => 'ꦔ', 'ny' => 'ꦚ', 'dh' => 'ꦝ', 'th' => 'ꦛ',

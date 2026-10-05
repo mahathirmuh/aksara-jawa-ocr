@@ -294,10 +294,10 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     "foto" -> fa-ha-o, "saé" menyisakan huruf Latin, kata ulang kehilangan pangkon (di korpus kata semacam itu tersaring).
     Pada 22.519 kata Wikipedia yang bisa dibandingkan, `AksaraWriter` mode korpus sama dengan alat lama di 99,78%.
     (2) ejaan baku (pa cerek, nga lelet, keret, n di depan c/j ditulis nya, angka diapit pada pangkat) diturunkan dari
-    ejaan aksara lema kamus, bukan dari ingatan: sama di 2.154 dari 2.212 lema (97,4%; mode korpus 93,0%). Angka itu
+    ejaan aksara lema kamus, bukan dari ingatan: sama di 2.173 dari 2.231 lema berejaan baku (97,4%; mode korpus 93,1%; entri varian ejaan tidak dihitung). Angka itu
     konstanta `AksaraWriter::DICTIONARY_AGREEMENT`, dijaga test dan ikut berubah bila kamus dibangun ulang.
     (3) e tanpa tanda: 53% kata ber-e benar bila semua dibaca pepet; leksikon `web/database/dictionaries/jv-taling.json`
-    (8.710 kata, `web/tools/taling_lexicon.py`, dari artikel Wikipedia Jawa yang bertanda kuat) menaikkannya ke 90% pada
+    (8.714 kata, `web/tools/taling_lexicon.py`, dari artikel Wikipedia Jawa yang bertanda kuat) menaikkannya ke 90% pada
     artikel yang ditahan. Aturan "e akhir kata = é" tidak menambah apa-apa di atas leksikon.
     (4) **NLLB tidak mengenal "ê":** "pêkên" -> "ke sana", "sêga" -> "tiga buah"; tanpa tanda -> "pasar", "nasi".
     `TranslationService::forModel()` membuang tanda itu di semua panggilan langsung (Terjemahan, Demo). Batch
@@ -308,28 +308,52 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     **Kamus kata (permintaan user 2026-10-05: "ditambahkan juga kamus bahasa jawa dan kamus bahasa indonesia"):** dua
     bagian baru di atas kamus aksara, isinya DATA PIHAK KETIGA (bukan hasil hitung proyek): tabel `dictionary_entries`
     dan `dictionary_sources`, berkas jadi di `web/database/dictionaries/` (ikut git; sumber & lisensi di `SUMBER.md`),
-    dibangun `web/tools/dictionaries.py`, diimpor `php artisan aksara:dictionary`. Sumber: entri bahasa Jawa (3.788)
-    dan bahasa Indonesia (39.968) Wiktionary bahasa Inggris lewat kaikki.org, CC BY-SA 4.0, arti berbahasa Inggris;
-    kamus Jawa membawa ejaan aksara (2.735 entri), ragam (635 entri), dan padanan ngoko/krama. Pencarian
-    (`DictionarySearch`): kolom turunan `lookup` (tanpa diakritik) dan `gloss_text`, LIKE biasa dan urutan byte
-    (`COLLATE "C"` di PostgreSQL) supaya sama di PostgreSQL dan SQLite. Yang dicari teks seperti diketik: frasa utuh
-    termasuk kata berulang ("mau tak mau"), imbuhan dengan tanda hubungnya ("-an", "ke- -an"), kutip pembungkus
-    dibuang; pencarian balik memakai bentuk kata seperti tersimpan di arti ("son-in-law") dan butuh >= 3 huruf; entri
-    yang cocok lewat ejaan aksara tidak diulang di daftar balik; kode "U+A9B6" hanya milik kamus aksara.
-    **Aturan pembangun data yang lahir dari tinjauan 2026-10-05 (jangan dikembalikan):** romanisasi dibaca per ENTRI
-    dari kepala entrinya (satu halaman beraksara bisa memuat dua kata: ꦲꦗꦶ = haji dan aji); ejaan aksara dari
-    penunjuk "Carakan spelling of" dikunci kata persisnya (enèm bukan enem), dan hanya varian ejaan yang beda
-    diakritik saja dari kata yang ditunjuknya ("dheweke" = "dhèwèké", 40 entri) yang mewarisi ejaan aksara; arti
-    bersarang wiktextract dirangkai "induk: anak" (tanpa itu sekitar 6.000 arti anak di 2.288 entri Indonesia
-    hilang), kecuali induk yang lebih panjang dari 40 karakter: ditulis sekali, anaknya menyusul; ragam dibaca dari
-    kepala entri ("(krama)", "(krama, ngoko)") sebelum tabel ragam, tetapi tanda kurung PERTAMA sesudah judul
-    beraksara adalah romanisasi, bukan label ("ꦏꦿꦩ (krama)" = kata "krama"); krama-ngoko menang atas ngoko; catatan
-    hanya memuat padanan di ragam LAIN; tanda aksara yang terlepas di ekstraksi sumber dirapatkan. Angka kecocokan
-    `AksaraWriter` turun dari 97,9% ke 97,4% hanya karena 40 varian ejaan itu ikut dihitung (ejaan lama menulis
-    taling tanpa tanda), bukan karena aturannya berubah. Belum beres: ~27 kata tanpa
-    ejaan aksara walau halaman beraksaranya ada (sumber tidak memasangkannya), dan `émah` ber-ejaan ꦲꦺꦴꦩꦃ (salah di
-    sumbernya). `tests/Feature/DictionaryTest.php` mengimpor berkas jadi yang ikut repo, jadi bangun ulang yang
-    merusak format ketahuan di test.
+    dibangun `web/tools/dictionaries.py`, diimpor `php artisan aksara:dictionary`. Sumber (semuanya CC BY-SA 4.0): Wiktionary
+    bahasa Inggris lewat kaikki.org untuk bahasa Jawa (3.966 entri, 3.186 lema; arti berbahasa Inggris, ejaan aksara
+    di 3.148 entri, ragam di 654, catatan padanan ngoko/krama di 245) dan bahasa Indonesia (39.966 entri, arti
+    berbahasa Inggris); **Wikikamus (id.wiktionary) bagian bahasa Jawa** (1.922 entri, 1.822 lema, 593 di antaranya
+    juga ada di sumber pertama; arti berbahasa INDONESIA, 942 contoh kalimat berterjemahan). Kamus Jawa jadi 5.888
+    entri / 4.415 lema; arti Indonesia didahulukan, dan kata Indonesia menemukan padanan Jawanya lewat pencarian balik
+    ("makan" -> mangan, dhahar, madhang). Wikikamus ditambahkan Claude 2026-10-05 untuk memenuhi permintaan kamus
+    (user belum menanggapi khusus): dump bertanggal 20261001 diurai `wikt_entries()` (cocok dengan pengurai riset di
+    1.835 dari 1.860 lema); dibuang: 47 bagian bertanda impor KBBI, arti yang hanya mengulang lemanya, dan "arti"
+    berejaan Jawa bertanda ê/é/è (halaman berjudul kata Indonesia: pijat -> pijêt). Dari Wikikamus TIDAK diambil ragam
+    dan ejaan aksara (label ragamnya bertentangan dengan Wiktionary Inggris di 11 dari 60 kata yang punya keduanya,
+    mis. dalan "krama inggil"; 3 dari 115 ejaan aksaranya salah); labelnya tetap tampil sebagai teks arti. Leksikon
+    pemulih é hanya memakai lema Wiktionary Inggris.
+    Pencarian (`DictionarySearch`): kolom turunan `lookup` (tanpa diakritik) dan `gloss_text`, LIKE biasa dan urutan
+    byte (`COLLATE "C"` di PostgreSQL) supaya sama di PostgreSQL dan SQLite. Satu kata dicari sebagai katanya (imbuhan
+    dengan tanda hubungnya: "-an"; kata ulang yang diketik berspasi "anak anak" = anak, dengan entri anak-anak
+    didahulukan; "-rumah" = rumah hanya bila "rumah" memang ada); beberapa kata = frasa utuh seperti diketik ("mau tak
+    mau", "ke- -an") lalu arti per kata; kutip pembungkus dibuang (`unquote()` memakai pola /u dan posesif: `trim()`
+    dengan daftar karakter non-ASCII memotong per BYTE dan pernah merusak "śrī" dan teks berawalan "—"); kueri dipotong
+    di 500 karakter; pencarian balik memakai bentuk kata seperti tersimpan di arti ("son-in-law") dan butuh >= 3
+    huruf; entri yang cocok lewat ejaan aksara tidak diulang di daftar balik; kode "U+A9B6" hanya milik kamus aksara;
+    leksikon tingkat tutur di halaman memakai bukti `SpeechLevel::classify()` yang sama dengan uraian.
+    **Aturan pembangun data yang lahir dari dua tinjauan 2026-10-05 (jangan dikembalikan):** romanisasi dibaca per
+    ENTRI dari kepala entrinya (satu halaman beraksara bisa memuat dua kata: ꦲꦗꦶ = haji dan aji), dengan "nyc/nyj"
+    hasil transliterasi otomatis ditulis "nc/nj" (jancuk, bukan janycuk); padanan ragam dibaca dari ARGUMEN templat
+    kepala (pasangan label-kata di `head`: ngoko, krama, krama ngoko, krama inggil, kawi, ngoko/krama lugu dan alus)
+    dan dari tabel "Javanese register set", bukan dari bentuk bertag hasil wiktextract (yang menempelkan "lugu/alus"
+    ke kata dan kehilangan kw=); "aksara, latin, ejaan lama" dalam satu ragam = SATU kata; ragam entri dari kepala
+    entri ("(krama)", "(krama, ngoko)") lalu dari kolom yang memuat kata itu, dan tanda kurung PERTAMA sesudah judul
+    beraksara adalah romanisasi, bukan label ("ꦏꦿꦩ (krama)" = kata "krama"); kata yang sama di ngoko dan krama =
+    krama-ngoko; catatan hanya memuat padanan di ragam LAIN, diromanisasi bila sumbernya memberi. Ejaan aksara entri
+    berjudul Latin: dari argumen j=/c= dan bentuk beraksara di halaman itu, HANYA bila `reads_as()` (pembanding kasar
+    aksara-Latin) menyatakannya terbaca sebagai kata itu; itu menolak ejaan salah tempel di sumber (ngétan <- ꦮꦺꦠꦤ꧀,
+    émah <- ꦲꦺꦴꦩꦃ, 7 entri) dan tidak menolak satu pun dari 2.831 ejaan yang sudah ada. Penunjuk "Carakan spelling
+    of" dikunci kata persisnya (enèm bukan enem); varian ejaan yang beda diakritik saja dari SATU kata yang
+    ditunjuknya mewarisi ejaan aksaranya. Sense bertag romanization yang teksnya "... spelling/form of X" adalah entri
+    varian (opo, sego, boekoe: 538 entri varian/penunjuk), dan judul penunjuk romanisasi yang tidak tercapai lewat
+    kata kepala (candi untuk candhi) mendapat entri kecil. Arti bersarang wiktextract dirangkai "induk: anak" (tanpa
+    itu sekitar 6.000 arti anak di 2.288 entri Indonesia hilang); induk yang lebih panjang dari 40 karakter (tanpa
+    labelnya) ditulis sekali dan anaknya menyusul dengan label induknya; sisa templat sumber ("{{place|...") dibuang.
+    Angka kecocokan `AksaraWriter` dihitung pada lema berejaan baku saja: entri varian ejaan ("asoe", "opo") memang
+    bukan ejaan baku (dengan semua entri beraksara angkanya 91,1%, dan itu bukan ukuran aturannya). Belum beres:
+    sekitar 28 kata tanpa ejaan aksara walau halaman beraksaranya ada (sumber tidak memasangkannya), 6 catatan masih
+    memuat padanan beraksara, dan kesalahan di sumber yang tidak terdeteksi pembanding kasar ikut terbawa.
+    `tests/Feature/DictionaryTest.php` mengimpor berkas jadi yang ikut repo dan memeriksa aturan-aturan ini pada
+    datanya, jadi bangun ulang yang merusaknya ketahuan di test.
     **Terukur 2026-10-05 dan JANGAN dilanggar:** KBBI (hak cipta Badan Bahasa, "seluruh isi KBBI Daring dilindungi Hak
     Cipta", tanpa rilis terbuka) dan Kateglo (96% definisinya teks KBBI III) tidak boleh disalin ke repo publik ini;
     Wikikamus (id.wiktionary) punya 71 ribu lema Indonesia tetapi 94% entrinya impor KBBI; kaikki edisi Indonesia tidak
@@ -353,7 +377,7 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     `phpunit.xml` memaksa SQLite in-memory (`force="true"`, jadi `DB_*` yang tertinggal di shell diabaikan) dan
     `tests/TestCase.php::createApplication` menolak database bernama `its_aksara` sebelum migrasi. Test memakai folder
     sementara untuk `storage/app/mt` (dulu `TranslationTest` menimpa hasil NLLB; dipulihkan dari DB lewat
-    `php artisan aksara:translate --dump`). 136 test lolos di SQLite dan di PostgreSQL uji (2026-10-05, sesudah perbaikan tinjauan kamus kata).
+    `php artisan aksara:translate --dump`). 137 test lolos di SQLite dan di PostgreSQL uji (2026-10-05, sesudah tinjauan kedua kamus kata dan sumber Wikikamus).
     **Port:** Laravel 8010, layanan model 8011, layanan terjemahan 8012 — 8000/8001 dipakai proyek lain
     milik user di laptop yang sama (jangan dihentikan). Test tetap bisa di SQLite in-memory
     (`phpunit.xml`); kode dijaga netral: `whereJsonContains` untuk tag, tabel turunan untuk ORDER BY berekspresi

@@ -75,7 +75,8 @@ class AksaraWriterTest extends TestCase
     {
         // Pembanding mandiri: ejaan aksara lema kamus bahasa Jawa (ditulis penyunting Wiktionary). Angka di kelas adalah
         // yang ditampilkan halaman Terjemahan, jadi harus persis; turun berarti aturan mundur, naik berarti angka belum diperbarui.
-        $same = $total = 0;
+        // Entri varian ejaan ("dated spelling of asu" untuk "asoe") tidak dihitung: ejaan Latinnya bukan ejaan baku.
+        $same = $total = $variants = 0;
         $seen = [];
         $handle = gzopen(__DIR__.'/../../database/dictionaries/jv.jsonl.gz', 'rb');
         while (($line = gzgets($handle)) !== false) {
@@ -85,6 +86,11 @@ class AksaraWriterTest extends TestCase
             if ($aksara === '' || str_contains($aksara, ' ') || ! preg_match('/^[\p{L}-]+$/u', $word) || isset($seen[$word."\t".$aksara])) {
                 continue;
             }
+            if (preg_match(AksaraWriter::SPELLING_VARIANT, $entry['glosses'][0])) {
+                $variants++;
+
+                continue;
+            }
             $seen[$word."\t".$aksara] = true;
             $total++;
             $same += (int) (AksaraWriter::fromLatin($word) === $aksara);
@@ -92,6 +98,7 @@ class AksaraWriterTest extends TestCase
         gzclose($handle);
 
         $this->assertSame(AksaraWriter::DICTIONARY_AGREEMENT, [$same, $total]);
+        $this->assertGreaterThan(100, $variants, 'entri varian ejaan harus dikenali, bukan ikut dihitung');
         $this->assertGreaterThan(0.97, $same / $total);
     }
 }

@@ -59,7 +59,8 @@ Cara menjalankan: bagian "Cara menjalankan" di `CLAUDE.md` dan `web/README.md`. 
 - Leksikon pemulih tanda é (`web/database/dictionaries/jv-taling.json`): daftar ejaan kata dari Wikipedia bahasa Jawa
   snapshot 20231101 (CC BY-SA 4.0).
 - Kamus kata halaman Kamus (`web/database/dictionaries/`): entri bahasa Jawa dan bahasa Indonesia dari Wiktionary
-  bahasa Inggris, lewat ekstraksi kaikki.org (wiktextract); CC BY-SA 4.0. Rincian di
+  bahasa Inggris, lewat ekstraksi kaikki.org (wiktextract), dan bagian bahasa Jawa Wikikamus (Wiktionary bahasa
+  Indonesia) untuk arti berbahasa Indonesia; CC BY-SA 4.0. Rincian di
   [`web/database/dictionaries/SUMBER.md`](web/database/dictionaries/SUMBER.md).
 - Antarmuka web: huruf Inter (SIL OFL 1.1, paket npm `inter-ui`) dan Tabler Icons (MIT). Lambang aplikasi
   (`web/resources/brand/logo.png`) disediakan pemilik repo.

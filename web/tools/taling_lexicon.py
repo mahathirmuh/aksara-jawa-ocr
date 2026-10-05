@@ -5,8 +5,9 @@ penerjemah, menulis keduanya "e". Tanpa pemulihan, separuh kata ber-e mendapat s
 
 Cara: Wikipedia bahasa Jawa menulis é/è secara eksplisit di banyak artikel. Dari artikel yang "bertanda kuat" (>= 10 é/è
 dan >= 30% dari semua huruf e), tiap kata dicatat bentuk bertandanya; kata masuk leksikon bila bentuk bertanda terbanyaknya
-muncul >= 2 kali dan menguasai >= 60% kemunculan kata itu. Lema kamus (jv.jsonl.gz) yang bertanda ditambahkan bila belum ada
-dan tidak punya kembaran tanpa tanda. Ketepatan diukur pada 20% artikel yang ditahan, lalu leksikon akhir dibangun dari semuanya.
+muncul >= 2 kali dan menguasai >= 60% kemunculan kata itu. Lema kamus (jv.jsonl.gz, sumber Wiktionary bahasa Inggris) yang
+bertanda ditambahkan bila belum ada, tidak punya kembaran tanpa tanda yang merupakan kata tersendiri, dan hanya ada satu
+bentuk bertandanya. Ketepatan diukur pada 20% artikel yang ditahan, lalu leksikon akhir dibangun dari semuanya.
 
 Butuh snapshot Wikipedia proyek (data/raw/jvwiki-20231101.parquet, dibuat `python -m src.corpus`) dan pyarrow.
 Pakai (dari akar repo): .venv/Scripts/python web/tools/taling_lexicon.py
@@ -23,6 +24,8 @@ import unicodedata
 MIN_TALING, MIN_RATIO = 10, .30     # artikel "bertanda kuat"
 MIN_COUNT, MIN_SHARE = 2, .60       # syarat kata masuk leksikon
 WORD = re.compile(r'[a-zéè]+')
+# Arti entri yang hanya menunjuk ejaan lain: "nonstandard form of akèh, ...", "romanization of ꦕꦤ꧀ꦝꦶ (candhi)".
+POINTER = re.compile(r'(?:\([^()]*\) )?(?:(?:\w+ )?(?:spelling|form) of |romanization of )')
 
 
 def bare(word: str) -> str:
@@ -90,12 +93,24 @@ def main() -> None:
     lemmas = set()
     with gzip.open(args.dictionary, 'rt', encoding='utf-8') as handle:
         for line in handle:
-            lemma = unicodedata.normalize('NFC', json.loads(line)['word']).lower().replace('ê', 'e')
-            if WORD.fullmatch(lemma):
+            entry = json.loads(line)
+            # Hanya lema Wiktionary bahasa Inggris: ejaannya menandai é/è secara taat asas. Lema Wikikamus sering ditulis
+            # tanpa tanda (sore, kowe), dan itu bukan bukti bahwa kata tak bertanda itu kata lain.
+            if entry.get('source') != 'enwiktionary':
+                continue
+            lemma = unicodedata.normalize('NFC', entry['word']).lower().replace('ê', 'e')
+            # Entri tanpa tanda yang hanya menunjuk ejaan lain ("akeh: nonstandard form of akèh") bukan kata tersendiri,
+            # jadi tidak menghalangi bentuk bertandanya.
+            if WORD.fullmatch(lemma) and not (lemma == bare(lemma) and all(POINTER.match(gloss) for gloss in entry['glosses'])):
                 lemmas.add(lemma)
-    for lemma in sorted(lemmas):
-        if lemma != bare(lemma) and bare(lemma) not in lemmas:
-            words.setdefault(bare(lemma), lemma)
+    marked: dict[str, set[str]] = collections.defaultdict(set)
+    for lemma in lemmas:
+        if lemma != bare(lemma):
+            marked[bare(lemma)].add(lemma)
+    for key, forms in sorted(marked.items()):
+        # Dua bentuk bertanda untuk satu ejaan polos (jené, jéné) = tidak bisa dipulihkan tanpa konteks.
+        if key not in lemmas and len(forms) == 1:
+            words.setdefault(key, next(iter(forms)))
 
     meta = {
         'source': 'Wikipedia bahasa Jawa, snapshot 20231101 (CC BY-SA 4.0) + lema kamus Wiktionary (CC BY-SA 4.0)',

@@ -12,7 +12,7 @@
     <section class="card">
         <div class="card-body flex flex-col gap-3">
             <flux:input wire:model.live.debounce.300ms="q" id="kamus-q" type="search" icon="ti-search" autocomplete="off"
-                        aria-label="Cari di kamus"
+                        aria-label="Cari di kamus" maxlength="{{ \App\Livewire\Pages\Kamus::MAX_QUERY }}"
                         placeholder="Cari kata Jawa atau Indonesia, nama atau kode aksara; bisa juga menempel aksara (mis. omah, rumah, wulu, U+A9B6, {{ mb_chr(0xA98F).mb_chr(0xA9B6) }})" />
 
             @if ($probe)

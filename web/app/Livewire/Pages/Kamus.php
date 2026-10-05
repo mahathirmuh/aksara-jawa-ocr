@@ -47,6 +47,9 @@ class Kamus extends Component
 
     private const MAX_SHOWN = 200;
 
+    /** Kueri lebih panjang dari ini dipotong: satu baris teks tidak sepanjang itu, dan pola pencarian tidak perlu memuatnya. */
+    public const MAX_QUERY = 500;
+
     #[Url(as: 'q', except: '')]
     public string $q = '';
 
@@ -70,7 +73,7 @@ class Kamus extends Component
     {
         $catalog = AksaraCatalog::load();
         $counts = AksaraCatalog::countIn(Line::pluck('reference'));
-        $query = trim($this->q);
+        $query = mb_substr(trim($this->q), 0, self::MAX_QUERY);
         $needle = mb_strtolower($query);
         $aksaraQuery = AksaraCatalog::hasJavanese($query);
         $latin = $aksaraQuery ? Transliterator::toLatin($query) : $query;
@@ -81,11 +84,13 @@ class Kamus extends Component
                 ? mb_strpos($query, $e['char']) !== false
                 : str_contains($e['name'], $needle) || $e['latin'] === $needle || str_contains(mb_strtolower($e['code']), $needle)));
 
-        // Leksikon: satu kata dicari sebagai bagian kata penanda; beberapa kata (atau aksara yang ditempel, lewat bacaan
-        // Latin drafnya) menampilkan penanda yang memang ada di teks itu, sama dengan yang dihitung di uraian.
-        $terms = array_map(DictionaryEntry::normalize(...), DictionarySearch::words($latin, PHP_INT_MAX));
-        $marker = fn (string $w): bool => $needle === ''
-            || (count($terms) > 1 ? in_array($w, $terms, true) : $terms !== [] && str_contains($w, $terms[0]));
+        // Leksikon: penanda yang ditemukan di teks itu (sumber yang sama dengan uraian, jadi teks tanpa spasi dan kata
+        // bertanda hubung ikut); satu kata juga dicari sebagai bagian kata penanda.
+        $speech = $query === '' ? null : SpeechLevel::classify($latin);
+        $evidence = array_column($speech['evidence'] ?? [], 0);
+        $terms = array_map(DictionaryEntry::normalize(...), DictionarySearch::words($latin, 2));
+        $marker = fn (string $w): bool => $needle === '' || in_array($w, $evidence, true)
+            || (count($terms) === 1 && str_contains($w, $terms[0]));
         $lexicon = collect(SpeechLevel::lexicon())->map(fn (array $words) => collect($words)->filter($marker)->values());
 
         return view('livewire.pages.kamus', [
@@ -99,7 +104,7 @@ class Kamus extends Component
             'unspaced' => Line::whereJsonContains('tags', 'label tanpa spasi')->count(),
             'lexicon' => $lexicon,
             'lexiconTotal' => collect(SpeechLevel::lexicon())->map(fn (array $words) => count($words)),
-            'probe' => $query === '' ? null : $this->probe($query, $latin, $aksaraQuery, collect($catalog['entries'])->keyBy('char')),
+            'probe' => $query === '' ? null : $this->probe($query, $latin, $aksaraQuery, collect($catalog['entries'])->keyBy('char'), $speech),
             'dictionaries' => $this->dictionaries($query, $latin, $aksaraQuery),
             'lm' => $this->languageModels(),
             'official' => Pipeline::official(),
@@ -110,7 +115,7 @@ class Kamus extends Component
      * Uraian teks yang dicari: aksara diurai per codepoint dan ditransliterasikan (draf); teks Latin dicocokkan
      * dengan leksikon tingkat tutur.
      */
-    private function probe(string $query, string $latin, bool $aksara, $byChar): array
+    private function probe(string $query, string $latin, bool $aksara, $byChar, array $speech): array
     {
         return [
             'aksara' => $aksara,
@@ -118,7 +123,7 @@ class Kamus extends Component
             'chars' => $aksara
                 ? collect(mb_str_split($query))->map(fn (string $ch) => $byChar->get($ch) ?? ['char' => $ch, 'name' => aksara_name($ch), 'code' => sprintf('U+%04X', mb_ord($ch))])->all()
                 : [],
-            'speech' => SpeechLevel::classify($latin),
+            'speech' => $speech,
         ];
     }
 
@@ -155,16 +160,28 @@ class Kamus extends Component
                 $state['found'] = collect($state['rows'])->filter(fn (array $row) => $row['entries']->isNotEmpty())->count() + ($state['phrase']->isNotEmpty() ? 1 : 0);
             } else {
                 $state['mode'] = 'search';
-                // Yang dicari teks seperti diketik (imbuhan "-an" tetap bertanda hubung); `term` = katanya saja, untuk tautan KBBI.
+                // Yang dicari katanya (imbuhan "-an" tetap bertanda hubung; "kupu kupu" dan "- rumah" = satu kata); kata itu
+                // juga yang ditautkan ke KBBI. Ejaan aksara dicocokkan tanpa tanda kutip dan pada di tepinya.
                 $state['term'] = $code ? '' : ($words[0] ?? '');
-                $spelling = $aksara && $key === 'jv' ? (Normalizer::normalize($query, Normalizer::FORM_C) ?: $query) : null;
-                $state += DictionarySearch::search($key, $code ? '' : $clean, $state['limit'], $spelling);
+                $spelling = $aksara && $key === 'jv' ? self::spelling($query) : null;
+                // Kata ulang yang diketik berspasi ("anak anak"): entri bertanda hubungnya (anak-anak) didahulukan.
+                $tokens = preg_split('/\s+/u', $clean, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                $state += DictionarySearch::search($key, $code ? '' : ($words[0] ?? $clean), $state['limit'], $spelling,
+                    count($tokens) > 1 ? implode('-', $tokens) : null);
                 $state['found'] = $state['total'] + $state['reverse_total'];
             }
             $out[$key] = $state;
         }
 
         return $out;
+    }
+
+    /** Aksara yang ditempel sebagai ejaan yang dicocokkan: NFC, tanpa tanda kutip pembungkus dan tanpa pada di tepinya. */
+    private static function spelling(string $query): string
+    {
+        $text = DictionarySearch::unquote(Normalizer::normalize($query, Normalizer::FORM_C) ?: $query);
+
+        return preg_replace('/^[\s\x{A9C1}-\x{A9CF}]+|[\s\x{A9C1}-\x{A9CF}]+$/u', '', $text) ?? $text;
     }
 
     /**
