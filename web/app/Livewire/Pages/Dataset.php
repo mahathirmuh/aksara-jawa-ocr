@@ -6,8 +6,10 @@ use App\Models\DatasetReport;
 use App\Models\DictionarySource;
 use App\Models\Line;
 use App\Models\LineAnnotation;
+use App\Models\MethodReport;
 use App\Models\Pipeline;
 use App\Support\TalingRestorer;
+use Illuminate\Support\Collection;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -16,8 +18,9 @@ use Livewire\Component;
  * Halaman Dataset: daftar dataset, pembagian latih/validasi/uji, pemakaian oleh run resmi, font per peran, batasan.
  *
  * Semua angka data OCR datang dari kartu data buatan Python (scripts/export_datasets.py, diimpor
- * `php artisan aksara:datasets`); di sini hanya disusun untuk tampilan. Data pendukung milik web (kamus kata,
- * leksikon, anotasi) dihitung dari tabel web sendiri.
+ * `php artisan aksara:datasets`); di sini hanya disusun untuk tampilan. Kalimat yang bergantung pada isi kartu
+ * (rantai run, seed, batasan) dipilih dari nilai kartu, supaya tetap benar untuk kartu run lain. Data pendukung milik
+ * web dihitung dari tabel web (kamus kata, anotasi) dan dari berkas leksikon é.
  */
 #[Layout('components.layouts.app')]
 #[Title('Dataset')]
@@ -30,60 +33,85 @@ class Dataset extends Component
     public const PARTS = [
         'train' => ['Latih', 'Bahan belajar. Model melihat baris ini, dirender menjadi citra, lalu memperbaiki dirinya. Ibarat buku latihan soal.'],
         'val' => ['Validasi', 'Dicek berkala selama training; model tidak belajar darinya. Dipakai memantau training dan menyetel pengaturan. Ibarat try-out.'],
-        'test' => ['Uji', 'Disimpan sampai akhir, hanya untuk angka yang dilaporkan. Ibarat ujian akhir.'],
+        'test' => ['Uji', 'Tidak pernah dilatihkan. Dipakai untuk angka yang dilaporkan. Ibarat ujian akhir.'],
     ];
 
-    private const FONT_GROUPS = ['core' => 'inti', 'extra' => 'tambahan', 'test' => 'uji', 'review' => 'meragukan', 'rejected' => 'ditolak'];
+    /** Kenapa sekelompok font tidak dipakai run resmi. */
+    private const UNUSED_FONTS = [
+        'core' => 'Font inti yang tidak dipakai run resmi',
+        'extra' => 'Font tambahan yang tidak dipakai run resmi',
+        'review' => 'Tidak dipakai karena meragukan',
+        'rejected' => 'Tidak dipakai karena ditolak',
+    ];
 
     public function render()
     {
-        $report = DatasetReport::current();
+        return view('livewire.pages.dataset', self::viewData(DatasetReport::current()));
+    }
+
+    /**
+     * Data tampilan untuk sebuah kartu. Dipakai halaman ini dan impor kartu (DatasetImporter merendernya sekali
+     * sebelum menyimpan, supaya kartu yang tidak bisa ditampilkan ditolak saat impor).
+     */
+    public static function viewData(?DatasetReport $report): array
+    {
         if (! $report) {
-            return view('livewire.pages.dataset', ['report' => null]);
+            return ['report' => null];
         }
         $card = $report->payload;
-        $train = $card['usage']['train'];
         $fonts = collect($card['fonts']);
         $trainFonts = $fonts->filter(fn ($f) => in_array('train', $f['roles'], true));
         $testFonts = $fonts->filter(fn ($f) => in_array('test', $f['roles'], true));
         $datasets = collect($card['datasets']);
+        $trainLines = $card['splits'][0]['lines'];
+        $seen = $card['lineage']['distinct_lines'];
 
-        return view('livewire.pages.dataset', [
+        return [
             'report' => $report,
             'card' => $card,
-            'train' => $train,
-            'stale' => $this->stale($card),
-            'tiles' => $this->tiles($card, $datasets, $trainFonts, $testFonts),
-            'parts' => $this->parts($card, $testFonts),
-            'funnel' => $this->funnel($card['corpus']),
-            'histogram' => $this->histogram($card['corpus']),
+            'stale' => self::stale($card),
+            'tiles' => self::tiles($card, $datasets, $trainFonts, $testFonts),
+            'parts' => self::parts($card, $testFonts),
+            'footer' => self::footer($card, $trainLines),
+            'funnel' => self::funnel($card['corpus']),
+            'histogram' => self::histogram($card['corpus']),
             'runs' => array_map(fn ($run) => $run + ['recipe' => self::recipe($run), 'official' => $run['run'] === $card['official']['run']],
                 $card['lineage']['runs']),
-            'trainLines' => $card['splits'][0]['lines'],
-            'datasets' => $datasets->map(fn ($d) => ['roles' => self::byRole($d['roles'])] + $d),
+            'chainIntro' => self::chainIntro($card, $trainLines),
+            'seenShare' => $seen !== null && $trainLines ? $seen / $trainLines : null,
+            'datasets' => $datasets->map(fn ($d) => [
+                'roles' => self::byRole($d['roles']),
+                'link' => preg_match('#^https?://#i', (string) ($d['source_url'] ?? '')) ? $d['source_url'] : null,
+                'waiting' => self::waiting($d),
+            ] + $d),
             'usedFonts' => $fonts->filter(fn ($f) => $f['roles'])->map(fn ($f) => $f + ['remarks' => self::remarks($f)])->values(),
-            'unusedFonts' => $fonts->reject(fn ($f) => $f['roles'])->groupBy(fn ($f) => self::FONT_GROUPS[$f['group']] ?? $f['group']),
-            'limits' => $this->limits($card, $datasets, $trainFonts),
-            'support' => $this->support($card),
-        ]);
+            'unusedFonts' => self::unusedFonts($fonts),
+            'limits' => self::limits($card, $datasets, $trainFonts),
+            'support' => self::support($card),
+        ];
     }
 
-    /** Kartu data dihitung untuk run lain daripada pipeline resmi web sekarang: pemakaiannya tidak lagi berlaku. */
-    private function stale(array $card): ?array
+    /**
+     * Kartu data dan hasil OCR yang diimpor dihitung untuk run yang berbeda: pemakaian di halaman ini bukan milik
+     * pipeline resmi web. Kalimatnya tidak menebak sisi mana yang tertinggal (kartu bisa lebih baru daripada hasil,
+     * atau sebaliknya). Kartu untuk run yang tidak dikenal ekspor hasil (kunci pipeline kosong) juga tidak cocok.
+     */
+    private static function stale(array $card): ?array
     {
         $official = Pipeline::official();
-        $key = $card['official']['pipeline'] ?? null;
-        if (! $official || ! $key || $official->key === $key) {
+        if (! $official || $official->key === ($card['official']['pipeline'] ?? null)) {
             return null;
         }
 
         return ['run' => $card['official']['run'], 'official' => $official->label];
     }
 
-    private function tiles(array $card, $datasets, $trainFonts, $testFonts): array
+    private static function tiles(array $card, Collection $datasets, Collection $trainFonts, Collection $testFonts): array
     {
         $corpus = $card['corpus'];
-        $real = $datasets->first(fn ($d) => isset($d['roles']['test']) && $d['key'] !== 'corpus');
+        $real = $datasets->filter(fn ($d) => $d['key'] !== 'corpus');
+        $tested = $real->first(fn ($d) => isset($d['roles']['test']));
+        $trained = (int) $real->sum(fn ($d) => $d['roles']['train'] ?? 0);
         $extra = $trainFonts->where('group', 'extra')->count();
         // Rasio rancangan = keranjang hash id artikel per bagian; porsi menurut jumlah baris sedikit berbeda.
         $buckets = array_map(fn ($split) => $corpus['split_buckets'][$split['key']] ?? round($split['share'] * 100), $card['splits']);
@@ -95,16 +123,17 @@ class Dataset extends Component
             ['icon' => 'ti-chart-pie', 'title' => 'Pembagian', 'value' => implode(' / ', $buckets), 'note' => '% artikel',
                 'hint' => 'Latih / validasi / uji. Menurut jumlah baris '.implode(' / ', $shares).'% · teks yang sama di dua bagian: '
                     .nfmt($corpus['leaked_lines']).' baris'],
-            ['icon' => 'ti-scan', 'title' => 'Data nyata', 'value' => nfmt($card['usage']['real']['lines']), 'note' => 'baris cetak',
-                'hint' => ($real && isset($real['pages']) ? nfmt($real['pages']).' halaman pindaian · ' : '').'semuanya untuk uji, tidak untuk latih'],
+            ['icon' => 'ti-scan', 'title' => 'Data nyata', 'value' => nfmt($card['usage']['real']['lines']), 'note' => 'baris uji',
+                'hint' => ($tested && isset($tested['pages']) ? nfmt($tested['pages']).' halaman pindaian · ' : '')
+                    .($trained ? nfmt($trained).' baris nyata lain dipakai melatih' : 'semuanya untuk uji, tidak untuk latih')],
             ['icon' => 'ti-typography', 'title' => 'Font latih', 'value' => nfmt($trainFonts->count()), 'note' => 'font',
                 'hint' => nfmt($trainFonts->count() - $extra).' inti + '.nfmt($extra).' tambahan · font uji: '
                     .($testFonts->pluck('file')->map(fn ($f) => pathinfo($f, PATHINFO_FILENAME))->join(', ') ?: 'tidak ada')],
         ];
     }
 
-    /** Tiga bagian korpus: besar, arti, dan seberapa banyak yang dipakai run resmi. */
-    private function parts(array $card, $testFonts): array
+    /** Tiga bagian korpus: besar, arti, dan seberapa banyak yang dipakai run resmi (null = tidak dihitung). */
+    private static function parts(array $card, Collection $testFonts): array
     {
         $usage = $card['usage'];
         $train = $usage['train'];
@@ -112,15 +141,31 @@ class Dataset extends Component
         $fontNames = $testFonts->pluck('file')->map(fn ($f) => pathinfo($f, PATHINFO_FILENAME))->join(', ') ?: 'font uji';
         $gates = implode(' dan ', array_column($usage['test']['gates'], 'code'));
         $checks = count($usage['val']['steps']);
+        $quick = $usage['test']['quick'] ?? 0;
+        $full = $usage['test']['full'] ?? 0;
+        $others = array_filter([
+            $quick ? nfmt($quick).' tes cepat penentu arah (sampai '.nfmt($usage['test']['quick_max_lines'] ?? 0).' baris pertama)' : null,
+            $full ? nfmt($full).' evaluasi penuh untuk run lain' : null,
+        ]);
+        // Sampel = baris di semua batch; batch terakhir sebuah kelompok panjang bisa lebih kecil dari ukuran batch.
+        $samples = $train['samples'] === $train['steps'] * $train['batch_size']
+            ? nfmt($train['steps']).' langkah × '.$train['batch_size'].' = '.nfmt($train['samples']).' sampel'
+            : nfmt($train['steps']).' langkah, '.nfmt($train['samples']).' sampel';
+
         $used = [
-            'train' => [$train['distinct_lines'], 'baris dijadwalkan run '.$run,
-                'Dari kumpulan '.nfmt($train['pool']).' baris acak (seed '.$train['seed'].'): '.nfmt($train['steps']).' langkah × '
-                .$train['batch_size'].' = '.nfmt($train['samples']).' sampel. Tiap baris dirender dengan font, ukuran, dan augmentasi acak.'],
-            'val' => [$usage['val']['lines'], 'baris pertama, tiap pemeriksaan',
-                ($checks ? 'Diperiksa '.$checks.' kali (langkah '.implode(', ', array_map('nfmt', $usage['val']['steps'])).')' : 'Diperiksa berkala')
-                .' dengan '.$usage['val']['fonts'].' font inti, tanpa augmentasi.'],
+            'train' => $train['distinct_lines'] === null
+                ? [null, 'baris sintetis: tidak dihitung', 'Run '.$run.' dilatih dengan data nyata atau dalam mode menghafal, jadi jadwal baris sintetisnya tidak dihitung.']
+                : [$train['distinct_lines'], 'baris dijadwalkan run '.$run,
+                    'Dari kumpulan '.nfmt($train['pool']).' baris acak (seed '.$train['seed'].'): '.$samples
+                    .'. Tiap baris dirender dengan font, ukuran, dan augmentasi acak.'],
+            'val' => ($train['real_val'] ?? false)
+                ? [null, 'tidak dipakai run '.$run, 'Run ini divalidasi dengan data nyata, bukan dengan bagian ini.']
+                : [$usage['val']['lines'], 'baris pertama, tiap pemeriksaan',
+                    ($checks ? 'Diperiksa '.$checks.' kali (langkah '.implode(', ', array_map('nfmt', $usage['val']['steps'])).')' : 'Diperiksa berkala')
+                    .' dengan '.$usage['val']['fonts'].' font inti, tanpa augmentasi.'],
             'test' => [$usage['test']['lines'], 'baris pertama untuk '.($gates ?: 'gerbang sintetis'),
-                'Dirender dengan '.$fontNames.'; baris yang sama untuk kedua gerbang.'],
+                'Dirender dengan '.$fontNames.'; baris yang sama untuk tiap gerbang.'
+                .($others ? ' Di luar gerbang resmi, '.implode(' dan ', $others).' juga membaca bagian ini.' : '')],
         ];
 
         return array_map(function ($split) use ($used) {
@@ -129,13 +174,27 @@ class Dataset extends Component
             return [
                 'key' => $split['key'], 'label' => self::PARTS[$split['key']][0], 'meaning' => self::PARTS[$split['key']][1],
                 'lines' => $split['lines'], 'share' => $split['share'], 'used' => $lines, 'caption' => $caption, 'detail' => $detail,
-                'used_share' => $split['lines'] ? min(1, $lines / $split['lines']) : 0,
+                'used_share' => $lines !== null && $split['lines'] ? min(1, $lines / $split['lines']) : null,
             ];
         }, $card['splits']);
     }
 
+    /** Kenapa bukan 80/20: angkanya dari kartu, dan kalimat "baru sekian persen yang dilihat" hanya bila memang begitu. */
+    private static function footer(array $card, int $trainLines): string
+    {
+        $seen = $card['lineage']['distinct_lines'];
+        $text = 'Kenapa bukan 80/20 atau 70/15/15? Rasio itu untuk data berjumlah ribuan. Di sini bagian uji saja sudah '
+            .nfmt($card['splits'][2]['lines']).' baris, padahal gerbang hanya memakai '.nfmt($card['usage']['test']['lines']);
+        if ($seen !== null && $trainLines && $seen < $trainLines) {
+            $text .= ', dan sepanjang rantai run resmi baru '.pct($seen / $trainLines).' bagian latih yang pernah dilihat';
+        }
+
+        return $text.'. Membagi ulang juga memindahkan teks yang sudah dilatih ke bagian uji, sehingga angka lama tidak bisa lagi '
+            .'dibandingkan dengan yang baru.';
+    }
+
     /** Dari artikel ke baris korpus: tiap langkah pembangunan dengan jumlahnya. */
-    private function funnel(array $corpus): array
+    private static function funnel(array $corpus): array
     {
         $rows = [
             ['Artikel Wikipedia bahasa Jawa', nfmt($corpus['articles']), null],
@@ -153,7 +212,7 @@ class Dataset extends Component
         return $rows;
     }
 
-    private function histogram(array $corpus): array
+    private static function histogram(array $corpus): array
     {
         $max = max(1, ...array_column($corpus['length_histogram'], 'lines'));
 
@@ -161,6 +220,30 @@ class Dataset extends Component
             'range' => str_replace('-', '–', $bin['range']), 'lines' => $bin['lines'],
             'share' => $corpus['lines'] ? $bin['lines'] / $corpus['lines'] : 0, 'width' => round($bin['lines'] / $max * 100, 2),
         ], $corpus['length_histogram']);
+    }
+
+    /** Kalimat pembuka tabel rantai, dipilih dari isi kartu: jumlah run, kelengkapan rantai, seed, dan porsi terlihat. */
+    private static function chainIntro(array $card, int $trainLines): string
+    {
+        $runs = $card['lineage']['runs'];
+        $before = count($runs) - 1;
+        $run = $card['official']['run'];
+        $complete = $card['lineage']['complete'];
+        $text = match (true) {
+            $before > 0 => 'Checkpoint '.$run.' melanjutkan bobot '.($complete ? '' : 'sedikitnya ').$before.' run sebelumnya.',
+            $complete => 'Checkpoint '.$run.' dilatih dalam satu run, dari bobot acak.',
+            default => 'Checkpoint '.$run.' melanjutkan run lain yang checkpoint-nya sudah tidak ada.',
+        };
+        $seeds = array_values(array_unique(array_column($runs, 'seed')));
+        if ($before > 0) {
+            $text .= count($seeds) === 1
+                ? ' Semua run mengambil barisnya dari kumpulan acak yang sama (seed '.$seeds[0].').'
+                : ' Run-run itu memakai seed yang berbeda, jadi kumpulan barisnya tidak sama.';
+        }
+        $seen = $card['lineage']['distinct_lines'];
+
+        return $text.($seen === null || ! $trainLines ? ' Jumlah baris berbeda di sepanjang rantai tidak dihitung.'
+            : ' Sepanjang rantai, model melihat '.pct($seen / $trainLines).' bagian latih.');
     }
 
     /**
@@ -179,6 +262,16 @@ class Dataset extends Component
         return $ordered + $values;
     }
 
+    /** Baris sebuah dataset yang masih menunggu verifikasi (0 bila tidak ada atau bukan dataset yang menunggu). */
+    private static function waiting(array $dataset): int
+    {
+        if (($dataset['status'] ?? '') !== 'pending') {
+            return 0;
+        }
+
+        return (int) ($dataset['pending'] ?? max(0, $dataset['count'] - ($dataset['verified'] ?? 0)));
+    }
+
     /** Resep data sebuah run di rantai checkpoint, dari argumen training di checkpoint-nya. */
     private static function recipe(array $run): string
     {
@@ -192,6 +285,9 @@ class Dataset extends Component
         if ($run['rare_insert_prob'] > 0 || $run['rare_opener_prob'] > 0) {
             $parts[] = 'sisipan aksara langka';
         }
+        if ($run['real_train'] ?? false) {
+            $parts[] = 'data nyata ikut dilatih';
+        }
 
         return implode(' · ', $parts);
     }
@@ -200,14 +296,14 @@ class Dataset extends Component
     private static function remarks(array $font): array
     {
         $remarks = [];
-        $shared = $font['shared_with_test'] ?? null;
-        if ($shared && $shared['family']) {
+        $shared = $font['shared_with_test'] ?? [];
+        if (($shared['family'] ?? false) && isset($shared['font'], $shared['same'], $shared['of'])) {
             $remarks[] = 'Sekeluarga dengan font uji '.pathinfo($shared['font'], PATHINFO_FILENAME).': lebar '
                 .$shared['same'].' dari '.$shared['of'].' aksara, angka, dan pada persis sama.';
         }
         if ($font['missing'] ?? []) {
             $remarks[] = 'Tidak punya '.implode(', ', array_map(
-                fn ($code) => $code.' ('.aksara_name(mb_chr(hexdec(substr($code, 2)))).')', $font['missing'])).'.';
+                fn ($code) => $code.' ('.aksara_name(mb_chr(hexdec(substr((string) $code, 2)))).')', $font['missing'])).'.';
         }
         if ($font['drops_space'] ?? false) {
             $remarks[] = 'Spasinya nyaris tak tampak, jadi spasi selalu dibuang dari teks dan label.';
@@ -216,62 +312,84 @@ class Dataset extends Component
             $remarks[] = 'Berkasnya tidak ditemukan saat ekspor.';
         }
 
-        return array_merge($remarks, $font['notes'] ?? []);
+        return array_merge($remarks, array_map('strval', $font['notes'] ?? []));
     }
 
-    /** Batasan data, hanya yang syaratnya terpenuhi di kartu data (hilang sendiri begitu datanya diperbaiki). */
-    private function limits(array $card, $datasets, $trainFonts): array
+    /** Font yang tidak dipakai run resmi, per alasan, dengan catatan pemeriksaannya ditulis terlihat. */
+    private static function unusedFonts(Collection $fonts): array
+    {
+        return $fonts->reject(fn ($f) => $f['roles'])->groupBy('group')->map(fn ($items, $group) => [
+            'label' => self::UNUSED_FONTS[$group] ?? 'Tidak dipakai ('.$group.')',
+            'fonts' => $items->map(function ($font) {
+                // "MERAGUKAN: susun-3 bertabrakan" -> "susun-3 bertabrakan": labelnya sudah ada di kalimat.
+                $reason = trim((string) preg_replace('/^[A-Z ]+:\s*/u', '', (string) ($font['review'] ?? '')));
+
+                return pathinfo($font['file'], PATHINFO_FILENAME).($reason !== '' ? ' ('.$reason.')' : '');
+            })->values()->all(),
+        ])->values()->all();
+    }
+
+    /** Batasan data, hanya yang syaratnya terpenuhi di kartu data. */
+    private static function limits(array $card, Collection $datasets, Collection $trainFonts): array
     {
         $limits = [];
-        $twin = $trainFonts->first(fn ($f) => $f['shared_with_test']['family'] ?? false);
+        $twin = $trainFonts->first(fn ($f) => ($f['shared_with_test']['family'] ?? false) && isset($f['shared_with_test']['font']));
         if ($twin) {
             $shared = $twin['shared_with_test'];
             $gates = implode(' dan ', array_column($card['usage']['test']['gates'], 'code')) ?: 'Gerbang sintetis';
             $limits[] = ['Font uji bukan font yang benar-benar baru',
                 'Font uji '.pathinfo($shared['font'], PATHINFO_FILENAME).' sekeluarga dengan font latih '.pathinfo($twin['file'], PATHINFO_FILENAME)
-                .': lebar '.$shared['same'].' dari '.$shared['of'].' aksara, angka, dan pada persis sama. '.$gates
+                .': lebar '.($shared['same'] ?? '?').' dari '.($shared['of'] ?? '?').' aksara, angka, dan pada persis sama. '.$gates
                 .' karena itu mengukur generalisasi di dalam satu keluarga huruf, bukan ke huruf yang belum pernah dilihat model.'];
         }
 
         $real = $datasets->filter(fn ($d) => $d['key'] !== 'corpus');
         $tested = $real->first(fn ($d) => isset($d['roles']['test']));
         if ($tested && ! $real->contains(fn ($d) => isset($d['roles']['val']))) {
-            $pending = $real->first(fn ($d) => ($d['status'] ?? '') === 'pending');
+            $reports = $card['usage']['real']['reports'] ?? 0;
+            $pending = $real->first(fn ($d) => self::waiting($d) > 0);
             $limits[] = ['Data nyata tidak punya bagian validasi',
-                'Semua '.nfmt($tested['count']).' baris nyata masuk bagian uji. Keputusan seperti memilih run resmi ikut melihat data uji, '
-                .'jadi angka G3 sedikit terlalu bagus. Data itu tidak dibelah karena sebagian besar halamannya dari satu majalah dengan '
-                .'huruf yang sama: membaginya per halaman akan membocorkan bentuk huruf ke bagian uji.'
-                .($pending ? ' Perbaikannya butuh data nyata lain untuk latih dan validasi: '.nfmt($pending['count'])
-                    .' baris '.mb_strtolower(mb_substr($pending['name'], 0, 1)).mb_substr($pending['name'], 1).' masih menunggu verifikasi pembaca aksara.' : '')];
+                'Semua '.nfmt($tested['count']).' baris '.$tested['name'].' dipakai sebagai data uji, dan tidak ada data nyata untuk validasi. '
+                .'Keputusan seperti memilih run resmi ikut melihat data uji, jadi angka G3 sedikit terlalu bagus'
+                .($reports > 1 ? ' (data itu sudah dievaluasi '.nfmt($reports).' kali sepanjang proyek)' : '').'.'
+                // Catatan proyek tentang NusaAksara (CLAUDE.md, keputusan 2026-09-13), bukan nilai kartu.
+                .($tested['key'] === 'nusaaksara' ? ' Data itu tidak dibelah karena sebagian besar halamannya berasal dari satu terbitan dengan '
+                    .'huruf yang sama: membaginya per halaman akan membocorkan bentuk huruf ke bagian uji.' : '')
+                .($pending ? ' Perbaikannya butuh data nyata lain untuk latih dan validasi: '.nfmt(self::waiting($pending)).' baris '
+                    .mb_strtolower(mb_substr($pending['name'], 0, 1)).mb_substr($pending['name'], 1).' masih menunggu verifikasi pembaca aksara.' : '')];
         }
 
+        // Sisipan aksara langka saat render adalah obat keterbatasan ini: bila run resmi memakainya, batasannya tidak berlaku.
         $rare = $card['rare'];
-        if ($rare['codepoints'] > 0 && ($rare['scheduled_lines'] ?? [])) {
+        $train = $card['usage']['train'];
+        $inserted = ($train['rare_insert_prob'] ?? 0) > 0 || ($train['rare_opener_prob'] ?? 0) > 0;
+        $seen = $rare['scheduled_lines'] ?? [];
+        if ($rare['codepoints'] > 0 && ! $inserted && $train['distinct_lines'] !== null && isset($seen['min'], $seen['max'], $seen['mean'])) {
             $each = $rare['train_lines'];
-            $seen = $rare['scheduled_lines'];
+            $trial = collect(MethodReport::current()?->payload['groups'] ?? [])->flatMap(fn ($g) => $g['methods'] ?? [])->contains('key', 'rare');
             $limits[] = ['Aksara langka nyaris tidak terlihat saat training',
                 nfmt($rare['codepoints']).' dari '.nfmt($rare['javanese']).' karakter aksara Jawa di charset ada di '
-                .($each['min'] === $each['max'] ? 'hanya '.nfmt($each['max']) : nfmt($each['min']).'–'.nfmt($each['max']))
+                .(($each['min'] ?? null) === ($each['max'] ?? null) ? 'hanya '.nfmt($each['max'] ?? 0) : nfmt($each['min'] ?? 0).'–'.nfmt($each['max'] ?? 0))
                 .' baris latih masing-masing: aksara murda dan mahaprana, aksara swara, beberapa sandhangan dan pada. Di antara '
-                .nfmt($card['usage']['train']['distinct_lines'])
-                .' baris yang dijadwalkan run resmi, tiap karakter itu muncul di '.nfmt($seen['min']).'–'.nfmt($seen['max'])
-                .' baris, rata-rata '.self::dec($seen['mean'], 1).'. Model resmi karena itu hampir tidak pernah mengeluarkannya.'];
+                .nfmt($train['distinct_lines']).' baris yang dijadwalkan run resmi, tiap karakter itu muncul di '.nfmt($seen['min']).'–'.nfmt($seen['max'])
+                .' baris, rata-rata '.self::dec($seen['mean'], 1).'.'
+                .($trial ? ' Sisipan aksara langka saat render sudah diuji; hasilnya ada di halaman Metode.' : '')];
         }
 
         return $limits;
     }
 
-    /** Data pendukung: milik repo OCR (dari kartu data) lalu milik web (dihitung dari tabel web). */
-    private function support(array $card): array
+    /** Data pendukung: milik repo OCR (dari kartu data) lalu milik web (tabel web dan berkas leksikon). */
+    private static function support(array $card): array
     {
         $rows = [];
         foreach ($card['support'] as $item) {
-            $rows[] = match ($item['key']) {
-                'charset' => ['Charset tokenizer', 'Kelas keluaran model',
-                    nfmt($item['characters']).' karakter + blank = '.nfmt($item['classes']).' kelas', 'Dibangun dari korpus ('.$item['file'].')'],
-                'charlm' => ['Model bahasa karakter', 'Kondisi "kamus": beam search + LM',
+            $rows[] = match (true) {
+                $item['key'] === 'charset' && isset($item['characters'], $item['classes']) => ['Charset tokenizer', 'Kelas keluaran model',
+                    nfmt($item['characters']).' karakter + blank = '.nfmt($item['classes']).' kelas', 'Dibangun dari korpus ('.($item['file'] ?? 'data/tokenizer.json').')'],
+                $item['key'] === 'charlm' && isset($item['order'], $item['lines']) => ['Model bahasa karakter', 'Kondisi "kamus": beam search + LM',
                     'order '.$item['order'].' · '.nfmt($item['lines']).' baris', 'Bagian latih korpus'],
-                'vlm_blind' => ['Uji buta VLM', 'Pembanding VLM zero-shot', nfmt($item['lines']).' baris', 'Sampel acak data nyata'],
+                $item['key'] === 'vlm_blind' && isset($item['lines']) => ['Uji buta VLM', 'Pembanding VLM zero-shot', nfmt($item['lines']).' baris', 'Sampel acak data nyata'],
                 default => null,
             };
         }

@@ -10,7 +10,7 @@ Isi:
                    dicocokkan dengan data/corpus_stats.json (berhenti kalau berbeda)
   usage, lineage   pemakaian oleh run resmi (OFFICIAL_RUN di scripts/export_results.py) dan rantai checkpoint yang
                    dilanjutkannya: argumen dan langkah dibaca dari checkpoint, proses training dari log.jsonl, baris
-                   yang dijadwalkan dari urutan LengthBucketSampler yang sama dengan src.train
+                   yang dijadwalkan dari urutan batch DataLoader src.train (lihat Schedule.batches)
   rare             karakter langka di bagian latih (aturan src.text_augment) dan seberapa sering run resmi melihatnya
   datasets         daftar dataset: jumlah dihitung, sumber dan lisensi dari catatan di repo ini
   fonts            font per peran, lebar aksara yang sama dengan font uji, glyph yang tidak ada
@@ -40,6 +40,7 @@ from export_results import (  # noqa: E402  (scripts/ bukan paket: dijalankan da
     CHECKPOINTS,
     LEGACY_REPORTS,
     LM_PATH,
+    OFFICIAL_LINES,
     OFFICIAL_RUN,
     OPTIONAL_CHECKPOINTS,
     checkpoint_meta,
@@ -47,7 +48,7 @@ from export_results import (  # noqa: E402  (scripts/ bukan paket: dijalankan da
     read_json,
     write_atomic,
 )
-from src.corpus import MAX_ROUNDTRIP_CER, MIN_COUNT, SPLIT_BUCKETS  # noqa: E402
+from src.corpus import MAX_LEN, MAX_ROUNDTRIP_CER, MIN_COUNT, SPLIT_BUCKETS  # noqa: E402
 from src.dataset import MIN_SPACE_RATIO, LengthBucketSampler, space_ratio  # noqa: E402
 from src.text_augment import RARE_MAX_LINE_FRACTION  # noqa: E402
 from src.tokenizer import is_javanese, nfc  # noqa: E402
@@ -99,10 +100,12 @@ def count_lines(path: Path) -> int:
 
 
 def relative(path: Path, root: Path) -> str:
+    """Jalur relatif terhadap repo. Berkas di luar repo hanya disebut dua bagian terakhirnya: jalur utuhnya bisa
+    memuat nama folder pengguna, dan kartu ini disimpan web lalu bisa ditampilkan."""
     try:
         return path.resolve().relative_to(root.resolve()).as_posix()
     except ValueError:
-        return path.as_posix()
+        return "(luar repo)/" + "/".join(path.parts[-2:])
 
 
 def day(path: Path) -> str:
@@ -160,10 +163,19 @@ def corpus_card(root: Path) -> tuple[dict, list[dict]]:
         "split_buckets": {key: len(SPLIT_BUCKETS[key]) for key in SPLITS},
         "max_roundtrip_cer": MAX_ROUNDTRIP_CER,
         "min_count": {key: MIN_COUNT[key] for key in SPLITS},
-        "length_histogram": [{"range": k, "lines": v} for k, v in stats["length_histogram"].items()],
+        "length_histogram": histogram(stats["length_histogram"]),
         "built": day(stats_path),
     }
     return corpus, splits
+
+
+def histogram(bins: dict[str, int]) -> list[dict]:
+    """Sebaran panjang baris. Keranjang terakhir corpus_stats.json berlabel "70-79" tetapi juga memuat baris sepanjang
+    MAX_LEN (src.corpus.length_histogram memotong panjang ke MAX_LEN - 1), jadi labelnya dibetulkan di sini."""
+    rows = [{"range": key, "lines": value} for key, value in bins.items()]
+    if rows and rows[-1]["range"].endswith(f"-{MAX_LEN - 1}"):
+        rows[-1]["range"] = rows[-1]["range"].rsplit("-", 1)[0] + f"-{MAX_LEN}"
+    return rows
 
 
 def read_log(path: Path) -> list[dict]:
@@ -228,13 +240,13 @@ class Schedule:
 
     src.train mengacak daftar baris dengan random.Random(seed) lalu mengambil `train_lines` baris pertama; hasil acak
     itu hanya bergantung pada jumlah baris dan seed, jadi kumpulan run yang lebih kecil selalu awalan kumpulan run yang
-    lebih besar (seed sama). Urutan batch = epoch pertama LengthBucketSampler, yang diulang tiap proses.
+    lebih besar (seed sama). Urutan batch = urutan DataLoader di awal sebuah proses, yang diulang tiap proses.
     """
 
     def __init__(self, lines: list[str]):
         self.lines = lines
         self._order: dict[int, list[int]] = {}
-        self._batches: dict[tuple[int, int, int], list[list[int]]] = {}
+        self._epochs: dict[tuple[int, int, int, bool], tuple[LengthBucketSampler, list[list[list[int]]]]] = {}
 
     def order(self, seed: int) -> list[int]:
         if seed not in self._order:
@@ -247,20 +259,37 @@ class Schedule:
         """Indeks baris (di berkas split) yang masuk kumpulan run."""
         return self.order(seed)[:size]
 
-    def scheduled(self, size: int, seed: int, batch_size: int, steps: int) -> set[int]:
-        """Indeks baris yang dijadwalkan `steps` batch pertama sebuah proses."""
+    def batches(self, size: int, seed: int, batch_size: int, steps: int, workers: int) -> list[list[int]]:
+        """`steps` batch pertama sebuah proses training, tiap batch berupa indeks baris di berkas split.
+
+        Urutannya urutan DataLoader yang sebenarnya, bukan panggilan pertama sampler. Dengan worker (num_workers > 0)
+        DataLoader PyTorch memanggil iter(sampler) dua kali sebelum batch pertama (sekali saat iteratornya dibuat,
+        sekali lagi di _reset), dan LengthBucketSampler menaikkan epoch-nya di tiap panggilan, jadi epoch pertama
+        memakai random.Random(seed + 1), bukan seed + 0. Ditemukan tinjauan 2026-10-05: terukur dengan
+        src.train.make_loader sungguhan, dan jumlah split_batches di log training hanya cocok dengan urutan ini.
+        Batch terakhir sebuah kelompok panjang bisa lebih kecil dari batch_size. Lewat satu epoch, urutan diacak lagi.
+        """
         pool = self.pool(size, seed)
-        key = (len(pool), seed, batch_size)
-        if key not in self._batches:
+        key = (len(pool), seed, batch_size, workers > 0)
+        if key not in self._epochs:
             sampler = LengthBucketSampler([self.lines[i] for i in pool], batch_size, shuffle=True, seed=seed)
-            self._batches[key] = list(iter(sampler))
-        batches = self._batches[key]
-        if steps >= len(batches):  # lebih dari satu epoch: semua baris kumpulan terlihat
-            return set(pool)
-        return {pool[i] for batch in batches[:steps] for i in batch}
+            if workers > 0:
+                iter(sampler)
+            self._epochs[key] = (sampler, [])
+        sampler, epochs = self._epochs[key]
+        taken: list[list[int]] = []
+        epoch = 0
+        while len(taken) < steps:
+            if epoch == len(epochs):
+                epochs.append(list(iter(sampler)))
+            if not epochs[epoch]:
+                break
+            taken.extend(epochs[epoch][: steps - len(taken)])
+            epoch += 1
+        return [[pool[i] for i in batch] for batch in taken]
 
 
-def run_usage(link: dict, schedule: Schedule, root: Path, warnings: list[str]) -> tuple[dict, set[int]]:
+def run_usage(link: dict, schedule: Schedule, root: Path, warnings: list[str]) -> tuple[dict, set[int] | None]:
     """Data latih yang dipakai satu run di rantai: kumpulan baris, sampel, baris berbeda yang dijadwalkan."""
     args, step, run = link["args"], link["step"], link["run"]
     batch_size, seed = args["batch_size"], args.get("seed", 0)
@@ -271,24 +300,48 @@ def run_usage(link: dict, schedule: Schedule, root: Path, warnings: list[str]) -
         warnings.append(f"Log run {run} tidak menjelaskan semua {step} langkahnya; baris berbeda dihitung seolah "
                         "satu proses tanpa lanjutan (batas atas).")
         segments = [(0, step)]
-    scheduled: set[int] = set()
+    starts = [row for row in rows if row.get("event") == "start" and isinstance(row.get("step"), int)]
+    # Langkah checkpoint yang diperiksa lebih dari satu proses = run pernah dimundurkan ke checkpoint lebih awal
+    # lalu melewati langkah itu lagi. Log tidak mencatat proses mana yang menulis berkasnya (best.pt bisa milik
+    # silsilah yang ditinggalkan), jadi hitungan dari proses-proses terakhir belum tentu benar.
+    if sum(1 for row in rows if "val_cer" in row and row.get("step") == step) > 1:
+        warnings.append(f"Log run {run}: langkah {step} diperiksa lebih dari satu proses, jadi tidak pasti proses mana "
+                        "yang menulis checkpoint-nya; baris berbeda dihitung dari proses-proses terakhir.")
+    data_args = ("train_lines", "seed", "batch_size", "workers")
+    if any(row.get("args", {}).get(key, args.get(key)) != args.get(key) for row in starts for key in data_args):
+        warnings.append(f"Run {run} dilanjutkan dengan argumen data yang berbeda dari checkpoint-nya; baris berbeda "
+                        "dihitung dengan argumen checkpoint untuk semua prosesnya.")
+    scheduled: set[int] | None = set()
+    samples = step * batch_size
     if args.get("overfit") or args.get("real_train"):
         warnings.append(f"Run {run} memakai --overfit atau --real-train; baris berbeda tidak dihitung.")
+        scheduled = None
     else:
-        scheduled = schedule.scheduled(pool, seed, batch_size, max((b - a for a, b in segments), default=0))
+        # Tiap proses mengulang urutan dari awal: sampel dijumlahkan per proses, baris berbeda digabung.
+        samples = 0
+        for a, b in segments:
+            for batch in schedule.batches(pool, seed, batch_size, b - a, args.get("workers") or 0):
+                samples += len(batch)
+                scheduled.update(batch)
     extra = len(font_files(root / args["extra_fonts"])) if args.get("extra_fonts") else 0
+    if args.get("extra_fonts") and not extra:
+        warnings.append(f"Run {run} dilatih dengan font tambahan dari {args['extra_fonts']}, tetapi folder itu kosong "
+                        "atau tidak ada di mesin ini; jumlah dan daftar font di kartu ini tidak lengkap.")
     core = len(font_files(root / "fonts"))
     return {
         "run": run,
         "checkpoint": relative(link["path"], root),
         "steps": step,
         "batch_size": batch_size,
-        "samples": step * batch_size,
+        "samples": samples,
         "pool": pool,
         "seed": seed,
         "processes": len(segments),
         "segments": [list(s) for s in segments],
-        "distinct_lines": len(scheduled),
+        "distinct_lines": None if scheduled is None else len(scheduled),
+        # Data nyata ikut dilatih atau dipakai sebagai validasi (Fase 6): jadwal dan validasi sintetis tidak berlaku.
+        "real_train": bool(args.get("real_train")),
+        "real_val": bool(args.get("real_val")),
         "fonts": core + extra,
         "extra_fonts": extra,
         "augment": args.get("augment") or "none",
@@ -322,10 +375,36 @@ def gate_reports(run: str, root: Path, real_lines: int) -> list[dict]:
     return reports
 
 
-def rare_coverage(lines: list[str], charset: list[str], pool: list[int], scheduled: set[int]) -> dict:
+def other_reports(root: Path, official: set[str]) -> dict:
+    """Laporan src.evaluate di luar gerbang resmi yang juga membaca data uji: bagian uji korpus tidak "disimpan sampai
+    akhir" secara harfiah. quick = tes cepat penentu arah (kurang dari OFFICIAL_LINES baris pertama), full = evaluasi
+    penuh run lain, real = semua laporan gerbang G3 pada data nyata, termasuk yang resmi."""
+    found = {"quick": 0, "quick_max_lines": 0, "full": 0, "real": 0}
+    for path in sorted((root / "out/eval").glob("*.json")):
+        try:
+            report = read_json(path)
+        except (OSError, ValueError):
+            continue
+        results = report.get("results") if isinstance(report, dict) else None
+        if not isinstance(results, dict) or not isinstance(results.get("semua"), dict):
+            continue
+        lines = results["semua"].get("lines") or 0
+        if report.get("goal") == "G3":
+            found["real"] += 1
+        elif report.get("split") == "test" and relative(path, root) not in official:
+            if lines < OFFICIAL_LINES:
+                found["quick"] += 1
+                found["quick_max_lines"] = max(found["quick_max_lines"], lines)
+            else:
+                found["full"] += 1
+    return found
+
+
+def rare_coverage(lines: list[str], charset: list[str], pool: list[int], scheduled: set[int] | None) -> dict:
     """Karakter langka di bagian latih, dan berapa baris yang memuatnya di kumpulan dan jadwal run resmi.
 
     Langka = aturan src.text_augment: codepoint aksara Jawa di charset yang ada di < RARE_MAX_LINE_FRACTION baris.
+    `scheduled` None = jadwal run resmi tidak dihitung: scheduled_lines kosong dan never_scheduled null.
     """
     per_line: Counter = Counter()
     for line in lines:
@@ -340,7 +419,7 @@ def rare_coverage(lines: list[str], charset: list[str], pool: list[int], schedul
             found = set(pattern.findall(lines[i]))
             if found:
                 in_pool.update(found)
-                if i in scheduled:
+                if scheduled is not None and i in scheduled:
                     in_schedule.update(found)
 
     def spread(counts: Counter) -> dict:
@@ -354,8 +433,8 @@ def rare_coverage(lines: list[str], charset: list[str], pool: list[int], schedul
         "max_line_fraction": RARE_MAX_LINE_FRACTION,
         "train_lines": spread(per_line),
         "pool_lines": spread(in_pool),
-        "scheduled_lines": spread(in_schedule),
-        "never_scheduled": sum(1 for ch in rare if not in_schedule[ch]),
+        "scheduled_lines": spread(in_schedule) if scheduled is not None else {},
+        "never_scheduled": sum(1 for ch in rare if not in_schedule[ch]) if scheduled is not None else None,
     }
 
 
@@ -486,7 +565,13 @@ def support_cards(root: Path, charset: list[str]) -> list[dict]:
     return items
 
 
-def dataset_cards(corpus: dict, splits: list[dict], real: dict, commons: dict | None, gates: list[dict]) -> list[dict]:
+def label_rows(path: Path) -> int:
+    with path.open(encoding="utf-8", newline="") as f:
+        return sum(1 for _ in csv.DictReader(f, delimiter="\t"))
+
+
+def dataset_cards(corpus: dict, splits: list[dict], real: dict, commons: dict | None, gates: list[dict],
+                  official_args: dict, root: Path) -> list[dict]:
     """Daftar dataset. Jumlah dari hitungan di atas; isi, sumber, dan lisensi dari catatan repo (README, SOURCE.md)."""
     lines = {s["key"]: s["lines"] for s in splits}
     synthetic = [g["code"] for g in gates if g["code"] != "G3"]
@@ -526,11 +611,19 @@ def dataset_cards(corpus: dict, splits: list[dict], real: dict, commons: dict | 
             "license": "non-komersial",
             "shareable": False,
             "in_repo": False,
-            "share_note": "Tidak boleh disebar. Dipakai lokal, hanya sebagai data uji.",
+            "share_note": "Lisensi non-komersial. Tidak disebarkan repo ini; dipakai lokal, hanya sebagai data uji.",
         },
     ]
     if commons:
         licenses = ", ".join(commons["licenses"])
+        # Peran Commons mengikuti run resmi: baris yang dipakai --real-train / --real-val dari folder Commons.
+        folder = (root / "data/real/commons").resolve()
+        roles = {}
+        for role, key in (("train", "real_train"), ("val", "real_val")):
+            path = (root / official_args[key]).resolve() if official_args.get(key) else None
+            if path and path.exists() and folder in path.parents:
+                roles[role] = label_rows(path)
+        pending = max(0, commons["drafts"] - commons["verified"])
         cards.append({
             "key": "commons",
             "name": "Papan nama Wikimedia Commons",
@@ -540,10 +633,11 @@ def dataset_cards(corpus: dict, splits: list[dict], real: dict, commons: dict | 
             "unit": "baris citra",
             "files": commons["files"],
             "verified": commons["verified"],
-            "roles": {},
-            "planned": ["train", "val"],
+            "pending": pending,
+            "roles": roles,
+            "planned": [role for role in ("train", "val") if role not in roles],
             "gates": [],
-            "status": "pending",
+            "status": "pending" if pending else "used" if roles else "verified",
             "source": f"Wikimedia Commons, {commons['files']} berkas foto",
             "source_url": "https://commons.wikimedia.org/wiki/Category:Javanese_script",
             "license": licenses,
@@ -562,7 +656,11 @@ def build(root: Path = ROOT, run: str = OFFICIAL_RUN, test_font_dir: Path = TEST
     links, complete = chain(run, root)
     official = links[-1]
     train_path = root / "data/splits/train.txt"
-    oldest = min(link["path"].stat().st_mtime for link in links)
+    # Waktu berkas hanya petunjuk: last_snapshot.pt disalin ulang tiap evaluasi (scripts/fase6_common.sh), jadi log
+    # training ikut dilihat. Tanpa hash korpus di checkpoint, korpus yang ditulis ulang tidak selalu terdeteksi.
+    stamps = [path.stat().st_mtime for link in links for path in (link["path"], link["path"].parent / "log.jsonl")
+              if path.exists()]
+    oldest = min(stamps)
     if train_path.stat().st_mtime > oldest:
         warnings.append("data/splits/train.txt lebih baru daripada checkpoint di rantai run resmi: pemakaian di bawah "
                         "dihitung dari berkas yang sekarang, bukan yang dipakai saat training.")
@@ -570,17 +668,19 @@ def build(root: Path = ROOT, run: str = OFFICIAL_RUN, test_font_dir: Path = TEST
     if len(train_lines) != splits[0]["lines"]:
         raise SystemExit(f"{train_path}: splitlines memberi {len(train_lines)} baris, hitungan newline {splits[0]['lines']}")
     schedule = Schedule(train_lines)
-    runs, seen, scheduled = [], set(), set()
-    for link in links:  # sesudah putaran terakhir, `scheduled` = jadwal run resmi
+    runs, seen, scheduled, known = [], set(), set(), True
+    for link in links:  # sesudah putaran terakhir, `scheduled` = jadwal run resmi (None bila tidak dihitung)
         usage, scheduled = run_usage(link, schedule, root, warnings)
         usage["init"] = runs[-1]["run"] if runs else None
         runs.append(usage)
-        seen |= scheduled
+        known = known and scheduled is not None
+        seen |= scheduled or set()
     train = runs[-1]
 
     real = nusaaksara_card(root / "data/real/nusaaksara/labels.tsv")
     gates = gate_reports(run, root, real["lines"])
     synthetic = [g for g in gates if g["code"] != "G3"]
+    others = other_reports(root, {g["source"] for g in gates})
     test_fonts = sorted({name for g in synthetic for name in g["fonts"]})
     commons = commons_card(root / "data/real/commons")
 
@@ -596,8 +696,9 @@ def build(root: Path = ROOT, run: str = OFFICIAL_RUN, test_font_dir: Path = TEST
             "val": {"lines": min(train["val_lines"], splits[1]["lines"]), "steps": train["val_steps"],
                     "fonts": len(font_files(root / "fonts"))},
             # G1 dan G2 membaca baris yang sama: N baris pertama bagian uji (src.evaluate).
-            "test": {"lines": max((g["lines"] for g in synthetic), default=0), "gates": synthetic},
-            "real": {"lines": real["lines"], "gates": [g for g in gates if g["code"] == "G3"]},
+            "test": {"lines": max((g["lines"] for g in synthetic), default=0), "gates": synthetic,
+                     "quick": others["quick"], "quick_max_lines": others["quick_max_lines"], "full": others["full"]},
+            "real": {"lines": real["lines"], "gates": [g for g in gates if g["code"] == "G3"], "reports": others["real"]},
         },
         "lineage": {
             "runs": runs,
@@ -605,10 +706,10 @@ def build(root: Path = ROOT, run: str = OFFICIAL_RUN, test_font_dir: Path = TEST
             "steps": sum(r["steps"] for r in runs),
             "samples": sum(r["samples"] for r in runs),
             "pool": max(r["pool"] for r in runs),
-            "distinct_lines": len(seen),
+            "distinct_lines": len(seen) if known else None,
         },
         "rare": rare_coverage(train_lines, charset, schedule.pool(train["pool"], train["seed"]), scheduled),
-        "datasets": dataset_cards(corpus, splits, real, commons, gates),
+        "datasets": dataset_cards(corpus, splits, real, commons, gates, official["args"], root),
         "fonts": font_cards(root, official["args"], test_fonts, charset, test_font_dir, warnings),
         "support": support_cards(root, charset),
         "warnings": warnings,
@@ -620,16 +721,22 @@ def main(argv=None) -> None:
     parser.add_argument("--out", default=str(ROOT / "out/results"))
     args = parser.parse_args(argv)
     card = build()
+    if card["official"]["pipeline"] is None:
+        raise SystemExit(f"run resmi {card['official']['run']} tidak dikenal scripts/export_results.py (CHECKPOINTS / "
+                         "OPTIONAL_CHECKPOINTS); web tidak bisa mencocokkan kartu ini dengan pipeline resminya")
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
-    write_atomic(out_dir / "datasets.json", json.dumps(card, ensure_ascii=False, indent=1) + "\n")
+    write_atomic(out_dir / "datasets.json", json.dumps(card, ensure_ascii=False, indent=1, allow_nan=False) + "\n")
 
     train, lineage = card["usage"]["train"], card["lineage"]
     shares = " / ".join(f"{s['share']:.1%}" for s in card["splits"])
     print(f"korpus: {card['corpus']['lines']:,} baris ({shares})")
+    def count(value) -> str:
+        return "tidak dihitung" if value is None else f"{value:,}"
+
     print(f"run resmi {card['official']['run']}: kumpulan {train['pool']:,} baris, {train['samples']:,} sampel, "
-          f"{train['distinct_lines']:,} baris berbeda; rantai {len(lineage['runs'])} run, {lineage['steps']:,} langkah, "
-          f"{lineage['distinct_lines']:,} baris berbeda")
+          f"{count(train['distinct_lines'])} baris berbeda; rantai {len(lineage['runs'])} run, {lineage['steps']:,} langkah, "
+          f"{count(lineage['distinct_lines'])} baris berbeda")
     print(f"font: {sum(1 for f in card['fonts'] if 'train' in f['roles'])} latih, "
           f"{sum(1 for f in card['fonts'] if 'test' in f['roles'])} uji; "
           f"sekeluarga dengan font uji: {[f['file'] for f in card['fonts'] if f.get('shared_with_test', {}).get('family')]}")

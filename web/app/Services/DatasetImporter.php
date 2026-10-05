@@ -2,73 +2,91 @@
 
 namespace App\Services;
 
+use App\Livewire\Pages\Dataset;
 use App\Models\DatasetReport;
-use Illuminate\Support\Facades\DB;
-use JsonException;
+use Illuminate\Database\Eloquent\Model;
 use RuntimeException;
 
 /**
  * Impor kartu data dari repo OCR (scripts/export_datasets.py, kontrak dataset skema 1) untuk halaman Dataset.
  *
  * Web tidak menghitung apa pun dari data OCR: jumlah baris, pembagian, pemakaian run resmi, dan font datang dari
- * Python. Isinya disimpan utuh; yang diperiksa di sini hanya bentuknya, supaya berkas yang salah ditolak saat impor
- * dan bukan menjadi galat saat halaman dibuka.
+ * Python. Isinya disimpan utuh. Bentuknya diperiksa `CardImporter` menurut `shape()` di bawah, lalu halaman Dataset
+ * dirender sekali dengan kartu itu sebelum kartu lama diganti.
  */
-class DatasetImporter
+class DatasetImporter extends CardImporter
 {
     public const FILE = 'datasets.json';
 
-    /** Kunci yang dibaca halaman Dataset (notasi titik); semuanya wajib ada. */
-    private const REQUIRED = [
-        'generated', 'official.run', 'corpus.lines', 'corpus.articles', 'corpus.length_histogram', 'splits',
-        'usage.train.distinct_lines', 'usage.train.pool', 'usage.train.samples', 'usage.val.lines', 'usage.test.lines',
-        'usage.test.gates', 'usage.real.lines', 'lineage.runs', 'lineage.distinct_lines', 'rare.codepoints',
-        'datasets', 'fonts', 'support', 'warnings',
-    ];
-
     private const SPLITS = ['train', 'val', 'test'];
 
-    public static function path(string $dir): string
+    protected function model(): string
     {
-        return rtrim($dir, '/\\').DIRECTORY_SEPARATOR.self::FILE;
+        return DatasetReport::class;
     }
 
-    public function import(string $dir): array
+    protected function label(): string
     {
-        $path = self::path($dir);
-        if (! is_file($path)) {
-            throw new RuntimeException("Berkas tidak ditemukan: {$path}. Jalankan dulu: python scripts/export_datasets.py");
-        }
-        try {
-            $card = json_decode(file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
-        } catch (JsonException $e) {
-            throw new RuntimeException("{$path} bukan JSON yang sah: {$e->getMessage()}");
-        }
-        if (! is_array($card)) {
-            throw new RuntimeException("{$path} bukan kartu data: isinya harus objek JSON.");
-        }
-        $expected = config('aksara.dataset_schema');
-        if (($card['schema'] ?? null) !== $expected) {
-            throw new RuntimeException('Skema kartu data '.json_encode($card['schema'] ?? null)." tidak didukung (butuh {$expected}).");
-        }
-        foreach (self::REQUIRED as $key) {
-            if (data_get($card, $key) === null) {
-                throw new RuntimeException("Kartu data tidak lengkap: kunci {$key} tidak ada di {$path}.");
-            }
-        }
+        return 'kartu data';
+    }
+
+    protected function schemaConfig(): string
+    {
+        return 'aksara.dataset_schema';
+    }
+
+    protected function exporter(): string
+    {
+        return 'scripts/export_datasets.py';
+    }
+
+    protected function shape(): array
+    {
+        $typed = fn (string $type, string $prefix, array $keys) => array_fill_keys(array_map(fn ($key) => $prefix.$key, $keys), $type);
+
+        return $typed('number', 'corpus.', ['articles', 'candidates', 'roundtrip_passed', 'roundtrip_pass_rate', 'duplicates', 'injected',
+            'lines', 'leaked_lines'])
+            + ['corpus.length_histogram' => 'list', 'corpus.length_histogram.*.range' => 'string', 'corpus.length_histogram.*.lines' => 'number',
+                'splits' => 'list', 'splits.*.key' => 'string', 'splits.*.lines' => 'number', 'splits.*.share' => 'number']
+            + $typed('number', 'usage.train.', ['steps', 'batch_size', 'samples', 'pool', 'seed'])
+            // Jadwal baris sintetis tidak dihitung untuk run --overfit / --real-train: ekspor menulis null.
+            + ['usage.train.distinct_lines' => 'number?', 'lineage.distinct_lines' => 'number?', 'lineage.runs.*.distinct_lines' => 'number?',
+                'usage.val.lines' => 'number', 'usage.val.steps' => 'list', 'usage.val.steps.*' => 'number', 'usage.val.fonts' => 'number',
+                'usage.test.lines' => 'number', 'usage.test.gates' => 'list', 'usage.test.gates.*.code' => 'string',
+                'usage.real.lines' => 'number',
+                'lineage.complete' => 'bool', 'lineage.runs' => 'list', 'lineage.runs.*.run' => 'string', 'lineage.runs.*.augment' => 'string']
+            + $typed('number', 'lineage.', ['steps', 'samples', 'pool'])
+            + $typed('number', 'lineage.runs.*.', ['steps', 'samples', 'pool', 'seed', 'fonts', 'drop_space_prob', 'track_prob', 'track_max',
+                'rare_insert_prob', 'rare_opener_prob'])
+            + ['rare.codepoints' => 'number', 'rare.javanese' => 'number', 'rare.train_lines' => 'map', 'rare.scheduled_lines' => 'map',
+                'datasets' => 'list', 'datasets.*.count' => 'number', 'datasets.*.shareable' => 'bool', 'datasets.*.roles' => 'map',
+                'datasets.*.roles.*' => 'number', 'datasets.*.gates' => 'list', 'datasets.*.gates.*' => 'string']
+            + $typed('string', 'datasets.*.', ['key', 'name', 'content', 'unit', 'source', 'license', 'share_note'])
+            // Wadah (daftar) diperiksa sebelum isinya, supaya pesannya menyebut kunci yang salah bentuk.
+            + ['fonts' => 'list']
+            + $typed('string', 'fonts.*.', ['file', 'group', 'license'])
+            + ['fonts.*.roles' => 'list', 'fonts.*.roles.*' => 'string', 'fonts.*.in_repo' => 'bool',
+                'support' => 'list', 'support.*.key' => 'string', 'warnings' => 'list', 'warnings.*' => 'string'];
+    }
+
+    protected function check(array $card): void
+    {
         if (array_column($card['splits'], 'key') !== self::SPLITS) {
             throw new RuntimeException('Kartu data tidak lengkap: splits harus berisi train, val, test (urutan itu).');
         }
+        if ($card['lineage']['runs'] === [] || $card['corpus']['length_histogram'] === []) {
+            throw new RuntimeException('Kartu data tidak lengkap: lineage.runs dan corpus.length_histogram tidak boleh kosong.');
+        }
+    }
 
-        return DB::transaction(function () use ($card, $dir) {
-            DatasetReport::query()->delete();
-            DatasetReport::create([
-                'schema' => $card['schema'], 'generated_at' => $card['generated'],
-                'official_run' => $card['official']['run'], 'source_path' => $dir, 'payload' => $card,
-            ]);
+    protected function preview(Model $report): void
+    {
+        view('livewire.pages.dataset', Dataset::viewData($report))->render();
+    }
 
-            return ['run' => $card['official']['run'], 'lines' => $card['corpus']['lines'],
-                'datasets' => count($card['datasets']), 'fonts' => count($card['fonts'])];
-        });
+    protected function summary(array $card): array
+    {
+        return ['run' => $card['official']['run'], 'lines' => $card['corpus']['lines'],
+            'datasets' => count($card['datasets']), 'fonts' => count($card['fonts'])];
     }
 }

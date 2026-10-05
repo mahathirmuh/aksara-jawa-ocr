@@ -316,10 +316,45 @@ select:focus[data-flux-control] {
     .split-val { background: var(--series-2); }
     .split-test { background: var(--series-3); }
     .split-dot { display: inline-block; flex: none; width: .625rem; height: .625rem; border-radius: 2px; }
-    .meter { display: block; height: .375rem; overflow: hidden; border-radius: 100rem; background: var(--border); }
+    /* Alur batang berwarna permukaan dengan garis tepi, bukan abu: di alur abu isi jingga (validasi) hanya berkontras 2,3:1. */
+    .meter { display: block; height: .375rem; overflow: hidden; border-radius: 100rem; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
     .meter > span { display: block; min-width: 2px; height: 100%; border-radius: inherit; }
     .meter-lg { height: .625rem; border-radius: 2px; }
     .role-chip { display: inline-flex; align-items: center; gap: .375rem; padding: .1875rem .5rem; border-radius: var(--radius); box-shadow: inset 0 0 0 1px var(--border); font-size: .75rem; line-height: 1.2; white-space: nowrap; }
+
+    /* ---------- halaman Metode: alur langkah dan daftar butir ----------
+       Alur menurun di ponsel dan mendatar di layar lebar; kotak .is-learned = langkah yang memakai model hasil belajar.
+       Butir: nama + jenis + status | penjelasan + bukti | pengaturan; kolom ketiga turun ke bawah di layar sedang. */
+    .flow { display: flex; flex-direction: column; gap: 1.5rem; margin: 0; padding: 0; list-style: none; }
+    .flow-step { position: relative; display: flex; flex: none; flex-direction: column; gap: .125rem; min-width: 0; padding: .5rem .75rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+    .flow-step.is-learned { border-color: var(--brand); background: var(--brand-wash); }
+    .flow-step:not(:last-child)::after { content: '↓'; position: absolute; left: 50%; bottom: -1.375rem; transform: translateX(-50%); line-height: 1.25rem; color: var(--text-muted); }
+    .flow-name { font-size: .8125rem; font-weight: 600; color: var(--text); }
+    .flow-detail { font-size: .75rem; line-height: 1.35; color: var(--text-muted); }
+    @media (min-width: 768px) {
+        .flow { flex-direction: row; flex-wrap: wrap; gap: .75rem 1.5rem; padding-inline-end: 1.25rem; }
+        .flow-step { flex: 1 1 6.5rem; }
+        .flow-step:not(:last-child)::after { content: '→'; left: auto; right: -1.125rem; bottom: auto; top: 50%; transform: translateY(-50%); }
+    }
+    .method-list { display: flex; flex-direction: column; }
+    .method-row { display: grid; gap: .75rem 1.5rem; padding: 1rem 0; border-top: 1px solid var(--row-line); }
+    .method-row:last-child { padding-bottom: 0; }
+    .method-row > * { min-width: 0; }
+    .method-name { font-size: .875rem; line-height: 1.25rem; font-weight: 600; color: var(--text); }
+    .method-summary { max-width: 75ch; }
+    .method-evidence { margin-top: .5rem; padding: .5rem .75rem; border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--surface-2); font-size: .75rem; line-height: 1.5; overflow-wrap: anywhere; }
+    .method-settings { display: grid; gap: .375rem; align-content: start; margin: 0; font-size: .75rem; line-height: 1.45; }
+    .method-settings > div { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr); gap: .75rem; }
+    .method-settings dt { color: var(--text-muted); }
+    .method-settings dd { margin: 0; overflow-wrap: anywhere; }
+    @media (min-width: 768px) {
+        .method-row { grid-template-columns: 13rem minmax(0, 1fr); }
+        .method-settings { grid-column: 2; }
+    }
+    @media (min-width: 1280px) {
+        .method-row { grid-template-columns: 13rem minmax(0, 1fr) 21rem; }
+        .method-settings { grid-column: auto; }
+    }
 }
 
 /* ---------- kerangka: sidebar, bilah atas, isi, footer ----------

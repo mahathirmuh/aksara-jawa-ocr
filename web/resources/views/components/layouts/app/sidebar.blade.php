@@ -12,6 +12,7 @@
                     ['perbandingan', 'ti-chart-bar', 'Perbandingan'],
                     ['ablasi', 'ti-flask', 'Ablasi'],
                     ['dataset', 'ti-database', 'Dataset'],
+                    ['metode', 'ti-brain', 'Metode'],
                 ],
                 'Analisis' => [
                     ['penjelajah', 'ti-list-search', 'Penjelajah baris'],

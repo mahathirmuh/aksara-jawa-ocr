@@ -6,7 +6,8 @@
 #   2. menunggu scripts/after_fase7.sh selesai, supaya tidak ada dua ekspor atau dua eval_spacing sekaligus;
 #   3. ekspor (scripts/export_results.py harus sudah menetapkan run itu lewat OFFICIAL_RUN; kalau belum, berhenti
 #      tanpa mengekspor), kartu data halaman Dataset (scripts/export_datasets.py), impor ke web, pembanding terhadap
-#      run kontrol, evaluasi sintetis jarak (>= 300 baris).
+#      run kontrol, evaluasi sintetis jarak (>= 300 baris), lalu kartu metode halaman Metode
+#      (scripts/export_methods.py) paling akhir, karena buktinya dikutip dari semua keluaran di atas.
 # Boleh dijalankan ulang: evaluasi yang laporannya lebih baru dari snapshot dilewati, evaluasi sintetis memakai cache.
 # Proses mandiri dari root repo; log out/make_official.log:
 #   Start-Process "C:\Program Files\Git\bin\bash.exe" -ArgumentList scripts/make_official.sh -WindowStyle Hidden
@@ -74,4 +75,11 @@ if [ -f out/checkpoints/fase7_ctrl/last_snapshot.pt ]; then
 fi
 $PY scripts/eval_spacing.py --lines 301 --threads 4 >> "$LOG" 2>&1
 say "eval_spacing exit=$?"
+# Kartu metode halaman Metode mengutip manifest hasil, berkas pembanding, dan evaluasi sintetis di atas, jadi
+# diekspor dan diimpor paling akhir. Sampai di sini halaman Metode masih memuat kartu lama dan menandainya tidak
+# sejalan dengan hasil yang baru diimpor. Bila gagal, kartu lama dipertahankan.
+$PY scripts/export_methods.py 2>&1 | grep -v -E "Warning|warnings.warn" >> "$LOG"
+say "ekspor kartu metode exit=${PIPESTATUS[0]}"
+(cd web && php artisan aksara:methods --no-ansi) >> "$LOG" 2>&1
+say "impor kartu metode exit=$?"
 say "selesai"

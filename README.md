@@ -34,7 +34,7 @@ keputusan desain, dan riwayat eksperimen ada di [`CLAUDE.md`](CLAUDE.md); rencan
 | Folder | Isi |
 |---|---|
 | `src/` | render (RAQM wajib), tokenizer urutan visual, dataset sintetis, augmentasi, model, training, evaluasi, beam + LM, layanan FastAPI |
-| `scripts/` | verifikasi shaping font, ablasi, ekspor hasil dan kartu data untuk web, pembanding run, evaluasi aksara langka |
+| `scripts/` | verifikasi shaping font, ablasi, ekspor hasil, kartu data, dan kartu metode untuk web, pembanding run, evaluasi aksara langka |
 | `tests/` | pytest (termasuk round-trip tokenizer 1 juta baris, ~6 menit) |
 | `web/` | Laravel 12 + Livewire; lihat [`web/README.md`](web/README.md) |
 

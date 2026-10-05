@@ -1,6 +1,7 @@
 """Test scripts/export_datasets.py: kartu data halaman Dataset, pada repo palsu kecil dan (bila ada) data sebenarnya."""
 
 import json
+import os
 import random
 import shutil
 import sys
@@ -20,7 +21,8 @@ from export_results import (  # noqa: E402
     OPTIONAL_CHECKPOINTS,
     official_pipeline,
 )
-from src.dataset import TRAIN_FONTS, LengthBucketSampler  # noqa: E402
+from src.dataset import H, TRAIN_FONTS, LengthBucketSampler  # noqa: E402
+from src.train import make_loader  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 KA, GA, WULU, PANGKON, RARE, NEVER = "ꦏ", "ꦒ", "ꦶ", "꧀", "ꦐ", "ꦑ"
@@ -59,7 +61,25 @@ def test_effective_segments_follow_resumes_and_discard_lost_steps():
     assert ed.effective_segments([], 10) == []
 
 
-def test_schedule_reproduces_src_train_order():
+class IndexLines(torch.utils.data.Dataset):
+    """Dataset palsu berbentuk SyntheticLines: target tiap sampel = indeksnya, supaya batch DataLoader bisa dibaca."""
+
+    def __init__(self, lines):
+        self.lines = list(lines)
+
+    def __len__(self):
+        return len(self.lines)
+
+    def __getitem__(self, idx):
+        return torch.zeros(1, H, 8), torch.tensor([idx], dtype=torch.long)
+
+
+def loader_batches(lines, batch_size, workers, seed, passes=1):
+    loader = make_loader(IndexLines(lines), batch_size, True, workers, seed)
+    return [[y.tolist() for _x, y, _in, _tgt in loader] for _ in range(passes)]
+
+
+def test_schedule_reproduces_the_real_dataloader_order():
     rng = random.Random(7)
     lines = [KA * rng.randint(1, 30) + str(i) for i in range(500)]
     schedule = ed.Schedule(lines)
@@ -67,16 +87,30 @@ def test_schedule_reproduces_src_train_order():
     # src.train: random.Random(seed).shuffle(train_lines); train_lines[:n]
     shuffled = list(lines)
     random.Random(3).shuffle(shuffled)
-    assert [lines[i] for i in schedule.pool(120, 3)] == shuffled[:120]
-    assert schedule.pool(60, 3) == schedule.pool(120, 3)[:60]  # kumpulan kecil = awalan kumpulan besar
+    pool = schedule.pool(120, 3)
+    assert [lines[i] for i in pool] == shuffled[:120]
+    assert schedule.pool(60, 3) == pool[:60]  # kumpulan kecil = awalan kumpulan besar
 
-    batches = list(iter(LengthBucketSampler(shuffled[:120], 8, shuffle=True, seed=3)))
-    expected = {shuffled[i] for batch in batches[:5] for i in batch}
-    got = schedule.scheduled(120, 3, 8, 5)
-    assert {lines[i] for i in got} == expected and len(got) == 40
-    assert schedule.scheduled(120, 3, 8, 0) == set()
-    assert schedule.scheduled(120, 3, 8, len(batches) + 4) == set(schedule.pool(120, 3))  # lebih dari satu epoch
-    assert schedule.scheduled(120, 3, 8, 3) < schedule.scheduled(120, 3, 8, 5)  # proses lanjutan mengulang awal
+    # 120 baris, batch 8 = 15 batch per epoch. Dua epoch dari DataLoader sungguhan, tanpa dan dengan worker.
+    for workers in (0, 2):
+        first, second = loader_batches(shuffled[:120], 8, workers, 3, passes=2)
+        replay = schedule.batches(120, 3, 8, 30, workers)
+        assert [[pool.index(i) for i in batch] for batch in replay] == first + second, workers
+        assert schedule.batches(120, 3, 8, 5, workers) == replay[:5]  # proses lanjutan mengulang dari awal
+        assert schedule.batches(120, 3, 8, 0, workers) == []
+    # Dengan worker, DataLoader memanggil iter(sampler) dua kali sebelum batch pertama: urutannya BUKAN panggilan
+    # pertama sampler. Menyamakannya dengan panggilan pertama memilih baris yang lain (temuan tinjauan 2026-10-05).
+    naive = list(iter(LengthBucketSampler(shuffled[:120], 8, shuffle=True, seed=3)))
+    assert [[pool.index(i) for i in batch] for batch in schedule.batches(120, 3, 8, 15, 0)] == naive
+    assert [[pool.index(i) for i in batch] for batch in schedule.batches(120, 3, 8, 15, 2)] != naive
+
+
+def test_short_batches_are_counted_as_they_are():
+    # 100 baris, batch 8: kelompok panjang berisi 100 baris = 12 batch penuh + satu batch berisi 4.
+    lines = [KA * (i % 17 + 1) for i in range(100)]
+    batches = ed.Schedule(lines).batches(100, 0, 8, 13, 0)
+    assert sorted(len(b) for b in batches) == [4] + [8] * 12
+    assert sum(len(b) for b in batches) == 100 == len({i for b in batches for i in b})
 
 
 def test_pipeline_key_follows_the_results_export():
@@ -166,8 +200,9 @@ def fake_repo(root: Path, run: str = "runB") -> Path:
     ckpt = root / "out/checkpoints"
     first = save_ckpt(ckpt / "runA" / "last_snapshot.pt", 6, train_lines=200)
     write_log(first.parent / "log.jsonl", [start(0), {"step": 4, "val_cer": 0.5, "val_lines": 10},
-                                           start(4), {"step": 6, "val_cer": 0.2, "val_lines": 10}, {"step": 6, "event": "end"}])
-    last = save_ckpt(ckpt / run / "last_snapshot.pt", 10, init="out/checkpoints/runA/last_snapshot.pt",
+                                           start(4), {"step": 6, "val_cer": 0.2, "val_lines": 10},
+                                           {"step": 8, "val_cer": 0.3, "val_lines": 10}])  # jalan terus sesudah snapshot
+    last = save_ckpt(ckpt / run / "last_snapshot.pt", 10, init="out/checkpoints/runA/last_snapshot.pt", workers=2,
                      extra_fonts="fonts/extra", augment="fase5", drop_space_prob=0.5, track_prob=0.5, track_max=0.3)
     write_log(last.parent / "log.jsonl", [start(0), {"step": 5, "val_cer": 0.1, "val_lines": 10},
                                           {"step": 10, "val_cer": 0.05, "val_lines": 10}, {"step": 10, "event": "end"}])
@@ -191,6 +226,14 @@ def fake_repo(root: Path, run: str = "runB") -> Path:
             "goal": code, "checkpoint": checkpoint, "split": "test", "augment": augment, "cer": 0.01,
             "results": {"javatext.ttf": {"lines": OFFICIAL_LINES - 2, "rejected_by_min_frames": 2},
                         "semua": {"lines": OFFICIAL_LINES - 2}}}), encoding="utf-8")
+    # Laporan lain yang juga membaca data uji: dua tes cepat, satu evaluasi penuh run lain, satu G3 tes cepat.
+    for name, report in (("q100_G1", {"goal": "G1", "split": "test", "results": {"semua": {"lines": 100}}}),
+                         ("q100_x_trainfonts", {"goal": "G1", "split": "test", "results": {"semua": {"lines": 200}}}),
+                         ("lain_G1_10k", {"goal": "G1", "split": "test", "results": {"semua": {"lines": OFFICIAL_LINES}}}),
+                         ("q100_val", {"goal": "G1", "split": "val", "results": {"semua": {"lines": 100}}}),
+                         ("q100_G3", {"goal": "G3", "results": {"semua": {"lines": 3}}}),
+                         ("bukan_laporan", {"items": [1, 2]})):
+        (root / "out/eval" / f"{name}.json").write_text(json.dumps(report), encoding="utf-8")
     (root / "out/eval" / f"{run}_G3_full.json").write_text(json.dumps({
         "goal": "G3", "checkpoint": checkpoint, "pad_ratio": 0.0, "cer": 0.2, "results": {"semua": {"lines": 3}}}),
         encoding="utf-8")
@@ -209,28 +252,41 @@ def test_build_describes_a_fake_repo(tmp_path):
     assert [s["lines"] for s in card["splits"]] == [2000, 100, 100]
     assert sum(s["share"] for s in card["splits"]) == pytest.approx(1.0)
     assert card["corpus"]["lines"] == 2200 and card["corpus"]["other"] == 2200 - (2300 - 110 + 10)
-    assert card["corpus"]["length_histogram"][0] == {"range": "20-29", "lines": 900}
+    assert card["corpus"]["length_histogram"] == [{"range": "20-29", "lines": 900}, {"range": "30-39", "lines": 1300}]
     assert card["corpus"]["split_buckets"] == {"train": 90, "val": 5, "test": 5}
     assert card["corpus"]["max_roundtrip_cer"] == 0.05 and card["corpus"]["min_count"]["train"] == 100
 
     first, last = card["lineage"]["runs"]
     assert (first["run"], first["init"], first["pool"], first["steps"], first["samples"]) == ("runA", None, 200, 6, 48)
     assert first["segments"] == [[0, 4], [4, 6]] and first["distinct_lines"] == 4 * 8  # proses kedua mengulang awal
+    assert first["val_steps"] == [4, 6]  # pemeriksaan di langkah 8 terjadi sesudah checkpoint yang dipakai runB
     assert (first["fonts"], first["extra_fonts"], first["augment"]) == (2, 0, "none")
     assert (last["run"], last["init"], last["pool"], last["steps"], last["samples"]) == ("runB", "runA", 400, 10, 80)
     assert last["distinct_lines"] == 80 and last["processes"] == 1 and last["val_steps"] == [5, 10]
     assert (last["fonts"], last["extra_fonts"], last["track_prob"], last["drop_space_prob"]) == (3, 1, 0.5, 0.5)
     lineage = card["lineage"]
     assert lineage["complete"] and lineage["steps"] == 16 and lineage["samples"] == 128 and lineage["pool"] == 400
-    assert max(first["distinct_lines"], last["distinct_lines"]) <= lineage["distinct_lines"] <= 32 + 80
+    # Gabungan rantai dihitung ulang di sini tanpa Schedule: runA tanpa worker (panggilan pertama sampler), runB dengan
+    # worker (panggilan kedua). Gabungannya lebih besar daripada jadwal run resmi saja.
+    train = (root / "data/splits/train.txt").read_text(encoding="utf-8").splitlines()
+    order = list(range(len(train)))
+    random.Random(0).shuffle(order)
+    sampler_a = LengthBucketSampler([train[i] for i in order[:200]], 8, shuffle=True, seed=0)
+    seen_a = {order[i] for batch in list(iter(sampler_a))[:4] for i in batch}
+    sampler_b = LengthBucketSampler([train[i] for i in order[:400]], 8, shuffle=True, seed=0)
+    iter(sampler_b)
+    seen_b = {order[i] for batch in list(iter(sampler_b))[:10] for i in batch}
+    assert (len(seen_a), len(seen_b)) == (32, 80)
+    assert lineage["distinct_lines"] == len(seen_a | seen_b) > 80
 
     usage = card["usage"]
     assert usage["train"] == last
     assert usage["val"] == {"lines": 10, "steps": [5, 10], "fonts": 2}
     assert usage["test"]["lines"] == OFFICIAL_LINES and [g["code"] for g in usage["test"]["gates"]] == ["G1", "G2"]
+    assert (usage["test"]["quick"], usage["test"]["quick_max_lines"], usage["test"]["full"]) == (2, 200, 1)
     assert usage["test"]["gates"][1]["augment"] == "heavy" and usage["test"]["gates"][0]["fonts"] == ["javatext.ttf"]
-    assert usage["real"] == {"lines": 3, "gates": [{"code": "G3", "lines": 3, "fonts": [], "split": None, "augment": None,
-                                                    "source": "out/eval/runB_G3_full.json"}]}
+    assert usage["real"] == {"lines": 3, "reports": 2, "gates": [{"code": "G3", "lines": 3, "fonts": [], "split": None,
+                                                                  "augment": None, "source": "out/eval/runB_G3_full.json"}]}
 
     rare = card["rare"]
     assert (rare["codepoints"], rare["javanese"], rare["charset"]) == (2, 4, 5)  # RARE (1 baris) dan NEVER (0 baris)
@@ -243,7 +299,10 @@ def test_build_describes_a_fake_repo(tmp_path):
     assert (real["count"], real["pages"], real["without_space"], real["roles"]) == (3, 2, 2, {"test": 3})
     assert real["shareable"] is False and real["license"] == "non-komersial"
     assert (commons["count"], commons["files"], commons["verified"], commons["status"]) == (3, 2, 0, "pending")
+    assert commons["pending"] == 3
     assert commons["license"] == "CC BY-SA 4.0, CC0" and commons["roles"] == {} and commons["planned"] == ["train", "val"]
+    assert real["share_note"].startswith("Lisensi non-komersial. Tidak disebarkan repo ini")
+    assert (last["real_train"], last["real_val"]) == (False, False)
 
     fonts = {f["file"]: f for f in card["fonts"]}
     assert [f["group"] for f in card["fonts"]] == ["core", "core", "extra", "test"]
@@ -306,6 +365,12 @@ def test_main_writes_the_card(tmp_path, monkeypatch, capsys):
     root = fake_repo(tmp_path / "repo")
     card = ed.build(root, "runB", root / "ujifont")
     monkeypatch.setattr(ed, "build", lambda: card)
+    # Run yang tidak dikenal ekspor hasil tidak punya kunci pipeline: web tidak bisa mencocokkannya, jadi tidak ditulis.
+    assert card["official"]["pipeline"] is None
+    with pytest.raises(SystemExit, match="runB tidak dikenal scripts/export_results.py"):
+        ed.main(["--out", str(tmp_path / "hasil")])
+    assert not (tmp_path / "hasil/datasets.json").exists()
+    card["official"]["pipeline"] = "crnn_runB"
     ed.main(["--out", str(tmp_path / "hasil")])
     written = json.loads((tmp_path / "hasil/datasets.json").read_text(encoding="utf-8"))
     assert written == json.loads(json.dumps(card))
@@ -329,11 +394,22 @@ def test_real_card_is_internally_consistent():
     lineage = card["lineage"]
     assert lineage["runs"][-1] == train and lineage["complete"]
     assert train["distinct_lines"] <= lineage["distinct_lines"] <= lineage["pool"] <= splits[0]["lines"]
-    assert lineage["samples"] == sum(r["steps"] * r["batch_size"] for r in lineage["runs"])
     assert card["usage"]["val"]["lines"] <= splits[1]["lines"] and card["usage"]["test"]["lines"] <= splits[2]["lines"]
     roles = [set(f["roles"]) for f in card["fonts"]]
     assert sum("train" in r for r in roles) == train["fonts"] and sum("val" in r for r in roles) == len(TRAIN_FONTS)
     assert all(f["roles"] == [] for f in card["fonts"] if f["group"] in ("review", "rejected"))
+    fonts = {f["file"]: f for f in card["fonts"]}
+    if "CarakanJawa.otf" in fonts and "javatext.ttf" in fonts and fonts["javatext.ttf"]["available"]:
+        # Terukur 2026-10-05 dan dicatat di CLAUDE.md: 72 dari 73 lebar maju sama; tiga font berspasi sempit.
+        shared = fonts["CarakanJawa.otf"]["shared_with_test"]
+        assert shared["family"] and shared["same"] < shared["of"] == len(ed.SPACING)
+        assert fonts["CarakanJawa.otf"]["missing"] == ["U+A98E"]
+        assert sum(f.get("shared_with_test", {}).get("family", False) for f in card["fonts"]) == 1
+        assert {name for name, f in fonts.items() if f.get("drops_space")} == {
+            "GumregahNew.ttf", "abmAksaJawa-Regular.ttf", "abmAksaJawa-Bold.ttf"}
+    if len(lineage["runs"]) > 1:
+        assert lineage["distinct_lines"] > train["distinct_lines"]
+    assert lineage["samples"] == sum(r["samples"] for r in lineage["runs"]) <= sum(r["steps"] * r["batch_size"] for r in lineage["runs"])
     rare = card["rare"]
     assert rare["codepoints"] > 0 and rare["scheduled_lines"]["mean"] <= rare["pool_lines"]["mean"] <= rare["train_lines"]["mean"]
 
@@ -343,3 +419,180 @@ def test_real_card_is_internally_consistent():
         labels = [line.split("\t")[1] for line in f.read().splitlines()[1:]]
     assert len(labels) == card["usage"]["real"]["lines"]
     assert not any(label in dump for label in labels if len(label) >= 4)
+
+
+def test_rare_characters_are_counted_in_pool_and_schedule_separately(tmp_path):
+    root = fake_repo(tmp_path)
+    path = root / "data/splits/train.txt"
+    train = path.read_text(encoding="utf-8").splitlines()
+    order = list(range(len(train)))
+    random.Random(0).shuffle(order)
+    pool = order[:400]
+    sampler = LengthBucketSampler([train[i] for i in pool], 8, shuffle=True, seed=0)
+    iter(sampler)  # runB dilatih dengan worker
+    scheduled = {pool[i] for batch in list(iter(sampler))[:10] for i in batch}
+    in_schedule = min(scheduled)
+    in_pool_only = min(set(pool) - scheduled)
+    outside = min(set(order[400:]))
+    # Ganti karakter terakhir (panjang baris tetap, jadi urutan batch tidak berubah).
+    train = [line.replace(RARE, "") + (GA if RARE in line else "") for line in train]
+    for index, ch in ((in_schedule, "\ua990"), (in_pool_only, "\ua991"), (outside, "\ua993")):
+        train[index] = train[index][:-1] + ch
+    path.write_text("\n".join(train) + "\n", encoding="utf-8", newline="\n")
+    tokenizer = {"blank": 0, "charset": [f"U+{ord(ch):04X}" for ch in (" ", KA, GA, "\ua990", "\ua991", "\ua993", "\ua9ce")]}
+    (root / "data/tokenizer.json").write_text(json.dumps(tokenizer), encoding="utf-8")
+
+    card = ed.build(root, "runB", root / "ujifont")
+    rare = card["rare"]
+    assert (rare["codepoints"], rare["javanese"], rare["charset"]) == (4, 6, 7)
+    assert rare["train_lines"] == {"min": 0, "max": 1, "mean": 0.75}
+    assert rare["pool_lines"] == {"min": 0, "max": 1, "mean": 0.5}       # dua dari empat ada di kumpulan run resmi
+    assert rare["scheduled_lines"] == {"min": 0, "max": 1, "mean": 0.25}  # hanya satu yang dijadwalkan
+    assert rare["never_scheduled"] == 3
+    # U+A9CE belum dipakai Unicode: tidak ada font yang punya glyph-nya.
+    for font in card["fonts"]:
+        if font["roles"]:
+            assert font["missing"] == ["U+A9CE"], font["file"]
+
+
+def test_chain_follows_every_ancestor_and_reports_odd_logs(tmp_path):
+    root = fake_repo(tmp_path)
+    ckpt = root / "out/checkpoints"
+    zero = save_ckpt(ckpt / "run0" / "last_snapshot.pt", 3, train_lines=100)
+    write_log(zero.parent / "log.jsonl", [start(0), {"step": 3, "event": "end"}])
+    save_ckpt(ckpt / "runA" / "last_snapshot.pt", 6, train_lines=200, init="out/checkpoints/run0/last_snapshot.pt")
+    card = ed.build(root, "runB", root / "ujifont")
+    assert [(r["run"], r["init"]) for r in card["lineage"]["runs"]] == [("run0", None), ("runA", "run0"), ("runB", "runA")]
+    assert card["lineage"]["steps"] == 19 and card["lineage"]["complete"] and card["warnings"] == []
+
+    # Run yang dimundurkan lalu melewati langkah checkpoint-nya lagi, dan proses lanjutan dengan --train-lines lain:
+    # keduanya diberi tahu, karena hitungan dari log belum tentu benar.
+    write_log(ckpt / "runA" / "log.jsonl", [start(0), {"step": 6, "val_cer": 0.3}, start(2), {"step": 6, "val_cer": 0.2},
+                                            {"step": 6, "event": "end"}])
+    write_log(ckpt / "runB" / "log.jsonl", [start(0), {"step": 5}, {"event": "start", "step": 5, "args": {"train_lines": 123}},
+                                            {"step": 10, "event": "end"}])
+    (root / "fonts/extra/Salinan.ttf").unlink()
+    warnings = ed.build(root, "runB", root / "ujifont")["warnings"]
+    assert len(warnings) == 3
+    assert "Log run runA: langkah 6 diperiksa lebih dari satu proses" in warnings[0]
+    assert "Run runB dilanjutkan dengan argumen data yang berbeda" in warnings[1]
+    assert "font tambahan dari fonts/extra, tetapi folder itu kosong" in warnings[2]
+
+
+def test_paths_outside_the_repo_and_the_last_histogram_bin(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    assert ed.relative(root / "out/checkpoints/x/last_snapshot.pt", root) == "out/checkpoints/x/last_snapshot.pt"
+    outside = ed.relative(tmp_path / "pengguna rahasia" / "model" / "last_snapshot.pt", root)
+    assert outside == "(luar repo)/model/last_snapshot.pt" and "rahasia" not in outside
+
+    # src.corpus.length_histogram memasukkan baris sepanjang MAX_LEN (80) ke keranjang "70-79".
+    assert ed.histogram({"20-29": 5, "70-79": 7}) == [{"range": "20-29", "lines": 5}, {"range": "70-80", "lines": 7}]
+    assert ed.histogram({"20-29": 5, "30-39": 7})[-1]["range"] == "30-39"
+    assert ed.histogram({}) == []
+
+
+def test_main_refuses_values_that_are_not_strict_json(tmp_path, monkeypatch):
+    card = ed.build(fake_repo(tmp_path / "repo"), "runB", tmp_path / "repo" / "ujifont")
+    card["official"]["pipeline"] = "crnn_runB"
+    card["usage"]["train"]["track_max"] = float("nan")
+    monkeypatch.setattr(ed, "build", lambda: card)
+    with pytest.raises(ValueError):
+        ed.main(["--out", str(tmp_path / "hasil")])
+    assert not (tmp_path / "hasil/datasets.json").exists()
+
+
+def test_real_training_data_changes_roles_and_leaves_the_schedule_unknown(tmp_path):
+    root = fake_repo(tmp_path)
+    commons = root / "data/real/commons"
+    header = "image_path\ttext\tsource_id\tcondition\n"
+    (commons / "labels.tsv").write_text(header + f"a.png\t{KA}\tx1\tpapan\n" + f"b.png\t{GA}\tx2\tpapan\n",
+                                        encoding="utf-8", newline="\n")
+    # Dua dari tiga draf sudah diverifikasi tetapi belum dipakai melatih: satu masih menunggu.
+    card = ed.build(root, "runB", root / "ujifont")
+    waiting = card["datasets"][2]
+    assert (waiting["verified"], waiting["pending"], waiting["status"], waiting["roles"]) == (2, 1, "pending", {})
+
+    # Run resmi dilatih dan divalidasi dengan data nyata (Fase 6): jadwal baris sintetis tidak dihitung, ditulis null.
+    (commons / "labels_train.tsv").write_text(header + f"a.png\t{KA}\tx1\tpapan\n", encoding="utf-8", newline="\n")
+    (commons / "labels_val.tsv").write_text(header + f"b.png\t{GA}\tx2\tpapan\n", encoding="utf-8", newline="\n")
+    (commons / "labels.tsv").write_text(header + "".join(f"{n}.png\t{KA}\tx{n}\tpapan\n" for n in range(3)),
+                                        encoding="utf-8", newline="\n")
+    save_ckpt(root / "out/checkpoints/runB/last_snapshot.pt", 10, init="out/checkpoints/runA/last_snapshot.pt",
+              real_train="data/real/commons/labels_train.tsv", real_val="data/real/commons/labels_val.tsv")
+    card = ed.build(root, "runB", root / "ujifont")
+    train = card["usage"]["train"]
+    assert train["distinct_lines"] is None and train["real_train"] and train["real_val"] and train["samples"] == 80
+    assert card["lineage"]["distinct_lines"] is None and card["lineage"]["runs"][0]["distinct_lines"] == 32
+    assert card["rare"]["scheduled_lines"] == {} and card["rare"]["never_scheduled"] is None
+    assert card["rare"]["pool_lines"]["max"] <= 1 and card["rare"]["codepoints"] == 2
+    assert any("--overfit atau --real-train" in warning for warning in card["warnings"])
+    used = card["datasets"][2]
+    assert (used["status"], used["pending"], used["roles"], used["planned"]) == ("used", 0, {"train": 1, "val": 1}, [])
+
+
+def test_font_roles_and_remarks_follow_folders_and_measurements(tmp_path, monkeypatch):
+    """Aturan font teruji tanpa font tambahan (yang tidak ikut repo): ukurannya dibuat-buat, aturannya yang asli."""
+    root = fake_repo(tmp_path)
+    (root / "fonts/extra_review").mkdir()
+    shutil.copy(TRAIN_FONTS[1], root / "fonts/extra_review/Ragu.ttf")
+    with (root / "fonts/extra/SOURCES.md").open("a", encoding="utf-8") as f:
+        f.write("| `Ragu.ttf` | `extra_review` | https://contoh/ragu | tidak tercantum | MERAGUKAN: contoh |\n")
+    # Salinan: spasi sempit, dan lebar majunya sama dengan font uji di 72 dari 73 aksara (seperti CarakanJawa dan
+    # javatext sungguhan). Font inti berbeda di semua aksara.
+    reference = {ch: 0.5 for ch in ed.SPACING}
+    close = {**reference, ed.SPACING[0]: None}
+
+    def advances(path):
+        name = Path(path).name
+        return reference if name == "javatext.ttf" else close if name == "Salinan.ttf" else {ch: 0.7 for ch in ed.SPACING}
+
+    monkeypatch.setattr(ed, "advances", advances)
+    monkeypatch.setattr(ed, "space_ratio", lambda path: 0.05 if Path(path).name == "Salinan.ttf" else 0.2)
+
+    card = ed.build(root, "runB", root / "ujifont")
+    fonts = {f["file"]: f for f in card["fonts"]}
+    assert [f["group"] for f in card["fonts"]] == ["core", "core", "extra", "test", "review"]
+    salinan = fonts["Salinan.ttf"]
+    assert salinan["drops_space"] is True
+    assert salinan["shared_with_test"] == {"font": "javatext.ttf", "same": 72, "of": 73, "family": True}
+    for core in TRAIN_FONTS:
+        assert fonts[core.name]["drops_space"] is False
+        assert fonts[core.name]["shared_with_test"] == {"font": "javatext.ttf", "same": 0, "of": 73, "family": False}
+    # Font di folder yang bukan --extra-fonts run resmi tidak punya peran dan tidak diukur.
+    ragu = fonts["Ragu.ttf"]
+    assert ragu["roles"] == [] and ragu["review"] == "MERAGUKAN: contoh" and ragu["in_repo"] is False
+    assert not {"drops_space", "missing", "shared_with_test"} & set(ragu)
+    assert card["usage"]["train"]["fonts"] == 3 and card["warnings"] == []
+
+
+def test_samples_validation_lines_and_corpus_leftovers_are_counted_as_they_are(tmp_path):
+    """Empat hal yang lolos uji mutasi 2026-10-06: test lama tidak membedakan hitungan yang benar dari yang salah."""
+    root = fake_repo(tmp_path)
+    ckpt = root / "out/checkpoints/runB"
+    # Kumpulan 100 baris, batch 8: 12 batch penuh + satu batch berisi 4. 13 langkah = satu epoch = 100 sampel, bukan
+    # 13 x 8 = 104. --val-lines 500 lebih besar dari bagian validasi (100 baris): yang dibaca seluruh bagian itu.
+    save_ckpt(ckpt / "last_snapshot.pt", 13, init="out/checkpoints/runA/last_snapshot.pt", train_lines=100, workers=2,
+              val_lines=500)
+    write_log(ckpt / "log.jsonl", [start(0), {"step": 13, "val_cer": 0.05, "val_lines": 100}, {"step": 13, "event": "end"}])
+    # Statistik korpus yang jumlahnya tidak dijelaskan langkah pembangunannya: selisihnya ditulis, bukan dianggap nol.
+    stats_path = root / "data/corpus_stats.json"
+    stats = json.loads(stats_path.read_text(encoding="utf-8"))
+    stats_path.write_text(json.dumps({**stats, "duplicates": 105}), encoding="utf-8")
+
+    card = ed.build(root, "runB", root / "ujifont")
+    train = card["usage"]["train"]
+    assert (train["steps"], train["batch_size"], train["pool"]) == (13, 8, 100)
+    assert (train["samples"], train["distinct_lines"]) == (100, 100)
+    assert card["lineage"]["samples"] == 48 + 100 and card["lineage"]["steps"] == 6 + 13
+    assert card["usage"]["val"] == {"lines": 100, "steps": [13], "fonts": 2}
+    assert card["corpus"]["other"] == 2200 - (2300 - 105 + 10) == -5
+    assert card["warnings"] == []
+
+    # Berkas bagian latih ditulis ulang sesudah training: pemakaian dihitung dari berkas yang sekarang, dan itu disebut.
+    train_path = root / "data/splits/train.txt"
+    newer = train_path.stat().st_mtime + 3600
+    os.utime(train_path, (newer, newer))
+    warnings = ed.build(root, "runB", root / "ujifont")["warnings"]
+    assert len(warnings) == 1 and warnings[0].startswith("data/splits/train.txt lebih baru daripada checkpoint")
+

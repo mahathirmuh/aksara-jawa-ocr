@@ -15,6 +15,9 @@ return [
     /* Kartu data halaman Dataset: results_dir/datasets.json buatan scripts/export_datasets.py, skemanya sendiri. */
     'dataset_schema' => 1,
 
+    /* Kartu metode halaman Metode: results_dir/methods.json buatan scripts/export_methods.py, skemanya sendiri. */
+    'method_schema' => 1,
+
     /* Layanan model untuk halaman Demo (src/serve.py, FastAPI). */
     'service_url' => env('OCR_SERVICE_URL', 'http://127.0.0.1:8011'),
     'service_timeout' => 90,

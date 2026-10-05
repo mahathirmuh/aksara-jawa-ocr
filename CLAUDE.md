@@ -102,6 +102,7 @@ python -m src.charlm --order 5 --lines 300000 --drop-space-prob 0.5             
 python scripts/beam_eval.py CKPT --lm data/charlm/o5_n300000_ds0.5.pkl --name N  # beam+LM vs greedy: disetel di dev sintetis, NusaAksara sekali
 python scripts/export_results.py                 # kontrak data web -> out/results/ (~14 menit CPU dengan run fase6)
 python scripts/export_datasets.py                # kartu data halaman Dataset -> out/results/datasets.json (~20 dtk CPU, tanpa model)
+python scripts/export_methods.py                 # kartu metode halaman Metode -> out/results/methods.json (beberapa detik; SESUDAH export_results.py dan compare_runs.py, karena buktinya dikutip dari keluaran keduanya)
 python scripts/compare_runs.py A B               # dua pipeline di out/results: CER + SK bootstrap baris/halaman, recall aksara langka & adeg-adeg -> out/compare/
 python scripts/eval_rare.py --workers 2          # sintetis tertarget aksara langka (split test, font javatext, 3 kondisi x 3 checkpoint; ~1-2 jam CPU)
 python scripts/eval_spacing.py --lines 301 --threads 4   # dosis-respons jarak antar suku kata (split val, javatext): spasi palsu per 100 batas suku kata; memakai cache
@@ -110,6 +111,7 @@ bash scripts/make_official.sh RUN                # evaluasi resmi G1/G2 10.000 b
 cd web && php artisan aksara:import && php artisan serve --port=8010                  # web UI (lihat web/README)
 cd web && php artisan aksara:dictionary                                               # kamus kata halaman Kamus (data jadi di web/database/dictionaries)
 cd web && php artisan aksara:datasets                                                 # kartu data halaman Dataset saja (aksara:import ikut mengimpornya bila berkasnya ada)
+cd web && php artisan aksara:methods                                                  # kartu metode halaman Metode saja (aksara:import ikut mengimpornya bila berkasnya ada)
 ```
 
 ---
@@ -255,7 +257,7 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   - **Web UI di folder `web/`** (keputusan user 2026-09-24: satu folder dengan repo ini, bukan repo
     terpisah). Laravel 12 + starter kit Livewire (Flux, Volt), PHP 8.4, SQLite; Tailwind 4, Chart.js;
     webfont aksara hanya Noto Sans Javanese. Navigasi = **sidebar** (Hasil: Ringkasan, Perbandingan,
-    Ablasi, Dataset; Analisis: Penjelajah baris, Kesalahan aksara; Alat: Demo, Kamus, Terjemahan). Mockup disetujui user 2026-09-24:
+    Ablasi, Dataset, Metode; Analisis: Penjelajah baris, Kesalahan aksara; Alat: Demo, Kamus, Terjemahan). Mockup disetujui user 2026-09-24:
     <https://claude.ai/artifact/9NY5nf3RwJfJQpT479Sibp>. Lokal dengan login (citra NusaAksara
     non-komersial). Python menghitung semua angka OCR; Laravel hanya menampilkan (`php artisan
     aksara:import` dari `out/results/`) dan memanggil `src/serve.py` (FastAPI di `.venv`, 127.0.0.1) untuk demo.
@@ -368,18 +370,81 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     mengimpornya bila berkasnya ada, dan `scripts/make_official.sh` ikut mengekspornya. Isi kartu: korpus dan
     pembagian (dihitung ulang dari `data/splits`, wajib sama dengan `corpus_stats.json`), pemakaian run resmi dan
     rantai checkpoint yang dilanjutkannya (`args.init` tiap checkpoint, proses dari `log.jsonl`, baris yang dijadwalkan
-    dari urutan `LengthBucketSampler` yang sama dengan `src.train`), karakter langka, daftar dataset, font per peran,
-    data pendukung. Teks label NusaAksara tidak pernah ditulis ke kartu (dijaga test). Data pendukung milik web (kamus
-    kata, leksikon é, anotasi) dihitung web dari tabelnya sendiri.
-    Terukur 2026-10-05: run resmi `fase7_track` menjadwalkan **48.000 baris** berbeda (5,2% bagian latih; satu
-    proses, 1.500 langkah x 32) dari kumpulan 100.000 baris. **19.712 adalah angka `fase6_ctrl`** (tiga proses),
-    bukan angka run resmi. Seluruh rantai (base -> fase5_quick -> fase5_fonts -> fase6_ctrl -> fase7_track): 6.298
-    langkah, 201.536 sampel, 64.612 baris berbeda (6,9% bagian latih). 44 karakter langka masing-masing ada di 100
-    baris latih, dan hanya di 1-12 baris (rata-rata 5,5) dari yang dijadwalkan run resmi. Lebar maju CarakanJawa
-    sama dengan javatext di 72 dari 73 aksara/angka/pada (dihitung ulang tiap ekspor; font latih lain 0 dari 73).
-    Batasan di halaman hanya muncul bila syaratnya ada di kartu (font uji sekeluarga dengan font latih, data nyata
-    tanpa bagian validasi, aksara langka), jadi hilang sendiri begitu datanya diperbaiki. Halaman menandai kartu
-    "tertinggal" bila pipeline resmi web bukan run yang dihitung kartu.
+    dari urutan batch DataLoader `src.train`), karakter langka, daftar dataset, font per peran, data pendukung, dan
+    `warnings` (hal yang tidak bisa dipastikan ekspor: log tidak lengkap, run dimundurkan, folder font kosong). Teks
+    label NusaAksara tidak pernah ditulis ke kartu (dijaga test). Data pendukung milik web: kamus kata dan anotasi
+    dihitung dari tabel web, leksikon é dari berkasnya.
+    **Urutan batch training (ditemukan tinjauan independen 2026-10-05, diverifikasi dengan `src.train.make_loader`
+    sungguhan; berlaku untuk SEMUA hitungan "baris yang dilihat run"):** dengan worker (`num_workers > 0`) DataLoader
+    PyTorch memanggil `iter(batch_sampler)` dua kali sebelum batch pertama, dan `LengthBucketSampler.__iter__`
+    menaikkan `epoch` di tiap panggilan, jadi lintasan pertama tiap proses training memakai `random.Random(seed + 1)`,
+    bukan `seed + 0` (tanpa worker: `seed + 0`). Semua run di rantai memakai 2 atau 4 worker.
+    `Schedule.batches(..., workers)` menirunya; versi pertama kartu memakai panggilan pertama sampler dan salah (20 langkah
+    batch 32: hanya 194 dari 640 baris yang sama). Batch terakhir sebuah kelompok panjang bisa lebih kecil dari ukuran
+    batch, jadi sampel run `base` 47.968, bukan 1.500 x 32.
+    Terukur 2026-10-05, sesudah koreksi urutan: run resmi `fase7_track` menjadwalkan **48.000 baris** berbeda (5,2%
+    bagian latih; satu proses, 1.500 langkah x 32) dari kumpulan 100.000 baris. **19.712 adalah angka `fase6_ctrl`**
+    (tiga proses), bukan angka run resmi. Seluruh rantai (base -> fase5_quick -> fase5_fonts -> fase6_ctrl ->
+    fase7_track): 6.298 langkah, 201.504 sampel, **64.595 baris berbeda** (6,9% bagian latih; `base` 31.984 dari
+    kumpulan 50.000). 44 karakter langka masing-masing ada di 100 baris latih, dan hanya di **1-14 baris (rata-rata
+    5,9)** dari yang dijadwalkan run resmi. Angka lama 64.612 / 201.536 / 1-12 (rata-rata 5,5) salah. Lebar maju
+    CarakanJawa sama dengan javatext di 72 dari 73 aksara/angka/pada (dihitung ulang tiap ekspor; font latih lain 0
+    dari 73). Bagian uji korpus tidak "disimpan sampai akhir": di luar gerbang resmi, 24 tes cepat (sampai 200 baris
+    pertama) dan 2 evaluasi penuh run lain juga membacanya, dan NusaAksara sudah dievaluasi 36 kali (laporan G3 di
+    `out/eval`); halaman menyebut angka-angka itu.
+    Kalimat dan batasan di halaman dipilih dari isi kartu, supaya tetap benar untuk kartu run lain: font uji
+    sekeluarga dengan font latih; data nyata tanpa bagian validasi; aksara langka HANYA bila run resmi tidak memakai
+    sisipan aksara langka; jumlah run di rantai, seed, kelengkapan rantai. Nilai `null` (jadwal baris run `--overfit` /
+    `--real-train`) tampil "tidak dihitung". Baris Commons yang menunggu = draf - terverifikasi, dan perannya mengikuti
+    `--real-train` / `--real-val` run resmi. Halaman menampilkan peringatan "Kartu data dan hasil OCR tidak sejalan"
+    bila pipeline resmi web bukan run yang dihitung kartu, tanpa menebak sisi mana yang tertinggal.
+    **Impor kartu (`App\Services\CardImporter`, dasar `DatasetImporter` dan `MethodImporter`):** dua pengaman supaya
+    kartu yang salah ditolak saat impor, bukan menjadi HTTP 500 saat halaman dibuka (tinjauan 2026-10-05: 55 dari 78
+    kartu "satu kunci dibuang" diterima versi pertama lalu membuat halaman 500). (1) `shape()`: kunci wajib dan
+    tipenya (notasi titik, `*` = setiap butir, akhiran `?` = boleh null; wadah didaftar sebelum isinya supaya pesannya
+    menyebut kunci yang salah). (2) uji tampil: halaman dirender sekali dengan kartu calon di dalam transaksi
+    (`preview()`, lewat `viewData()` statis komponennya); gagal karena apa pun = batal, kartu lama dipertahankan.
+    `aksara:import` yang hasil OCR-nya berhasil tetapi sebuah kartunya ditolak menulis PERINGATAN dan tetap keluar 0
+    (hasilnya sudah tersimpan); `aksara:datasets` / `aksara:methods` keluar 1.
+    **Test halaman diperiksa dengan mutasi (2026-10-06):** tiap test halaman memeriksa isi per baris lewat atribut
+    `data-part|bin|run|dataset|font`, bukan `assertSee` pada teks yang muncul di banyak tempat (versi pertama
+    `DatasetPageTest` meloloskan 10 dari 16 kerusakan buatan peninjau: pil "disebar" terbalik, penanda resmi terbalik,
+    batang kosong). Sesudah diperkuat, 192 kerusakan satu-hal semuanya menggagalkan test: 31 di halaman Dataset, 51
+    di halaman Metode (atribut `data-group|method|step|plan`), 37 di `export_datasets.py`, dan 73 di
+    `export_methods.py`; untuk dua skrip ekspor itu juga tanpa test yang butuh data lokal. Empat mutan ekspor data dan
+    17 mutan ekspor metode lolos dari test versi pertama (sampel dengan batch pendek, `--val-lines` melebihi bagian
+    validasi, selisih korpus, peringatan korpus ditulis ulang; pengaturan tiap butir kartu metode tidak diperiksa
+    lengkap). Pembantu baca-halaman dipakai bersama lewat `web/tests/Concerns/ReadsPage.php`. Harness mutasinya ada di
+    scratchpad sesi, tidak ikut repo. Jebakan saat mengulanginya: folder sementara pytest bernama panjang melewati
+    batas jalur 260 karakter Windows dan gagalnya terhitung "mutan terbunuh"; periksa bahwa alasan gagalnya memang
+    pernyataan test.
+    **Menu Metode (permintaan user 2026-10-05: "pada sidebar tambahkan menu method/machine learning, jadi disana list
+    method atau machine learning yang digunakan"; isi dan pengelompokannya keputusan Claude, belum dikonfirmasi):**
+    `Pages/Metode.php`, kelompok Hasil di bawah Dataset, rute `/metode`. Isinya dari **kartu metode**
+    `out/results/methods.json` buatan `scripts/export_methods.py` (kontrak sendiri, `aksara.method_schema` 1), diimpor
+    `php artisan aksara:methods` ke tabel `method_reports`; `aksara:import` ikut mengimpornya bila berkasnya ada, dan
+    `scripts/make_official.sh` mengekspor dan mengimpornya PALING AKHIR (buktinya dikutip dari manifest hasil, berkas
+    pembanding, dan evaluasi sintetis). 26 butir di 5 kelompok (pembaca aksara 7, data latih sintetis 6, pelatihan 5,
+    koreksi sesudah baca 1, evaluasi dan statistik 7) + 4 pipeline berstatus "planned"; web menambah kelompok keenam
+    "Tahap lanjutan alur" (alih aksara, NLLB-200, chrF/BLEU, tingkat tutur, alih aksara Latin -> aksara, pemulih é)
+    dari tabel dan konstanta web (`Metode::webGroup()`), jadi logika tahap 2-4 tetap tidak masuk `src/`. Tiap butir:
+    jenis (`model`, `training`, `data`, `statistic`, `rule`, `evaluation`), status (`official` = bagian model resmi,
+    `used`, `available`, `tested`, `comparator`), penjelasan, pengaturan, bukti terukur + sumbernya, berkas kode.
+    **Tidak ada angka yang diketik tangan di kartu kecuali dua yang bersumber "catatan pengukuran di CLAUDE.md"**
+    (normalisasi kontras 0,9% -> 74,5%; packing 1,12% vs 0,07%): model dibangun dari `model_config` checkpoint resmi
+    dan dimuati bobotnya (4.590.909 parameter: CNN + proyeksi 1.913.568, BiLSTM 2.629.632, keluaran 47.709; 7 lapis
+    konvolusi, tinggi 96 -> 3, langkah lebar 4, 93 kelas), argumen pelatihan dari checkpoint, pengoptimal / jadwal /
+    rugi / pemotongan gradien dicocokkan dengan sumber `src.train.main` (**ekspor BERHENTI bila kode itu berubah**:
+    perbarui `TRAIN_CODE` dan butir pelatihannya), bukti dari `out/results/manifest.json` dan
+    `out/compare/<A>_vs_<B>.json` (bukti yang berkasnya tidak ada dilewati; run kontrol tiap perlakuan di
+    `CONTROL_OF`). Kalimat yang bergantung pada resep run (operasi augmentasi, rantai run, perangkat, beam + LM pada
+    checkpoint resmi atau belum) disusun dari argumen dan hasilnya, bukan teks tetap. Ekspor juga berhenti bila manifest
+    menetapkan pipeline resmi lain, dibuat dengan `--limit`, run-nya tidak dikenal `export_results.py`, jumlah kelas
+    checkpoint beda dari tokenizer, atau jumlah parameter di log beda dari model. Butir web "NLLB-200" menyebut
+    "bukan pipeline resmi" selama terjemahan dari keluaran OCR dibuat dari pipeline lain (sekarang: beam + LM atas
+    `fase5_fonts`). Halaman menampilkan peringatan
+    "Kartu metode dan hasil tidak sejalan" bila kartu dibuat untuk run lain atau `results_generated` kartu bukan ekspor
+    hasil yang sedang diimpor: sesudah `export_results.py` dijalankan ulang, jalankan ulang `export_methods.py` juga.
     **Jebakan PostgreSQL:** kolom `payload` bertipe `json`, BUKAN `jsonb`. jsonb mengurutkan ulang kunci objek
     (train/val/test tampil sebagai "5 / 5 / 90" dan peran dataset tertukar urutannya), sedangkan SQLite tidak, jadi
     test bawaan tidak menangkapnya. Halaman kini mengurutkan peran sendiri, dan ada test yang mengacak urutan kunci.
@@ -402,12 +467,12 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     `phpunit.xml` memaksa SQLite in-memory (`force="true"`, jadi `DB_*` yang tertinggal di shell diabaikan) dan
     `tests/TestCase.php::createApplication` menolak database bernama `its_aksara` sebelum migrasi. Test memakai folder
     sementara untuk `storage/app/mt` (dulu `TranslationTest` menimpa hasil NLLB; dipulihkan dari DB lewat
-    `php artisan aksara:translate --dump`). 146 test lolos di SQLite dan di PostgreSQL uji (2026-10-05, sesudah menu Dataset).
+    `php artisan aksara:translate --dump`). 157 test lolos di SQLite dan di PostgreSQL uji (2026-10-06, sesudah menu Metode dan perbaikan tinjauan menu Dataset).
     **Port:** Laravel 8010, layanan model 8011, layanan terjemahan 8012 — 8000/8001 dipakai proyek lain
     milik user di laptop yang sama (jangan dihentikan). Test tetap bisa di SQLite in-memory
     (`phpunit.xml`); kode dijaga netral: `whereJsonContains` untuk tag, tabel turunan untuk ORDER BY berekspresi
     (PostgreSQL menolak alias kolom di dalam ekspresi). Isi DB kecuali akun & label manusia bisa dibangun ulang
-    (`aksara:import`, `aksara:datasets`, `aksara:annotations`, `aksara:translate --import-only`); label tingkat tutur dicadangkan
+    (`aksara:import`, `aksara:datasets`, `aksara:methods`, `aksara:annotations`, `aksara:translate --import-only`); label tingkat tutur dicadangkan
     ke `web/database/labels/speech_levels.json` lewat `php artisan aksara:labels export|import`.
   - **Kontrak data (skema 1):** `scripts/export_results.py` -> `out/results/manifest.json` (pipeline,
     gerbang, metrik, ablasi, kesalahan aksara), `lines.jsonl`, `predictions.jsonl` (teks, CER, segmen beda
