@@ -1,13 +1,19 @@
+@php
+    // Anak judul: isi tiap kamus, kamus kata hanya disebut bila sudah diimpor.
+    $aside = collect($dictionaries)->filter(fn ($d) => $d['entries'] > 0)
+        ->map(fn ($d, $key) => nfmt($d['entries']).' entri '.($key === 'jv' ? 'bahasa Jawa' : 'bahasa Indonesia'))
+        ->push(nfmt($total).' aksara dan tanda', nfmt($lexiconTotal->sum()).' kata penanda tingkat tutur')->implode(' · ');
+@endphp
 <div class="flex flex-col gap-4">
-    @include('partials.page-head', ['eyebrow' => 'Rujukan alur', 'heading' => 'Kamus',
-        'aside' => nfmt($total).' aksara dan tanda · '.nfmt($lexiconTotal->sum()).' kata penanda tingkat tutur'])
+    @include('partials.page-head', ['eyebrow' => 'Rujukan alur', 'heading' => 'Kamus', 'aside' => $aside])
 
-    {{-- Pencarian: menyaring kamus aksara dan leksikon; aksara yang ditempel diurai per codepoint. --}}
+    {{-- Pencarian: satu kotak untuk semua kamus. Kata dicari di kamus kata, nama/kode di kamus aksara dan leksikon;
+         aksara yang ditempel diurai per codepoint lalu dicari lewat bacaan Latin drafnya. --}}
     <section class="card">
         <div class="card-body flex flex-col gap-3">
             <flux:input wire:model.live.debounce.300ms="q" id="kamus-q" type="search" icon="ti-search" autocomplete="off"
                         aria-label="Cari di kamus"
-                        placeholder="Cari nama, kode, bacaan Latin, atau kata; bisa juga menempel aksara (mis. wulu, U+A9B6, kula, {{ mb_chr(0xA98F).mb_chr(0xA9B6) }})" />
+                        placeholder="Cari kata Jawa atau Indonesia, nama atau kode aksara; bisa juga menempel aksara (mis. omah, rumah, wulu, U+A9B6, {{ mb_chr(0xA98F).mb_chr(0xA9B6) }})" />
 
             @if ($probe)
                 <div class="card-inset flex flex-col gap-2 p-3" wire:key="uraian">
@@ -36,21 +42,172 @@
                             @endforeach
                         </div>
                     @elseif (! $probe['aksara'])
-                        <p class="text-xs text-zinc-500 dark:text-zinc-400">Hasil pencarian "{{ $q }}" ada di kamus aksara dan leksikon di bawah.</p>
+                        <p class="text-xs text-zinc-500 dark:text-zinc-400">Hasil pencarian "{{ $q }}" ada di tiap kamus di bawah.</p>
                     @endif
                 </div>
             @else
-                <p class="text-xs text-zinc-500 dark:text-zinc-400">Pencarian menyaring kamus aksara dan leksikon di bawah. Aksara Jawa yang ditempel diurai per aksara dan diberi bacaan Latin draf.</p>
+                <p class="text-xs text-zinc-500 dark:text-zinc-400">Satu kotak untuk semua kamus di bawah. Beberapa kata sekaligus (mis. satu baris transliterasi) diartikan per kata; aksara Jawa yang ditempel diurai per aksara dan dicari lewat bacaan Latin drafnya.</p>
             @endif
 
-            {{-- Halaman ini panjang: lompat ke bagiannya. --}}
+            {{-- Halaman ini panjang: lompat ke bagiannya. Angka = jumlah yang cocok dengan pencarian. --}}
             <nav class="flex flex-wrap gap-2" aria-label="Bagian kamus">
+                @foreach ($dictionaries as $key => $d)
+                    <a href="#kamus-{{ $key }}" class="chip" wire:key="lompat-{{ $key }}">{{ $d['label'] }}
+                        @if ($d['mode'] === 'search' || $d['mode'] === 'words')
+                            <span class="chip-count num">{{ nfmt($d['found']) }}</span>
+                        @endif
+                    </a>
+                @endforeach
                 <a href="#kamus-aksara" class="chip">Kamus aksara <span class="chip-count num">{{ nfmt($shown) }}</span></a>
                 <a href="#kamus-koreksi" class="chip">Kamus koreksi OCR</a>
                 <a href="#leksikon-tutur" class="chip">Leksikon tingkat tutur <span class="chip-count num">{{ nfmt($lexicon->sum(fn ($words) => $words->count())) }}</span></a>
             </nav>
         </div>
     </section>
+
+    {{-- Kamus kata: bahasa Jawa dan bahasa Indonesia. Data pihak ketiga (lihat sumber di kaki tiap bagian). --}}
+    @foreach ($dictionaries as $key => $d)
+        @php
+            // Di tiap entri cukup nama pendek sumbernya (tanpa keterangan dalam kurung); nama lengkap dan lisensinya di kaki bagian.
+            $sourceNames = $d['sources']->mapWithKeys(fn ($source) => [$source->key => trim(explode('(', $source->name)[0])])->all();
+            // Bahasa arti: bila kamus ini hanya punya satu bahasa arti, cukup disebut sekali di anak judul.
+            $languages = collect($d['languages'])->map(fn ($code) => \App\Models\DictionaryEntry::GLOSS_LANGUAGES[$code] ?? $code);
+            $mixed = $languages->count() > 1;
+        @endphp
+        <section class="card scroll-mt-20" id="kamus-{{ $key }}" wire:key="kamus-kata-{{ $key }}">
+            <div class="card-body">
+                <div class="mb-3">
+                    <h2 class="section-title">{{ $d['label'] }}</h2>
+                    <p class="card-subtitle">
+                        @if ($key === 'jv')
+                            Kata bahasa Jawa dengan ejaan aksara (bila sumbernya punya), kelas kata, ragam ngoko atau krama, dan artinya.
+                        @else
+                            Kata bahasa Indonesia dengan kelas kata dan artinya, untuk membaca hasil tahap arti.
+                        @endif
+                        @if ($languages->isNotEmpty())
+                            Arti berbahasa {{ $languages->join(', ', ' dan ') }}{{ $mixed && $languages->contains('Indonesia') ? '; yang berbahasa Indonesia didahulukan' : '' }}. Bisa juga dicari dari artinya: ketik kata dalam bahasa itu untuk menemukan {{ $key === 'jv' ? 'padanan Jawanya' : 'kata Indonesianya' }}.
+                        @endif
+                        Ini data pihak ketiga, bukan hasil OCR atau hitungan proyek ini.
+                    </p>
+                </div>
+
+                @if ($d['mode'] === 'missing')
+                    <div class="card card-dashed">
+                        <div class="card-body text-sm text-zinc-600 dark:text-zinc-300">
+                            {{ $d['label'] }} belum diimpor. Bangun datanya dengan <span class="font-mono">python web/tools/dictionaries.py</span>, lalu jalankan <span class="font-mono">php artisan aksara:dictionary</span>.
+                        </div>
+                    </div>
+                @elseif ($d['mode'] === 'idle')
+                    <div class="flex flex-wrap items-center gap-2 text-sm">
+                        <span class="text-xs text-zinc-500 dark:text-zinc-400">{{ nfmt($d['entries']) }} entri. Ketik kata di kotak pencarian, atau coba:</span>
+                        @foreach ($d['examples'] as $example)
+                            <button type="button" class="chip" wire:click="$set('q', '{{ $example }}')" wire:key="contoh-{{ $key }}-{{ $example }}">{{ $example }}</button>
+                        @endforeach
+                    </div>
+                @elseif ($d['mode'] === 'words')
+                    {{-- Beberapa kata: arti per kata, hanya entri yang katanya persis sama. --}}
+                    @if ($d['phrase']->isNotEmpty())
+                        <div class="dict-list mb-3">
+                            @foreach ($d['phrase'] as $entry)
+                                @include('partials.dictionary-entry', ['entry' => $entry, 'sourceNames' => $sourceNames, 'showLanguage' => $mixed])
+                            @endforeach
+                        </div>
+                    @endif
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr><th>Kata</th><th>Arti per kata</th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach ($d['rows'] as $i => $row)
+                                    <tr wire:key="per-kata-{{ $key }}-{{ $i }}">
+                                        <td class="whitespace-nowrap align-top font-semibold">{{ $row['word'] }}</td>
+                                        <td>
+                                            @forelse ($row['entries'] as $entry)
+                                                <div class="dict-inline">
+                                                    @if ($entry->aksara)
+                                                        <span class="jv dict-aksara" lang="jv-Java">{{ $entry->aksara }}</span>
+                                                    @endif
+                                                    @if ($entry->pos)
+                                                        <span class="text-xs text-zinc-500 dark:text-zinc-400">{{ $entry->pos }}</span>
+                                                    @endif
+                                                    @if ($entry->register)
+                                                        <span class="status status-blue">{{ $entry->register }}</span>
+                                                    @endif
+                                                    <span>{{ implode('; ', array_slice($entry->glosses, 0, 2)) }}</span>
+                                                    @if ($mixed && $entry->gloss_lang !== 'id')
+                                                        <span class="text-[11px] text-zinc-500 dark:text-zinc-400">({{ \App\Models\DictionaryEntry::GLOSS_LANGUAGES[$entry->gloss_lang] ?? $entry->gloss_lang }})</span>
+                                                    @endif
+                                                </div>
+                                            @empty
+                                                <span class="text-zinc-500 dark:text-zinc-400">tidak ada di kamus ini</span>
+                                            @endforelse
+                                        </td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">Paling banyak {{ \App\Support\DictionarySearch::MAX_WORDS }} kata pertama yang diartikan. Cari satu kata untuk melihat entri lengkapnya.</p>
+                @else
+                    @if ($d['matches']->isEmpty() && $d['reverse']->isEmpty())
+                        <p class="text-sm text-zinc-500 dark:text-zinc-400">Tidak ada entri yang cocok dengan pencarian ini.</p>
+                    @endif
+                    {{-- Direktif Blade tidak dikenali bila menempel pada huruf, jadi @if selalu di baris sendiri. --}}
+                    @if ($d['matches']->isNotEmpty())
+                        <div class="subheader mb-1">
+                            {{ nfmt($d['total']) }} entri cocok dengan katanya
+                            @if ($d['total'] > $d['matches']->count())
+                                · {{ nfmt($d['matches']->count()) }} ditampilkan
+                            @endif
+                        </div>
+                        <div class="dict-list">
+                            @foreach ($d['matches'] as $entry)
+                                @include('partials.dictionary-entry', ['entry' => $entry, 'sourceNames' => $sourceNames, 'showLanguage' => $mixed])
+                            @endforeach
+                        </div>
+                        @if ($d['total'] > $d['matches']->count() && $d['limit'] < $d['max'])
+                            <div class="mt-3">
+                                <button type="button" class="chip" wire:click="more('{{ $key }}')">Tampilkan lebih banyak</button>
+                            </div>
+                        @endif
+                    @endif
+                    @if ($d['reverse']->isNotEmpty())
+                        <div class="subheader mb-1 mt-4">
+                            Kata lain yang artinya memuat kata ini · {{ nfmt($d['reverse_total']) }}
+                            @if ($d['reverse_total'] > $d['reverse']->count())
+                                · {{ nfmt($d['reverse']->count()) }} ditampilkan
+                            @endif
+                        </div>
+                        <div class="dict-list">
+                            @foreach ($d['reverse'] as $entry)
+                                @include('partials.dictionary-entry', ['entry' => $entry, 'sourceNames' => $sourceNames, 'showLanguage' => $mixed, 'limit' => 2])
+                            @endforeach
+                        </div>
+                    @endif
+                @endif
+
+                {{-- KBBI tidak boleh disalin (hak cipta Badan Bahasa), jadi definisi resminya hanya ditautkan. --}}
+                @if ($key === 'id' && $d['mode'] === 'search' && $d['term'] !== '' && ! ($probe['aksara'] ?? false))
+                    <p class="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+                        Definisi resmi:
+                        <a href="https://kbbi.kemendikdasmen.go.id/entri/{{ rawurlencode($d['term']) }}" target="_blank" rel="noopener noreferrer" class="text-[var(--primary)] hover:underline">"{{ $d['term'] }}" di KBBI Daring</a>
+                        (situs Badan Bahasa, dibuka di tab baru; isinya tidak disalin ke sini).
+                    </p>
+                @endif
+
+                @if ($d['sources']->isNotEmpty())
+                    <p class="dict-sources">
+                        Sumber:
+                        @foreach ($d['sources'] as $source)
+                            <span class="whitespace-nowrap"><a href="{{ $source->url }}" target="_blank" rel="noopener noreferrer" class="text-[var(--primary)] hover:underline">{{ $source->name }}</a></span>
+                            ({{ $source->license }}; {{ nfmt($source->entries) }} entri{{ $source->retrieved ? '; diambil '.$source->retrieved : '' }}){{ $loop->last ? '.' : ',' }}
+                        @endforeach
+                    </p>
+                @endif
+            </div>
+        </section>
+    @endforeach
 
     {{-- 1. Aksara yang dibaca model --}}
     <section class="card scroll-mt-20" id="kamus-aksara">

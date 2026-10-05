@@ -28,6 +28,12 @@ return [
     */
     'mt_dir' => storage_path('app/mt'),
 
+    /*
+    | Kamus kata halaman Kamus (bahasa Jawa dan bahasa Indonesia): sources.json + jv.jsonl.gz + id.jsonl.gz buatan
+    | tools/dictionaries.py, diimpor `php artisan aksara:dictionary`.
+    */
+    'dictionary_dir' => database_path('dictionaries'),
+
     /* Transliterasi & terjemahan manusia NusaAksara (config Image Transliteration / Image Translation). */
     'annotations_path' => storage_path('app/nusaaksara/annotations.json'),
 

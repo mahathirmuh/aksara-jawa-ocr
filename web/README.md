@@ -46,6 +46,25 @@ php artisan aksara:translate                        # sumber: transliterasi manu
   kata buktinya. Label manusia diisi di Penjelajah baris (tombol ngoko/madya/krama/campur; saringan
   "tutur belum dilabel"); Ringkasan menghitung akurasi leksikon terhadap label itu.
 
+### Kamus kata (halaman Kamus)
+
+```bash
+../.venv/Scripts/python tools/dictionaries.py       # opsional: unduh ulang sumber dan bangun database/dictionaries/
+php artisan aksara:dictionary                       # impor kamus bahasa Jawa dan bahasa Indonesia (--only=jv|id)
+```
+
+- Data pihak ketiga, bukan hasil hitung proyek. Berkas jadinya ikut git (`database/dictionaries/jv.jsonl.gz`,
+  `id.jsonl.gz`, `sources.json`), jadi `aksara:dictionary` cukup sesudah `migrate`. Sumber dan lisensi tiap berkas:
+  `database/dictionaries/SUMBER.md`; juga ditampilkan di kaki tiap kamus, dan tiap entri bertaut ke halaman asalnya.
+- Sumber sekarang: entri bahasa Jawa dan bahasa Indonesia di Wiktionary bahasa Inggris (CC BY-SA 4.0, lewat
+  ekstraksi kaikki.org), jadi artinya berbahasa Inggris. Kamus Jawa membawa ejaan aksara, ragam, dan padanan
+  ngoko/krama dari kepala entrinya.
+- **KBBI tidak disalin**: isinya hak cipta Badan Bahasa dan tidak dirilis dengan lisensi terbuka, begitu juga kamus
+  yang isinya salinan KBBI (Kateglo). Untuk definisi resmi, hasil pencarian satu kata menautkan ke KBBI Daring.
+- Format berkas (satu entri per baris): `word`, `glosses[]`, `gloss_lang` (`id`/`en`/`jv`), `source`, lalu bila ada
+  `pos`, `aksara`, `register`, `examples[]`, `note`, `url`. Pengimpor mengganti satu kamus seutuhnya dalam satu
+  transaksi dan menolak berkas yang punya baris rusak.
+
 ## Database (PostgreSQL)
 
 PostgreSQL 18 (layanan Windows, port 5432). `.env`: `DB_CONNECTION=pgsql`, `DB_HOST=127.0.0.1`,
@@ -67,7 +86,8 @@ di PostgreSQL pakai database uji terpisah, JANGAN `its_aksara` (test mengosongka
 
 Port: Laravel 8010, layanan model 8011, layanan terjemahan 8012 (8000/8001 dipakai proyek lain di laptop ini).
 
-Hanya akun dan label tingkat tutur yang tidak bisa dibangun ulang dari file. Cadangkan labelnya:
+Kamus kata diisi ulang dengan `php artisan aksara:dictionary`. Hanya akun dan label tingkat tutur yang tidak bisa
+dibangun ulang dari file. Cadangkan labelnya:
 `php artisan aksara:labels export` (-> `database/labels/speech_levels.json`), pulihkan dengan `aksara:labels import`.
 
 ## Halaman
@@ -80,7 +100,7 @@ Hanya akun dan label tingkat tutur yang tidak bisa dibangun ulang dari file. Cad
 | Penjelajah baris | Citra, label, transliterasi, arti, tingkat tutur, dan keluaran tiap pipeline dengan beda per suku kata; arahkan kursor ke suku kata CRNN greedy untuk melihat kolom citra yang dibacanya |
 | Kesalahan aksara | Aksara tertukar, hilang, tambahan |
 | Demo | Unggah potongan satu baris → FastAPI `/predict`, dengan skor CTC dan LM setiap kandidat |
-| Kamus | Tiga rujukan alur, dengan pencarian: **kamus aksara** (91 codepoint charset tokenizer: nama, kode, bacaan Latin draf, jumlah kemunculan di label uji), **kamus koreksi OCR** (model bahasa karakter untuk beam search: greedy vs beam + LM per data, dari hasil yang diimpor), **leksikon tingkat tutur** (kata penanda ngoko/madya/krama tahap 4). Aksara yang ditempel ke kotak cari diurai per codepoint |
+| Kamus | Satu kotak pencarian untuk lima rujukan alur. **Kamus bahasa Jawa** dan **kamus bahasa Indonesia** (data pihak ketiga, `aksara:dictionary`): kata dicari tanpa peduli diakritik dan huruf besar, hasil diurutkan persis sama → berawalan → memuat, bisa dicari balik dari artinya, beberapa kata sekaligus diartikan per kata, dan aksara yang ditempel dicari lewat bacaan Latin drafnya. Lalu **kamus aksara** (91 codepoint charset tokenizer: nama, kode, bacaan Latin draf, jumlah kemunculan di label uji), **kamus koreksi OCR** (model bahasa karakter untuk beam search: greedy vs beam + LM per data, dari hasil yang diimpor), **leksikon tingkat tutur** (kata penanda ngoko/madya/krama tahap 4). Aksara yang ditempel ke kotak cari diurai per codepoint |
 
 ## Tampilan
 
@@ -130,6 +150,8 @@ Citra dan anotasi NusaAksara berlisensi non-komersial dan hanya dipakai sebagai 
 pemakaian lokal dengan login; citra dibaca langsung dari repo OCR, tidak disalin. Hanya Noto Sans Javanese
 (OFL) yang disajikan sebagai font aksara; font training lain tidak boleh disebar. Huruf antarmuka Inter (OFL) dan
 Tabler Icons (MIT) boleh disebar ulang.
+Kamus kata (`database/dictionaries/`) berasal dari Wiktionary dan berlisensi CC BY-SA 4.0: atribusi dan tautan ke
+halaman asal harus tetap ada; rinciannya di `database/dictionaries/SUMBER.md`.
 
 ## Test
 

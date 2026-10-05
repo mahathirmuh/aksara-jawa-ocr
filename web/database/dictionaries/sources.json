@@ -1,0 +1,20 @@
+{
+  "jv": [
+    {
+      "key": "enwiktionary",
+      "name": "Wiktionary bahasa Inggris (entri bahasa Jawa, ekstraksi kaikki.org)",
+      "license": "CC BY-SA 4.0",
+      "url": "https://kaikki.org/dictionary/Javanese/",
+      "retrieved": "2026-10-05"
+    }
+  ],
+  "id": [
+    {
+      "key": "enwiktionary",
+      "name": "Wiktionary bahasa Inggris (entri bahasa Indonesia, ekstraksi kaikki.org)",
+      "license": "CC BY-SA 4.0",
+      "url": "https://kaikki.org/dictionary/Indonesian/",
+      "retrieved": "2026-10-05"
+    }
+  ]
+}

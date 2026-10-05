@@ -514,4 +514,22 @@ select:focus[data-flux-control] {
     .kamus-tile { display: flex; min-width: 0; align-items: center; gap: .625rem; padding: .25rem .625rem; border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--surface); }
     .kamus-glyph { flex: none; min-width: 2.75rem; font-size: 1.5rem; line-height: 1.9; text-align: center; white-space: nowrap; }
     .kamus-word { display: inline-flex; align-items: center; padding: .125rem .5rem; border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--surface); font-size: .75rem; line-height: 1.4; }
+
+    /* Kamus kata: daftar entri dua kolom di layar lebar; tiap entri = kata, ejaan aksara, kelas kata, ragam, lalu artinya. */
+    .dict-list { display: grid; gap: 0 2rem; }
+    .dict-entry { min-width: 0; padding: .625rem 0; border-top: 1px solid var(--row-line); }
+    .dict-head { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .5rem; }
+    .dict-word { font-size: .9375rem; line-height: 1.4; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+    .dict-aksara { font-size: 1.25rem; line-height: 1.7; white-space: nowrap; }
+    .dict-glosses { margin-top: .25rem; padding-inline-start: 1.25rem; list-style: decimal; font-size: .8125rem; line-height: 1.5; overflow-wrap: anywhere; }
+    .dict-glosses.is-single { padding-inline-start: 0; list-style: none; }
+    .dict-example { margin-top: .25rem; padding-inline-start: .625rem; border-inline-start: 2px solid var(--border-soft); font-size: .75rem; line-height: 1.5; font-style: italic; color: var(--text-muted); overflow-wrap: anywhere; }
+    .dict-note { margin-top: .25rem; font-size: .75rem; line-height: 1.5; color: var(--text-muted); overflow-wrap: anywhere; }
+    .dict-meta { display: flex; flex-wrap: wrap; gap: .125rem .75rem; margin-top: .25rem; font-size: .6875rem; line-height: 1.4; color: var(--text-muted); }
+    .dict-inline { display: flex; flex-wrap: wrap; align-items: center; gap: .125rem .5rem; }
+    .dict-inline + .dict-inline { margin-top: .25rem; }
+    .dict-sources { margin-top: 1rem; padding-top: .75rem; border-top: 1px solid var(--border-soft); font-size: .6875rem; line-height: 1.5; color: var(--text-muted); }
+    @media (min-width: 1024px) {
+        .dict-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
 }

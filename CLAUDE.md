@@ -107,6 +107,7 @@ python scripts/eval_spacing.py --lines 301 --threads 4   # dosis-respons jarak a
 bash scripts/make_official.sh RUN                # evaluasi resmi G1/G2 10.000 baris untuk RUN, lalu ekspor + impor (OFFICIAL_RUN harus sudah RUN)
 .venv/Scripts/python -m uvicorn src.serve:app --host 127.0.0.1 --port 8011   # layanan model untuk Demo
 cd web && php artisan aksara:import && php artisan serve --port=8010                  # web UI (lihat web/README)
+cd web && php artisan aksara:dictionary                                               # kamus kata halaman Kamus (data jadi di web/database/dictionaries)
 ```
 
 ---
@@ -272,7 +273,17 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     aksara (charset `data/tokenizer.json`, lewat `App\Support\AksaraCatalog`; bacaan Latin = draf Transliterator),
     kamus koreksi OCR (kondisi "kamus" = beam + LM karakter; angka greedy vs beam diambil dari metrik yang diimpor,
     dengan peringatan bila checkpoint-nya bukan pipeline resmi), dan leksikon tingkat tutur (`SpeechLevel::lexicon()`).
-    Tidak ada kamus kata Jawa-Indonesia: datanya tidak ada di proyek ini, jadi tidak dibuat-buat.
+    **Kamus kata (permintaan user 2026-10-05: "ditambahkan juga kamus bahasa jawa dan kamus bahasa indonesia"):** dua
+    bagian baru di atas kamus aksara, isinya DATA PIHAK KETIGA (bukan hasil hitung proyek): tabel `dictionary_entries`
+    + `dictionary_sources`, berkas jadi di `web/database/dictionaries/` (ikut git; sumber & lisensi di `SUMBER.md`),
+    dibangun `web/tools/dictionaries.py`, diimpor `php artisan aksara:dictionary`. Sumber: entri bahasa Jawa (3.785)
+    dan bahasa Indonesia (39.968) Wiktionary bahasa Inggris lewat kaikki.org, CC BY-SA 4.0, arti berbahasa Inggris;
+    kamus Jawa membawa ejaan aksara (2.696 entri), ragam, dan padanan ngoko/krama. Pencarian (`DictionarySearch`):
+    kolom turunan `lookup` (tanpa diakritik) dan `gloss_text`, LIKE biasa supaya sama di PostgreSQL dan SQLite.
+    **Terukur 2026-10-05 dan JANGAN dilanggar:** KBBI (hak cipta Badan Bahasa, "seluruh isi KBBI Daring dilindungi Hak
+    Cipta", tanpa rilis terbuka) dan Kateglo (96% definisinya teks KBBI III) tidak boleh disalin ke repo publik ini;
+    Wikikamus (id.wiktionary) punya 71 ribu lema Indonesia tetapi 94% entrinya impor KBBI; kaikki edisi Indonesia tidak
+    memuat kosakata dasar; Wikidata hanya 109 leksem Jawa. Halaman hanya MENAUTKAN ke KBBI Daring.
     **Foto halaman masuk (user 2026-10-05: "kamu saja yang cari dan pilihkan gambarnya", konsep sama dengan
     rujukan):** korsel tiga foto di panel kiri + latar foto gelap, semuanya dari Wikimedia Commons berlisensi bebas
     dan dipilih Claude: naskah beraksara Jawa di Museum Sonobudoyo (CC0), halaman Serat Damar Wulan British Library
@@ -292,7 +303,7 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     `phpunit.xml` memaksa SQLite in-memory (`force="true"`, jadi `DB_*` yang tertinggal di shell diabaikan) dan
     `tests/TestCase.php::createApplication` menolak database bernama `its_aksara` sebelum migrasi. Test memakai folder
     sementara untuk `storage/app/mt` (dulu `TranslationTest` menimpa hasil NLLB; dipulihkan dari DB lewat
-    `php artisan aksara:translate --dump`). 77 test lolos di SQLite (2026-10-05, sesudah restyle dan menu Kamus).
+    `php artisan aksara:translate --dump`). 85 test lolos di SQLite (2026-10-05, sesudah kamus kata).
     **Port:** Laravel 8010, layanan model 8011, layanan terjemahan 8012 — 8000/8001 dipakai proyek lain
     milik user di laptop yang sama (jangan dihentikan). Test tetap bisa di SQLite in-memory
     (`phpunit.xml`); kode dijaga netral: `whereJsonContains` untuk tag, tabel turunan untuk ORDER BY berekspresi
