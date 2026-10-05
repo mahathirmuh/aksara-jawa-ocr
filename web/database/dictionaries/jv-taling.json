@@ -4,7 +4,7 @@
 "articles": 12147,
 "rule": "bentuk bertanda terbanyak >= 2 kali dan >= 60% kemunculan",
 "from_wikipedia": 8615,
-"from_dictionary": 94,
+"from_dictionary": 95,
 "held_out": {
 "articles": 2450,
 "words": 176048,
@@ -7135,6 +7135,7 @@
 "rekane": "rekané",
 "rekapitulasining": "rékapitulasining",
 "rekasane": "rekasané",
+"rekayasa": "rékayasa",
 "rekening": "rékening",
 "rekeninge": "rekeningé",
 "rekombinan": "rékombinan",

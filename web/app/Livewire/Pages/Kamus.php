@@ -81,8 +81,12 @@ class Kamus extends Component
                 ? mb_strpos($query, $e['char']) !== false
                 : str_contains($e['name'], $needle) || $e['latin'] === $needle || str_contains(mb_strtolower($e['code']), $needle)));
 
-        $lexicon = collect(SpeechLevel::lexicon())
-            ->map(fn (array $words) => collect($words)->filter(fn (string $w) => $needle === '' || (! $aksaraQuery && str_contains($w, $needle)))->values());
+        // Leksikon: satu kata dicari sebagai bagian kata penanda; beberapa kata (atau aksara yang ditempel, lewat bacaan
+        // Latin drafnya) menampilkan penanda yang memang ada di teks itu, sama dengan yang dihitung di uraian.
+        $terms = array_map(DictionaryEntry::normalize(...), DictionarySearch::words($latin, PHP_INT_MAX));
+        $marker = fn (string $w): bool => $needle === ''
+            || (count($terms) > 1 ? in_array($w, $terms, true) : $terms !== [] && str_contains($w, $terms[0]));
+        $lexicon = collect(SpeechLevel::lexicon())->map(fn (array $words) => collect($words)->filter($marker)->values());
 
         return view('livewire.pages.kamus', [
             'catalog' => $catalog,
@@ -126,7 +130,10 @@ class Kamus extends Component
     private function dictionaries(string $query, string $latin, bool $aksara): array
     {
         $sources = DictionarySource::orderBy('id')->get()->groupBy('dictionary');
-        $words = DictionarySearch::words($latin);
+        $clean = DictionarySearch::unquote($latin);
+        $words = DictionarySearch::words($clean);
+        // Kode titik Unicode ("U+A9B6") milik kamus aksara, bukan kata yang perlu dicari di kamus kata.
+        $code = (bool) preg_match('/^U\+[0-9A-F]{4,6}$/i', $query);
         $out = [];
         foreach (DictionaryEntry::DICTIONARIES as $key => $label) {
             $mine = $sources->get($key, collect());
@@ -140,16 +147,18 @@ class Kamus extends Component
             } elseif ($query === '') {
                 $found = DictionaryEntry::where('dictionary', $key)->whereIn('lookup', self::EXAMPLES[$key])->distinct()->pluck('lookup')->all();
                 $state['examples'] = array_values(array_intersect(self::EXAMPLES[$key], $found));
-            } elseif (count($words) > 1) {
+            } elseif (count($words) > 1 && ! $code) {
                 $state['mode'] = 'words';
-                $state['phrase'] = DictionarySearch::gloss($key, [implode(' ', $words)])[0]['entries'];
+                // Frasa utuh dicari seperti diketik: kata berulang ("mau tak mau") dan frasa panjang tidak dipotong.
+                $state['phrase'] = DictionarySearch::gloss($key, [$clean])[0]['entries'];
                 $state['rows'] = DictionarySearch::gloss($key, $words);
                 $state['found'] = collect($state['rows'])->filter(fn (array $row) => $row['entries']->isNotEmpty())->count() + ($state['phrase']->isNotEmpty() ? 1 : 0);
             } else {
                 $state['mode'] = 'search';
-                $state['term'] = $words[0] ?? '';
+                // Yang dicari teks seperti diketik (imbuhan "-an" tetap bertanda hubung); `term` = katanya saja, untuk tautan KBBI.
+                $state['term'] = $code ? '' : ($words[0] ?? '');
                 $spelling = $aksara && $key === 'jv' ? (Normalizer::normalize($query, Normalizer::FORM_C) ?: $query) : null;
-                $state += DictionarySearch::search($key, $state['term'], $state['limit'], $spelling);
+                $state += DictionarySearch::search($key, $code ? '' : $clean, $state['limit'], $spelling);
                 $state['found'] = $state['total'] + $state['reverse_total'];
             }
             $out[$key] = $state;

@@ -31,7 +31,9 @@ POS = {
     'noun': 'nomina', 'verb': 'verba', 'adj': 'adjektiva', 'adv': 'adverbia', 'name': 'nama diri', 'num': 'numeralia',
     'conj': 'konjungsi', 'pron': 'pronomina', 'det': 'pewatas', 'intj': 'interjeksi', 'particle': 'partikel',
     'prep': 'preposisi', 'prefix': 'awalan', 'suffix': 'akhiran', 'circumfix': 'konfiks', 'root': 'akar kata',
-    'phrase': 'frasa', 'character': 'aksara', 'article': 'artikula', 'punct': 'tanda baca',
+    'phrase': 'frasa', 'character': 'aksara', 'article': 'artikula', 'punct': 'tanda baca', 'proverb': 'peribahasa',
+    'classifier': 'kata penggolong', 'prep_phrase': 'frasa preposisi', 'symbol': 'simbol', 'infix': 'sisipan',
+    'postp': 'posposisi', 'abbrev': 'singkatan', 'affix': 'imbuhan', 'contraction': 'kontraksi', 'interfix': 'interfiks',
 }
 
 
@@ -59,8 +61,13 @@ def plain(text: str) -> str:
 
 
 def sense_gloss(sense: dict) -> str:
-    """Arti satu sense wiktextract, dengan label pemakaiannya ("(krama) water"). Titik dua penutup = sense yang punya anak."""
-    return nfc((sense.get('raw_glosses') or sense.get('glosses') or [''])[0]).rstrip(':').rstrip()
+    """Arti satu sense wiktextract, dengan label pemakaiannya ("(krama) water").
+
+    Sense bersarang disimpan sebagai rantai [arti induk, ..., arti sendiri], mis. ["house:", "abode"]. Rantainya
+    dirangkai ("house: abode") supaya arti anak tidak hilang dan tetap terbaca dalam konteks induknya.
+    """
+    chain = [nfc(part).rstrip(' :,;') for part in (sense.get('raw_glosses') or sense.get('glosses') or [])]
+    return ': '.join(dict.fromkeys(part for part in chain if part))
 
 
 # ---------- bahasa Jawa dari Wiktionary bahasa Inggris (ekstraksi kaikki.org / wiktextract) ----------
@@ -74,7 +81,8 @@ SET_REGISTER = {'ꦔꦺꦴꦏꦺꦴ': 'ngoko', 'ꦏꦿꦩ': 'krama', 'ꦏꦿꦩ�
                 'ꦏꦿꦩꦲꦤ꧀ꦝꦥ꧀': 'krama andhap', 'ꦏꦮꦶ': 'kawi'}
 # Label ragam yang ditulis penyunting dalam kata-kata: "(krama inggil) to walk", "krama inggil dalem", "Krama of gedhang."
 WORD_REGISTER = {'ngoko': 'ngoko', 'krama': 'krama', 'krama inggil': 'krama inggil', 'krama andhap': 'krama andhap',
-                 'krama-ngoko': 'krama-ngoko', 'krama ngoko': 'krama-ngoko', 'madya': 'madya', 'krama madya': 'madya'}
+                 'krama-ngoko': 'krama-ngoko', 'krama ngoko': 'krama-ngoko', 'madya': 'madya', 'krama madya': 'madya',
+                 'kawi': 'kawi'}
 REGISTER_WORDS = '|'.join(sorted(map(re.escape, WORD_REGISTER), key=len, reverse=True))
 LABELLED = re.compile('^(' + REGISTER_WORDS + ') (.+)$', re.I)
 REGISTER_OF = re.compile('^(' + REGISTER_WORDS + ') of ', re.I)
@@ -82,18 +90,66 @@ SPELLING_OF = re.compile(r'^(?:Carakan|Javanese script) spelling of (.+?)\.?$')
 SET_COLUMN = re.compile(r'([ꦀ-꧟]+) : (.*?)(?= [ꦀ-꧟]+ : |$)')
 
 
+def mend(text: str) -> str:
+    """Rapatkan tanda aksara yang terlepas dari aksaranya di ekstraksi sumber: "ꦢꦶꦤ ꧀ꦠꦼꦤ꧀" -> "ꦢꦶꦤ꧀ꦠꦼꦤ꧀".
+
+    Sandhangan dan pangkon tidak bisa mengawali kata, jadi spasi di depannya pasti artefak (tautan wiki yang
+    berakhir di tengah kata).
+    """
+    return re.sub(r'(?<=[ꦀ-꧟])\s+(?=[ꦀ-ꦃ꦳-꧀])', '', text)
+
+
+def head_latin(entry: dict, headword: str) -> str | None:
+    """Romanisasi kata kepala menurut kepala entrinya sendiri: "ꦲꦗꦶ (aji)" -> aji, "ꦲꦸꦭꦩ꧀ (ulam, oelam)" -> ulam.
+
+    Satu halaman beraksara bisa memuat beberapa kata (ꦲꦗꦶ = haji dan aji), jadi romanisasi dibaca per entri.
+    """
+    for head in entry.get('head_templates', []):
+        own = re.match(re.escape(headword) + r' \(([^()]+)\)', nfc(head.get('expansion', '')))
+        first = own.group(1).split(',')[0].strip() if own else ''
+        if first and not JAVA.search(first) and not LABELLED.match(first) and first.lower() not in WORD_REGISTER:
+            return first
+    return None
+
+
+def head_registers(entry: dict) -> list[str]:
+    """Ragam yang disebut kepala entri untuk kata itu sendiri: "ꦲꦒꦼꦁ (ageng) (krama)", "kang (krama, ngoko)"."""
+    found = []
+    for head in entry.get('head_templates', []):
+        tail = re.search(r'\(([^()]+)\)\s*$', nfc(head.get('expansion', '')))
+        names = [name.strip().lower() for name in tail.group(1).split(',')] if tail else []
+        if names and all(name in WORD_REGISTER for name in names):
+            found += [WORD_REGISTER[name] for name in names]
+    return list(dict.fromkeys(found))
+
+
+def spelling_targets(sense: dict) -> list[str]:
+    """Kata Latin yang ditunjuk sense "Carakan spelling of ...": "timah (“tin”)" -> [timah], "alis or halis" -> dua kata."""
+    pointer = SPELLING_OF.match(nfc((sense.get('glosses') or [''])[0]))
+    if not pointer:
+        return []
+    linked = [nfc(target['word']) for target in sense.get('alt_of', []) if not JAVA.search(target['word'])]
+    named = [part.strip() for part in re.split(r' or |[,;]', re.sub(r'\s*\(.*$', '', pointer.group(1))) if part.strip()]
+    return list(dict.fromkeys(named + [word for word in linked if ' ' not in word]))
+
+
 def register_set(entry: dict, headword: str) -> dict[str, list[str]]:
     """Padanan antar-ragam di kepala entri: {'ngoko': ['mangan'], 'krama': ['nedha'], ...}, ejaan seperti di sumber."""
     found: dict[str, list[str]] = {}
+
+    def add(register: str, text: str) -> None:
+        # Dua padanan dalam satu ragam dipisah pada lingsa (koma aksara Jawa): "ꦩꦂꦒ ꧈ ꦩꦼꦂꦒ".
+        found.setdefault(register, []).extend(value.strip() for value in text.split('꧈') if value.strip())
+
     for form in entry.get('forms', []):
-        tags, text = form.get('tags', []), nfc(form.get('form', ''))
+        tags, text = form.get('tags', []), mend(nfc(form.get('form', '')))
         for tag in tags:
             if tag in FORM_REGISTER and text:
-                found.setdefault(FORM_REGISTER[tag], []).append(text)
+                add(FORM_REGISTER[tag], text)
         # "(madya griya, ngoko omah, krama inggil dalem)" di kepala entri sampai ke sini sebagai bentuk "romanization".
-        labelled = LABELLED.match(text) if 'romanization' in tags else None
+        labelled = LABELLED.match(text) if 'romanization' in tags and text.lower() not in WORD_REGISTER else None
         if labelled:
-            found.setdefault(WORD_REGISTER[labelled.group(1).lower()], []).append(labelled.group(2))
+            add(WORD_REGISTER[labelled.group(1).lower()], labelled.group(2))
         if 'canonical' in tags and 'Javanese register set' in text:
             for table in text.split('Javanese register set')[1:]:
                 columns = SET_COLUMN.findall(table.strip())
@@ -103,8 +159,8 @@ def register_set(entry: dict, headword: str) -> dict[str, list[str]]:
                     if index == len(columns) - 1 and len(tokens) > 1 and tokens[-1] == headword:
                         tokens = tokens[:-1]
                     if label in SET_REGISTER and tokens:
-                        found.setdefault(SET_REGISTER[label], []).append(' '.join(tokens))
-    return found
+                        add(SET_REGISTER[label], ' '.join(tokens))
+    return {register: values for register, values in found.items() if values}
 
 
 def labelled_register(glosses: list[str]) -> str | None:
@@ -129,71 +185,70 @@ def enwiktionary_javanese(cache: str, refresh: bool):
     with open(path, encoding='utf-8') as handle:
         raw = [json.loads(line) for line in handle if line.strip()]
 
-    # Ejaan Latin tiap lema beraksara. Urutan kepercayaan: kepala entri "<aksara> (latin)"; lalu halaman penunjuk
-    # "romanization of <aksara>" (bisa lebih dari satu, termasuk ejaan tidak baku seperti "gedang" untuk gedhang, jadi
-    # yang juga tercatat sebagai bentuk romanisasi di entrinya didahulukan). Bentuk "romanization" di forms tidak
-    # dipakai sendirian: pada entri bertabel ragam, yang pertama sering romanisasi kata LAIN di tabel (geni -> "latu").
+    # Halaman penunjuk "romanization of <aksara>": kata Latin -> judul beraksara. Dikenali dari tag sense-nya, karena
+    # sebagian halaman penunjuk berkelas kata biasa (pendhidhikan). Satu judul beraksara bisa punya beberapa penunjuk,
+    # termasuk ejaan tidak baku ("gedang" untuk gedhang).
     pointers: dict[str, list[str]] = {}
     for entry in raw:
-        if entry.get('pos') == 'romanization':
-            for sense in entry.get('senses', []):
+        for sense in entry.get('senses', []):
+            if 'romanization' in sense.get('tags', []) and not JAVA.search(entry['word']):
                 for target in sense.get('alt_of', []):
                     if JAVA.search(target['word']):
                         pointers.setdefault(nfc(target['word']), []).append(nfc(entry['word']))
+    # Romanisasi per JUDUL beraksara, untuk entri yang kepalanya tidak menyebut romanisasi dan untuk anggota tabel ragam.
+    # Bentuk "romanization" di forms tidak dipakai sendirian: pada entri bertabel ragam, yang pertama sering
+    # romanisasi kata LAIN di tabel itu (geni -> "latu"); penunjuk yang juga tercatat di forms didahulukan.
     latin_of: dict[str, str] = {}
     for entry in raw:
         headword = nfc(entry['word'])
         if not JAVA.search(headword) or headword in latin_of:
             continue
-        for head in entry.get('head_templates', []):
-            own = re.match(re.escape(headword) + r' \(([^(),]+)\)', nfc(head.get('expansion', '')))
-            if own and not LABELLED.match(own.group(1)) and not JAVA.search(own.group(1)):
-                latin_of[headword] = own.group(1)
-                break
-        else:
-            romanized = [nfc(form['form']) for form in entry.get('forms', [])
-                         if 'romanization' in form.get('tags', []) and not LABELLED.match(nfc(form['form']))]
-            candidates = pointers.get(headword, [])
-            agreed = [candidate for candidate in candidates if candidate in romanized]
-            if agreed or len(romanized) == 1 or candidates:
-                latin_of[headword] = (agreed or (romanized if len(romanized) == 1 else candidates))[0]
-    for script, candidates in pointers.items():      # kata yang hanya muncul sebagai anggota tabel ragam
+        own = head_latin(entry, headword)
+        romanized = [nfc(form['form']) for form in entry.get('forms', [])
+                     if 'romanization' in form.get('tags', []) and not LABELLED.match(nfc(form['form']))]
+        candidates = pointers.get(headword, [])
+        agreed = [candidate for candidate in candidates if candidate in romanized]
+        if own or agreed or len(romanized) == 1 or candidates:
+            latin_of[headword] = own or (agreed or (romanized if len(romanized) == 1 else candidates))[0]
+    for script, candidates in pointers.items():
         latin_of.setdefault(script, candidates[0])
-    # Ejaan aksara lema Latin: entri beraksara yang isinya hanya "Carakan spelling of <latin>".
+    # Ejaan aksara lema Latin dari halaman beraksara yang isinya "Carakan spelling of <latin>". Dikunci kata persisnya
+    # (huruf besar dan tanda ikut): "enèm" bukan "enem", "Arya" bukan "arya".
     aksara_of: dict[str, str] = {}
     for entry in raw:
         if JAVA.search(entry['word']):
             for sense in entry.get('senses', []):
-                spelling = SPELLING_OF.match(nfc((sense.get('glosses') or [''])[0]))
-                if spelling:
-                    aksara_of.setdefault(plain(spelling.group(1)), nfc(entry['word']))
+                for target in spelling_targets(sense):
+                    aksara_of.setdefault(target, nfc(entry['word']))
 
     merged: dict[tuple, dict] = {}
     skipped = {'tanpa ejaan Latin': 0, 'tanpa arti': 0, 'kembar digabung': 0}
     for entry in raw:
-        if entry.get('pos') == 'romanization':
-            continue
         headword = nfc(entry['word'])
         scripted = bool(JAVA.search(headword))
         if scripted:
-            word, aksara = latin_of.get(headword), headword
+            word, aksara = head_latin(entry, headword) or latin_of.get(headword), headword
         else:
-            word, aksara = headword, aksara_of.get(plain(headword))
+            word, aksara = headword, None
             for form in entry.get('forms', []):
                 tags, spelled = form.get('tags', []), JAVA_RUN.fullmatch(nfc(form.get('form', '')).removeprefix('spelling '))
-                # "Carakan"/"Javanese" = ejaan kata ini; bentuk beraksara lain hanya dipakai bila romanisasinya memang kata ini.
-                if spelled and not aksara and ('Carakan' in tags or 'Javanese' in tags
-                                               or plain(latin_of.get(spelled.group(), '')) == plain(word)):
+                # "Carakan"/"Javanese" = ejaan kata ini menurut kepala entrinya sendiri.
+                if spelled and not aksara and ('Carakan' in tags or 'Javanese' in tags):
+                    aksara = spelled.group()
+            aksara = aksara or aksara_of.get(headword)
+            for form in entry.get('forms', []):
+                # Bentuk beraksara lain hanya dipakai bila romanisasinya memang kata ini.
+                spelled = JAVA_RUN.fullmatch(nfc(form.get('form', '')))
+                if spelled and not aksara and 'canonical' not in form.get('tags', []) and plain(latin_of.get(spelled.group(), '')) == plain(word):
                     aksara = spelled.group()
         glosses = []
         for sense in entry.get('senses', []):
             text = sense_gloss(sense)
-            pointer = SPELLING_OF.match(nfc((sense.get('glosses') or [''])[0]))
-            if text and not pointer and not {'romanization', 'no-gloss'} & set(sense.get('tags', [])):
+            if text and not spelling_targets(sense) and not {'romanization', 'no-gloss'} & set(sense.get('tags', [])):
                 glosses.append(text)
         glosses = list(dict.fromkeys(glosses))
         if not glosses:
-            skipped['tanpa arti'] += 1
+            skipped['tanpa arti'] += 1      # halaman penunjuk (romanisasi, ejaan Carakan) atau sense tanpa arti
             continue
         # Tanpa romanisasi, atau judulnya bukan huruf Latin (ejaan Pegon, simbol): tidak bisa dicari sebagai kata.
         if not word or not re.search('[a-z]', plain(word)):
@@ -202,16 +257,17 @@ def enwiktionary_javanese(cache: str, refresh: bool):
 
         registers = {name: list(dict.fromkeys(latin_of.get(value, value) for value in values))
                      for name, values in register_set(entry, headword).items()}
-        own = [name for name in REGISTER_ORDER if any(plain(value) == plain(word) for value in registers.get(name, []))]
-        for head in entry.get('head_templates', []):       # kepala entri kadang menyebut ragamnya sendiri: "(krama)"
-            explicit = re.fullmatch(r'\(([^()]+)\)', nfc(head.get('expansion', '')))
-            if explicit and explicit.group(1).lower() in WORD_REGISTER:
-                own = [WORD_REGISTER[explicit.group(1).lower()]]
-        if own:
-            register = 'krama-ngoko' if {'ngoko', 'krama'} <= set(own) else own[0]
+        # Ragam kata ini: yang disebut kepala entrinya, kalau tidak ada dari kolom tabel ragam yang memuat kata ini.
+        own = head_registers(entry) or [name for name in REGISTER_ORDER if any(plain(value) == plain(word) for value in registers.get(name, []))]
+        if 'krama-ngoko' in own or {'ngoko', 'krama'} <= set(own):
+            register = 'krama-ngoko'
+        elif own:
+            register = next(name for name in REGISTER_ORDER if name in own)
         else:
             register = labelled_register(glosses)
-        note = ' · '.join(f'{name} {", ".join(registers[name])}' for name in REGISTER_ORDER if name in registers)
+        # Catatan = padanan di ragam LAIN; kata ini sendiri (ejaan Latin maupun aksaranya) sudah ditandai lewat `register`.
+        others = {name: [value for value in values if plain(value) != plain(word) and value != aksara] for name, values in registers.items()}
+        note = ' · '.join(f'{name} {", ".join(others[name])}' for name in REGISTER_ORDER if others.get(name))
 
         item = {'word': word, 'glosses': glosses, 'gloss_lang': 'en', 'source': 'enwiktionary',
                 'url': 'https://en.wiktionary.org/wiki/' + urllib.parse.quote(headword.replace(' ', '_')) + '#Javanese'}
@@ -221,15 +277,14 @@ def enwiktionary_javanese(cache: str, refresh: bool):
             item['aksara'] = aksara
         if register:
             item['register'] = register
-        if note and (len(registers) > 1 or not own):
+        if note:
             item['note'] = note
-        # Kata yang sama sering punya dua halaman (judul Latin dan judul beraksara) dengan arti yang sama: satukan,
-        # tautannya ke halaman berjudul Latin.
+        # Kata yang sama sering punya dua halaman (judul Latin dan judul beraksara) dengan arti yang sama: satukan;
+        # isi halaman berjudul Latin didahulukan, halaman beraksara melengkapi (ejaan aksara, ragam, catatan).
         key = (plain(word), item.get('pos'), tuple(glosses))
         if key in merged:
             skipped['kembar digabung'] += 1
-            first, second = (merged[key], item) if scripted else (item, merged[key])
-            merged[key] = {**second, **first} if not scripted else {**item, **merged[key]}
+            merged[key] = {**item, **merged[key]} if scripted else {**merged[key], **item}
         else:
             merged[key] = item
 

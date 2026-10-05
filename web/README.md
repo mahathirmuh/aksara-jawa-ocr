@@ -61,10 +61,10 @@ php artisan aksara:translate                        # sumber: transliterasi manu
 - `App\Support\AksaraWriter::fromLatin()` menulis bahasa Jawa Latin dalam aksara Jawa menurut aturan: vokal tanpa
   konsonan pembuka memakai ha, ng/r/h penutup suku kata menjadi cecak/layar/wignyan, konsonan mati diberi pangkon,
   rê/lê ditulis pa cerek/nga lelet, konsonan + rê memakai keret, n di depan c/j ditulis nya, angka diapit pada
-  pangkat. Tidak memakai aksara murda/swara. Ejaannya sama dengan 2.086 dari 2.134 lema kamus bahasa Jawa (97,8%;
+  pangkat. Tidak memakai aksara murda/swara. Ejaannya sama dengan 2.129 dari 2.175 lema kamus bahasa Jawa (97,9%;
   `tests/Unit/AksaraWriterTest.php` menjaga angka itu).
 - `App\Support\TalingRestorer` memulihkan é/è pada kata tanpa tanda memakai `database/dictionaries/jv-taling.json`
-  (8.709 kata dari Wikipedia bahasa Jawa; pada artikel yang ditahan, kata ber-e yang benar naik dari 53% ke 90%).
+  (8.710 kata dari Wikipedia bahasa Jawa; pada artikel yang ditahan, kata ber-e yang benar naik dari 53% ke 90%).
   Membangun ulang leksikon butuh snapshot Wikipedia proyek (`../data/raw/jvwiki-20231101.parquet`).
 - Arah balik (`Transliterator::toLatin`) tetap draf: ꦲ di tengah kata selalu dibaca "h" dan teks tanpa spasi tidak
   punya batas kata.
@@ -72,7 +72,7 @@ php artisan aksara:translate                        # sumber: transliterasi manu
 ### Kamus kata (halaman Kamus)
 
 ```bash
-../.venv/Scripts/python tools/dictionaries.py       # opsional: unduh ulang sumber dan bangun database/dictionaries/
+../.venv/Scripts/python tools/dictionaries.py       # opsional: bangun ulang database/dictionaries/ (--refresh = unduh ulang sumber)
 php artisan aksara:dictionary                       # impor kamus bahasa Jawa dan bahasa Indonesia (--only=jv|id)
 ```
 
@@ -80,8 +80,12 @@ php artisan aksara:dictionary                       # impor kamus bahasa Jawa da
   `id.jsonl.gz`, `sources.json`), jadi `aksara:dictionary` cukup sesudah `migrate`. Sumber dan lisensi tiap berkas:
   `database/dictionaries/SUMBER.md`; juga ditampilkan di kaki tiap kamus, dan tiap entri bertaut ke halaman asalnya.
 - Sumber sekarang: entri bahasa Jawa dan bahasa Indonesia di Wiktionary bahasa Inggris (CC BY-SA 4.0, lewat
-  ekstraksi kaikki.org), jadi artinya berbahasa Inggris. Kamus Jawa membawa ejaan aksara, ragam, dan padanan
-  ngoko/krama dari kepala entrinya.
+  ekstraksi kaikki.org), jadi artinya berbahasa Inggris. Kamus Jawa (3.788 entri) membawa ejaan aksara (2.695
+  entri), ragam (645 entri), dan padanan ngoko/krama dari kepala entrinya; kamus Indonesia 39.968 entri.
+- Pencarian (`App\Support\DictionarySearch`) memakai teks seperti diketik: diakritik dan huruf besar diabaikan,
+  frasa dicari utuh ("mau tak mau"), imbuhan dicari dengan tanda hubungnya ("-an", "ke- -an"), tanda kutip yang
+  membungkus kata dibuang. Urutan: persis sama, berawalan, memuat; lalu kata lain yang artinya memuat kata itu.
+  Urutan dan hasilnya sama di PostgreSQL dan SQLite.
 - **KBBI tidak disalin**: isinya hak cipta Badan Bahasa dan tidak dirilis dengan lisensi terbuka, begitu juga kamus
   yang isinya salinan KBBI (Kateglo). Untuk definisi resmi, hasil pencarian satu kata menautkan ke KBBI Daring.
 - Format berkas (satu entri per baris): `word`, `glosses[]`, `gloss_lang` (`id`/`en`/`jv`), `source`, lalu bila ada
@@ -124,7 +128,7 @@ dibangun ulang dari file. Cadangkan labelnya:
 | Kesalahan aksara | Aksara tertukar, hilang, tambahan |
 | Demo | Unggah potongan satu baris → FastAPI `/predict`, dengan skor CTC dan LM setiap kandidat |
 | Terjemahan | Indonesia → Jawa beraksara Jawa dan sebaliknya. Model NLLB lokal menerjemahkan (per kalimat, paling banyak 12); web memulihkan tanda é (`TalingRestorer`), mengalihaksarakan (`AksaraWriter`, `Transliterator`), dan menampilkan teks Jawa Latin yang boleh disunting sehingga aksaranya mengikuti. Alih aksara tetap jalan tanpa layanan model. Tautan: `?arah=jv-id`, `?q=`, `?jawa=` |
-| Kamus | Satu kotak pencarian untuk lima rujukan alur. **Kamus bahasa Jawa** dan **kamus bahasa Indonesia** (data pihak ketiga, `aksara:dictionary`): kata dicari tanpa peduli diakritik dan huruf besar, hasil diurutkan persis sama → berawalan → memuat, bisa dicari balik dari artinya, beberapa kata sekaligus diartikan per kata, dan aksara yang ditempel dicari lewat bacaan Latin drafnya. Lalu **kamus aksara** (91 codepoint charset tokenizer: nama, kode, bacaan Latin draf, jumlah kemunculan di label uji), **kamus koreksi OCR** (model bahasa karakter untuk beam search: greedy vs beam + LM per data, dari hasil yang diimpor), **leksikon tingkat tutur** (kata penanda ngoko/madya/krama tahap 4). Aksara yang ditempel ke kotak cari diurai per codepoint |
+| Kamus | Satu kotak pencarian untuk lima rujukan alur. **Kamus bahasa Jawa** dan **kamus bahasa Indonesia** (data pihak ketiga, `aksara:dictionary`): kata dicari tanpa peduli diakritik dan huruf besar, hasil diurutkan persis sama → berawalan → memuat, bisa dicari balik dari artinya, frasa dan imbuhan ("mau tak mau", "-an") dicari seperti diketik, beberapa kata sekaligus diartikan per kata, dan aksara yang ditempel dicari lewat bacaan Latin drafnya dan ejaan aksaranya. Lalu **kamus aksara** (91 codepoint charset tokenizer: nama, kode, bacaan Latin draf, jumlah kemunculan di label uji), **kamus koreksi OCR** (model bahasa karakter untuk beam search: greedy vs beam + LM per data, dari hasil yang diimpor), **leksikon tingkat tutur** (kata penanda ngoko/madya/krama tahap 4). Aksara yang ditempel ke kotak cari diurai per codepoint |
 
 ## Tampilan
 

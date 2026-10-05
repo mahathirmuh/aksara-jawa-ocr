@@ -20,7 +20,8 @@
             <span class="status status-gray">arti berbahasa {{ \App\Models\DictionaryEntry::GLOSS_LANGUAGES[$entry->gloss_lang] ?? $entry->gloss_lang }}</span>
         @endif
     </div>
-    <ol class="dict-glosses {{ count($visible) === 1 ? 'is-single' : '' }}">
+    {{-- Arti ditulis dalam bahasa sumbernya (halaman ini berbahasa Indonesia), jadi bahasanya dinyatakan untuk pembaca layar. --}}
+    <ol class="dict-glosses {{ count($visible) === 1 ? 'is-single' : '' }}" lang="{{ $entry->gloss_lang }}">
         @foreach ($visible as $gloss)
             <li>{{ $gloss }}</li>
         @endforeach

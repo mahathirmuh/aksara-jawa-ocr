@@ -78,6 +78,31 @@ class DictionaryTest extends TestCase
         $this->artisan('aksara:dictionary', ['--path' => $this->dir])->assertSuccessful();
     }
 
+    /** Kasus tepi pencarian: frasa berkata ulang, imbuhan, kata bertanda hubung atau berapostrof, ejaan aksara. */
+    private function seedEdgeCases(): void
+    {
+        $en = fn (string $word, array $glosses, array $extra = []) => ['word' => $word, 'glosses' => $glosses, 'gloss_lang' => 'en', 'source' => 'contoh'] + $extra;
+        $this->write([
+            'jv' => [
+                // Draf aturan membaca ꦧꦤ꧀ꦣ sebagai "bandha"; entri ber-ejaan itu sendiri ditulis "banḍa".
+                self::jv('banḍa', ['ejaan lain bandha'], ['aksara' => 'ꦧꦤ꧀ꦣ']),
+                self::jv('bandha', ['harta']),
+                // Draf aturan membaca ꦱꦶꦤꦲꦸ sebagai "sinahu": hanya ejaan aksara yang mempertemukannya dengan "sinau".
+                self::jv('sinau', ['belajar'], ['aksara' => 'ꦱꦶꦤꦲꦸ']),
+                $en('toya', ['water']),
+                self::jv('toya', ['air']),
+            ],
+            'id' => [
+                $en('mau', ['to want']), $en('tak', ['not']), $en('mau tak mau', ['willy-nilly']),
+                $en('-an', ['suffix forming nouns']), $en('ke-', ['prefix']), $en('ke- -an', ['circumfix forming an abstract noun']),
+                $en('menantu', ['son-in-law', 'daughter-in-law']), $en("Al-Qur'an", ['the holy book of Islam']),
+                $en('rumah', ['house'], ['url' => 'https://example.org/id/rumah']),
+                $en('anak-anak', ['children']), $en('anak tiri', ['stepchild']),
+            ],
+        ]);
+        $this->artisan('aksara:dictionary', ['--path' => $this->dir])->assertSuccessful();
+    }
+
     public function test_import_fills_both_dictionaries_and_replaces_old_entries(): void
     {
         $this->seedDictionaries();
@@ -238,6 +263,103 @@ class DictionaryTest extends TestCase
         $this->assertCount(DictionarySearch::MAX_WORDS, DictionarySearch::words(implode(' ', range('a', 'z'))));
     }
 
+    public function test_phrases_affixes_and_quoted_words_are_found_as_typed(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $this->seedEdgeCases();
+        $words = fn (string $term, string $list = 'matches') => DictionarySearch::search('id', $term, 20)[$list]->pluck('word')->all();
+
+        // Frasa berkata ulang dicari utuh seperti diketik; sesudahnya kata per kata, tanpa pengulangan.
+        $this->assertOrder(['Kamus bahasa Indonesia', 'mau tak mau', 'willy-nilly', 'Arti per kata', 'mau', 'to want', 'tak', 'not'], $this->sections('mau tak mau'));
+
+        // Imbuhan: tanda hubung di depan ikut dicari. "an" di arti berbahasa Inggris bukan padanannya, jadi tanpa pencarian balik.
+        $suffix = DictionarySearch::search('id', '-an', 20);
+        $this->assertSame(['-an', 'ke- -an', 'anak-anak'], $suffix['matches']->pluck('word')->all());
+        $this->assertSame(0, $suffix['reverse_total']);
+        $this->assertOrder(['Kamus bahasa Indonesia', 'ke- -an', 'circumfix forming an abstract noun', 'Arti per kata', 'ke-', 'prefix', '-an', 'suffix forming nouns'],
+            $this->sections('ke- -an'));
+        $this->assertSame(['ke-', '-an'], DictionarySearch::words('ke- -an'));
+        // Kata biasa yang kebetulan didahului tanda hubung tetap diartikan.
+        $this->assertSame(['rumah'], DictionarySearch::gloss('id', ['-rumah'])[0]['entries']->pluck('word')->all());
+
+        // Tanda kutip yang membungkus kata dibuang; apostrof yang bagian dari kata tidak.
+        $this->assertSame(['rumah'], $words("'rumah'"));
+        $this->assertSame(['rumah'], $words('‘rumah’'));
+        $this->assertSame(["Al-Qur'an"], $words('al-qur’an'));
+        $this->assertSame(['omah', 'lan', 'griya'], DictionarySearch::words("'omah' lan 'griya'"));
+        Livewire::test(Kamus::class)->set('q', "'rumah'")
+            ->assertSee('href="https://kbbi.kemendikdasmen.go.id/entri/rumah"', false)
+            // Arti berbahasa Inggris di halaman berbahasa Indonesia dinyatakan bahasanya.
+            ->assertSee('lang="en"', false);
+
+        // Pencarian balik mengenai kata bertanda hubung di arti.
+        $this->assertSame(['menantu'], $words('son-in-law', 'reverse'));
+
+        // Kata sama panjang diurutkan menurut byte (spasi sebelum tanda hubung), sama di PostgreSQL dan SQLite.
+        $this->assertSame(['anak tiri', 'anak-anak'], $words('anak'));
+        // Arti berbahasa Indonesia didahulukan walau diimpor belakangan.
+        $this->assertSame(['id', 'en'], DictionarySearch::search('jv', 'toya', 20)['matches']->pluck('gloss_lang')->all());
+
+        // Tabel arti per kata bertaut ke halaman asal entrinya.
+        Livewire::test(Kamus::class)->set('q', 'rumah mau')
+            ->assertSee('href="https://example.org/id/rumah"', false)->assertSee('Sumber entri rumah: Kamus Contoh Indonesia', false);
+    }
+
+    public function test_entry_found_by_its_script_spelling_is_listed_once(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $this->seedEdgeCases();
+
+        // Entri banḍa cocok lewat ejaan aksaranya, entri bandha lewat katanya. Arti banḍa juga menyebut "bandha",
+        // tetapi entri itu tidak diulang di daftar "artinya memuat kata ini", dan jumlahnya tidak dihitung dua kali.
+        $found = DictionarySearch::search('jv', 'bandha', 20, 'ꦧꦤ꧀ꦣ');
+        $this->assertSame(['banḍa', 'bandha'], $found['matches']->pluck('word')->all());
+        $this->assertSame([2, 0, 0], [$found['total'], $found['reverse_total'], $found['reverse']->count()]);
+        // Tanpa ejaan aksara, banḍa hanya ditemukan dari artinya.
+        $plain = DictionarySearch::search('jv', 'bandha', 20);
+        $this->assertSame([['bandha'], ['banḍa']], [$plain['matches']->pluck('word')->all(), $plain['reverse']->pluck('word')->all()]);
+
+        // Di halaman: aksara yang ditempel menemukan entrinya walau bacaan Latin drafnya ("sinahu") bukan katanya.
+        $this->assertOrder(['Kamus bahasa Jawa', '1 entri cocok dengan katanya', 'sinau', 'ꦱꦶꦤꦲꦸ', 'belajar'], $this->sections('ꦱꦶꦤꦲꦸ'));
+    }
+
+    public function test_code_points_and_marker_words_go_to_their_own_dictionaries(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $this->seedDictionaries();
+
+        // Kode titik Unicode milik kamus aksara: kamus kata tidak mengartikan "U" dan "A9B6" satu per satu.
+        $text = $this->sections('U+A9B6');
+        $this->assertStringNotContainsString('Arti per kata', $text);
+        $this->assertSame(2, substr_count($text, 'Tidak ada entri yang cocok dengan pencarian ini.'));
+        Livewire::test(Kamus::class)->set('q', 'U+A9B6')->assertSee('wulu')->assertDontSee('KBBI Daring');
+
+        // Beberapa kata: leksikon tingkat tutur menampilkan penanda yang memang ada di teks, seperti di uraian.
+        $html = Livewire::test(Kamus::class)->set('q', 'kula badhé tindak')->html();
+        $this->assertMatchesRegularExpression('/Leksikon tingkat tutur\s*<span class="chip-count num">3<\/span>/u', $html);
+        $lexicon = strip_tags(substr($html, strpos($html, 'id="leksikon-tutur"')));
+        $this->assertOrder(['kula', 'badhe', 'tindak'], $lexicon);
+        $this->assertStringNotContainsString('sampun', $lexicon);
+    }
+
+    public function test_shipped_dictionary_files_import_cleanly(): void
+    {
+        // Berkas yang ikut repo harus lolos validasi pengimpor: bangun ulang data yang merusaknya ketahuan di sini,
+        // bukan saat impor ke database situs. Sekaligus impor yang jauh lebih besar dari satu potongan sisipan.
+        $this->artisan('aksara:dictionary')->assertSuccessful();
+
+        $counts = DictionaryEntry::selectRaw('dictionary, count(*) as n')->groupBy('dictionary')->pluck('n', 'dictionary');
+        $this->assertGreaterThan(3000, $counts['jv']);
+        $this->assertGreaterThan(30000, $counts['id']);
+        $this->assertSame((int) $counts['jv'], (int) DictionarySource::where('dictionary', 'jv')->sum('entries'));
+        // Yang dijanjikan dokumen: tiap entri bertaut ke halaman asalnya, dan tidak ada isi KBBI.
+        $this->assertSame(0, DictionaryEntry::whereNull('url')->count());
+        $this->assertSame(['enwiktionary'], DictionaryEntry::distinct()->pluck('source')->all());
+        // Ejaan aksara hanya berisi aksara Jawa (plus spasi dan tanda hubung antar-kata).
+        $this->assertSame([], DictionaryEntry::whereNotNull('aksara')->pluck('aksara')
+            ->reject(fn (string $aksara) => preg_match('/^[\x{A980}-\x{A9DF}\x{200C} -]+$/u', $aksara) === 1)->take(5)->values()->all());
+    }
+
     public function test_pattern_characters_and_markup_in_data_are_harmless(): void
     {
         $this->actingAs(User::factory()->create());
@@ -266,6 +388,7 @@ class DictionaryTest extends TestCase
 
         Livewire::test(Kamus::class)->set('q', 'kata')
             ->assertSee('45 entri cocok dengan katanya')->assertSee('20 ditampilkan')->assertSee('kata20')->assertDontSee('kata21')
+            ->assertSee('Tampilkan lebih banyak')
             ->call('more', 'jv')->assertSee('40 ditampilkan')->assertSee('kata40')->assertDontSee('kata41')
             ->call('more', 'bukan-kamus')->assertSee('40 ditampilkan')
             ->call('more', 'jv')->assertSee('kata45')->assertDontSee('Tampilkan lebih banyak')

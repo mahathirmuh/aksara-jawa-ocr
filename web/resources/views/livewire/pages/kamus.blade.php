@@ -101,7 +101,9 @@
                     <div class="flex flex-wrap items-center gap-2 text-sm">
                         <span class="text-xs text-zinc-500 dark:text-zinc-400">{{ nfmt($d['entries']) }} entri. Ketik kata di kotak pencarian, atau coba:</span>
                         @foreach ($d['examples'] as $example)
-                            <button type="button" class="chip" wire:click="$set('q', '{{ $example }}')" wire:key="contoh-{{ $key }}-{{ $example }}">{{ $example }}</button>
+                            {{-- Tombol ini hilang begitu pencarian jalan, jadi fokus dipindah ke kotak cari (kalau tidak, jatuh ke badan halaman). --}}
+                            <button type="button" class="chip" wire:click="$set('q', '{{ $example }}')" wire:key="contoh-{{ $key }}-{{ $example }}"
+                                    x-on:click="document.getElementById('kamus-q')?.focus({ preventScroll: true })">{{ $example }}</button>
                         @endforeach
                     </div>
                 @elseif ($d['mode'] === 'words')
@@ -134,9 +136,13 @@
                                                     @if ($entry->register)
                                                         <span class="status status-blue">{{ $entry->register }}</span>
                                                     @endif
-                                                    <span>{{ implode('; ', array_slice($entry->glosses, 0, 2)) }}</span>
+                                                    <span lang="{{ $entry->gloss_lang }}">{{ implode('; ', array_slice($entry->glosses, 0, 2)) }}</span>
                                                     @if ($mixed && $entry->gloss_lang !== 'id')
                                                         <span class="text-[11px] text-zinc-500 dark:text-zinc-400">({{ \App\Models\DictionaryEntry::GLOSS_LANGUAGES[$entry->gloss_lang] ?? $entry->gloss_lang }})</span>
+                                                    @endif
+                                                    @if ($entry->url)
+                                                        <a href="{{ $entry->url }}" target="_blank" rel="noopener noreferrer" class="text-[11px] text-[var(--primary)] hover:underline"
+                                                           aria-label="Sumber entri {{ $entry->word }}: {{ $sourceNames[$entry->source] ?? $entry->source }}">sumber</a>
                                                     @endif
                                                 </div>
                                             @empty
@@ -148,7 +154,7 @@
                             </tbody>
                         </table>
                     </div>
-                    <p class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">Paling banyak {{ \App\Support\DictionarySearch::MAX_WORDS }} kata pertama yang diartikan. Cari satu kata untuk melihat entri lengkapnya.</p>
+                    <p class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">Paling banyak {{ \App\Support\DictionarySearch::MAX_WORDS }} kata pertama yang diartikan, dan hanya entri yang katanya persis sama. Cari satu kata untuk melihat entri lengkapnya.</p>
                 @else
                     @if ($d['matches']->isEmpty() && $d['reverse']->isEmpty())
                         <p class="text-sm text-zinc-500 dark:text-zinc-400">Tidak ada entri yang cocok dengan pencarian ini.</p>
@@ -200,7 +206,7 @@
                     <p class="dict-sources">
                         Sumber:
                         @foreach ($d['sources'] as $source)
-                            <span class="whitespace-nowrap"><a href="{{ $source->url }}" target="_blank" rel="noopener noreferrer" class="text-[var(--primary)] hover:underline">{{ $source->name }}</a></span>
+                            <a href="{{ $source->url }}" target="_blank" rel="noopener noreferrer" class="text-[var(--primary)] hover:underline">{{ $source->name }}</a>
                             ({{ $source->license }}; {{ nfmt($source->entries) }} entri{{ $source->retrieved ? '; diambil '.$source->retrieved : '' }}){{ $loop->last ? '.' : ',' }}
                         @endforeach
                     </p>

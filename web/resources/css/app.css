@@ -276,7 +276,7 @@ select:focus[data-flux-control] {
     .chip:hover { color: var(--brand-strong); border-color: var(--brand); background: var(--brand-wash); }
     .chip.is-active, .chip[aria-pressed='true'], .chip[aria-current='true'] { background: var(--brand); border-color: var(--brand); color: #fff; }
     .chip.is-disabled, .chip:disabled { border-style: dashed; background: transparent; color: var(--color-zinc-400); cursor: default; pointer-events: none; }
-    .chip-count { font-variant-numeric: tabular-nums; opacity: .8; }
+    .chip-count { font-variant-numeric: tabular-nums; font-weight: 600; }
     .nav-tabs { position: relative; display: flex; flex-wrap: wrap; gap: 1.5rem; border-bottom: 2px solid #e2e8f0; }
     .dark .nav-tabs { border-bottom-color: var(--border); }
     .nav-tabs > a, .nav-tabs > button { position: relative; margin-bottom: -2px; padding: .5rem 0; color: #64748b; font-weight: 500; border-bottom: 3px solid transparent; }
@@ -527,6 +527,9 @@ select:focus[data-flux-control] {
     .dict-note { margin-top: .25rem; font-size: .75rem; line-height: 1.5; color: var(--text-muted); overflow-wrap: anywhere; }
     .dict-meta { display: flex; flex-wrap: wrap; gap: .125rem .75rem; margin-top: .25rem; font-size: .6875rem; line-height: 1.4; color: var(--text-muted); }
     .dict-inline { display: flex; flex-wrap: wrap; align-items: center; gap: .125rem .5rem; }
+    /* Arti dan catatan kadang memuat aksara Jawa (mis. "krama ꦭꦠꦸ"): webfont aksara disisipkan sebelum font sistem,
+       supaya tidak jatuh ke font bawaan Windows yang barisnya sangat tinggi atau ke kotak kosong. */
+    .dict-glosses, .dict-example, .dict-note, .dict-inline { font-family: 'InterVariable', 'Inter', 'Noto Sans Javanese', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif; }
     .dict-inline + .dict-inline { margin-top: .25rem; }
     .dict-sources { margin-top: 1rem; padding-top: .75rem; border-top: 1px solid var(--border-soft); font-size: .6875rem; line-height: 1.5; color: var(--text-muted); }
     @media (min-width: 1024px) {
