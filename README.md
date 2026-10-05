@@ -56,7 +56,8 @@ Cara menjalankan: bagian "Cara menjalankan" di `CLAUDE.md` dan `web/README.md`. 
   Haqq): SIL Open Font License 1.1, keterangan lisensi ada di metadata font.
 - Korpus: Wikipedia bahasa Jawa (CC BY-SA), tidak disertakan.
 - Terjemahan di `web/tools/`: NLLB-200-distilled-600M (CC-BY-NC), diunduh saat dipakai, tidak disertakan.
-- Antarmuka web: huruf Inter (SIL OFL 1.1, paket npm `inter-ui`) dan Tabler Icons (MIT).
+- Antarmuka web: huruf Inter (SIL OFL 1.1, paket npm `inter-ui`) dan Tabler Icons (MIT). Lambang aplikasi
+  (`web/resources/brand/logo.png`) disediakan pemilik repo.
 - Foto halaman masuk (`web/public/img/login/`), dari Wikimedia Commons, dipotong dan diperkecil: naskah beraksara
   Jawa koleksi Museum Sonobudoyo (Candramawa99, CC0), Serat Damar Wulan (British Library MSS Jav 89, domain publik),
   gerbang Donopratono Kraton Yogyakarta (Chainwit., CC BY 4.0). Tautan sumber di

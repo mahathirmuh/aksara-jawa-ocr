@@ -55,14 +55,13 @@
             </div>
 
             <div class="auth-panel">
-                <div class="auth-brand">
-                    <a href="{{ route('home') }}" class="app-brand-link" wire:navigate>
-                        <x-app-logo />
-                    </a>
-                    <span class="badge badge-outline">lokal</span>
-                </div>
+                <span class="badge badge-outline auth-badge">lokal</span>
 
                 <div class="auth-body">
+                    {{-- Lambang utuh dari tools/logo.py; di sidebar dipakai versi lambangnya saja (x-app-logo). --}}
+                    <a href="{{ route('home') }}" class="auth-logo" wire:navigate>
+                        <img src="{{ asset('img/logo/logo.png') }}?v={{ filemtime(public_path('img/logo/logo.png')) }}" alt="Logo Aksara OCR Lab" width="384" height="384">
+                    </a>
                     <div class="auth-title">Aksara OCR Lab</div>
                     <hr class="auth-rule">
                     <div class="flex flex-col gap-6">

@@ -315,8 +315,11 @@ select:focus[data-flux-control] {
     .app-brand { justify-content: center; }
 }
 .app-brand-link { display: flex; min-width: 0; align-items: center; gap: .625rem; color: var(--text); }
-.app-brand-mark { display: flex; flex: none; width: 2rem; height: 2rem; align-items: center; justify-content: center; border-radius: 8px; background: var(--brand); color: #fff; }
+/* Lambang = gambar dari tools/logo.py (components/app-logo-icon): ubin putih bersudut bulat, radius 22,2% sisinya.
+   Cincin tipis memberi batas pada ubin putih itu di sidebar terang. */
+.app-brand-mark { display: block; flex: none; width: 2.5rem; height: 2.5rem; border-radius: 22.2%; box-shadow: 0 0 0 1px var(--border-soft), 0 1px 3px rgba(15, 23, 42, .12); }
 .app-brand-name { font-size: .9375rem; line-height: 1.1; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; }
+.app-brand-accent { color: var(--brand-strong); }
 .app-brand-tag { margin-top: .125rem; font-size: .625rem; line-height: 1; letter-spacing: .04em; text-transform: uppercase; font-weight: 600; color: var(--nav-heading); white-space: nowrap; }
 .app-sidebar[data-flux-sidebar-collapsed-desktop] .app-brand-text { display: none; }
 
@@ -382,10 +385,13 @@ select:focus[data-flux-control] {
 .auth-thumbs button { width: 4rem; height: 3rem; border-radius: var(--radius); background-position: center; background-size: cover; opacity: .6; box-shadow: 0 0 0 1px rgba(255, 255, 255, .55); transition: opacity .15s ease, box-shadow .15s ease; }
 .auth-thumbs button:hover, .auth-thumbs button:focus-visible { opacity: 1; outline: none; box-shadow: 0 0 0 2px #fff; }
 .auth-thumbs button[aria-current='true'] { opacity: 1; box-shadow: 0 0 0 2px #fff; }
-.auth-panel { display: flex; min-width: 0; flex-direction: column; justify-content: space-between; }
-.auth-brand { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.5rem 2rem 0; }
-.auth-body { padding: 0 2rem 1.5rem; }
-.auth-title { margin-top: 1.5rem; text-align: center; font-size: 1.5rem; line-height: 2rem; font-weight: 600; color: var(--text-muted); }
+.auth-panel { position: relative; display: flex; min-width: 0; flex-direction: column; justify-content: space-between; }
+.auth-badge { position: absolute; top: 1rem; inset-inline-end: 1rem; }
+.auth-body { padding: 2rem 2rem 1.5rem; }
+/* Lambang utuh (dengan tulisan dan garis hiasnya) di atas judul; bayangan lembut seperti pada gambar sumbernya. */
+.auth-logo { display: block; width: 6.5rem; margin-inline: auto; border-radius: 22.2%; box-shadow: 0 0 0 1px rgba(4, 32, 69, .06), 0 12px 28px -12px rgba(37, 99, 235, .5); }
+.auth-logo img { display: block; width: 100%; height: auto; border-radius: inherit; }
+.auth-title { margin-top: 1rem; text-align: center; font-size: 1.5rem; line-height: 2rem; font-weight: 600; color: var(--text-muted); }
 .auth-rule { margin-block: 1rem; border: 0; border-top: 1px solid var(--border-soft); }
 .auth-foot { padding-bottom: .75rem; text-align: center; font-size: .75rem; color: var(--text-muted); }
 @media (min-width: 1024px) {
@@ -393,9 +399,13 @@ select:focus[data-flux-control] {
     .auth-card { grid-template-columns: 7fr 5fr; min-height: min(44rem, calc(100dvh - 6rem)); }
     .auth-slide figcaption { padding: 4rem 15rem 1rem 1.25rem; }
     .auth-thumbs { display: flex; }
-    .auth-body { margin-block: auto; }
-    .auth-brand { padding: 3rem 4rem 0; }
-    .auth-body { padding: 0 4rem 1.5rem; }
+    .auth-body { margin-block: auto; padding: 2rem 4rem 1.5rem; }
+}
+/* Jendela pendek (laptop 1366 x 768 dengan bilah browser): lambang diperkecil supaya kartu masuk muat tanpa menggulir. */
+@media (max-height: 720px) {
+    .auth-logo { width: 5rem; }
+    .auth-body { padding-top: 1.25rem; }
+    .auth-title { margin-top: .75rem; }
 }
 @media (prefers-reduced-motion: reduce) {
     .auth-slide, .auth-thumbs button { transition: none; }

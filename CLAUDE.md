@@ -278,6 +278,12 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     dan dipilih Claude: naskah beraksara Jawa di Museum Sonobudoyo (CC0), halaman Serat Damar Wulan British Library
     MSS Jav 89 (domain publik), gerbang Donopratono Kraton Yogyakarta (Chainwit., CC BY 4.0: atribusi WAJIB tetap
     ada di keterangan foto dan `web/public/img/login/SUMBER.md`). Dibuat ulang lewat `web/tools/login_images.py`.
+    **Lambang aplikasi = gambar pilihan user (2026-10-05: "ubah logonya jadi ini saja"; lambang SVG buatan Claude
+    ditolak):** sumber `web/resources/brand/logo.png` (ikon 1254 px: keris di atas atap joglo, bulir padi, ombak,
+    sebaris tulisan bergaya aksara Jawa). `web/tools/logo.py` menurunkan `public/img/logo/logo.png` (ubin utuh,
+    halaman masuk), `public/img/logo/mark.png` (lambang saja, sidebar), `favicon.ico`, `favicon-192.png`,
+    `apple-touch-icon.png`; jangan diganti tanpa permintaan user. Tulisan di gambar itu buatan pembuat gambar,
+    bentuknya tidak sama dengan `ꦲꦏ꧀ꦱꦫ ꦗꦮ` hasil font, dan belum diperiksa pembaca aksara (sudah disampaikan ke user).
   - **Database web: PostgreSQL 18** (keputusan user 2026-09-25; layanan Windows `postgresql-x64-18` sudah
     terpasang, port 5432). Database **`its_aksara`** (dibuat user 2026-10-02; UTF8), pengguna `postgres`;
     kredensial HANYA di `web/.env` (diabaikan git), jangan ditulis di file lain. Database uji

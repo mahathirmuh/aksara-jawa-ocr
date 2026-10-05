@@ -98,7 +98,13 @@ bergaris tipis, tabel rapat 12 px, huruf Inter 13 px. Stack tetap Tailwind 4 + F
   `layouts/auth/split.blade.php`.
 - **Huruf dan ikon:** Inter 4.1 dari paket npm `inter-ui` (OFL, dibundel Vite, tanpa CDN); aksara Jawa tetap Noto
   Sans Javanese. Ikon menu = Tabler Icons (MIT) sebagai komponen `flux:icon.ti-*` di `resources/views/flux/icon/`.
-  Ikon situs dibuat `tools/favicon.py`.
+- **Lambang:** gambar pilihan user (2026-10-05), sumbernya `resources/brand/logo.png`: ubin putih bersudut bulat
+  berisi keris di atas atap joglo, diapit bulir padi di atas ombak, dengan sebaris tulisan bergaya aksara Jawa.
+  `tools/logo.py` menurunkan semua berkasnya: `public/img/logo/logo.png` (ubin utuh, di atas judul halaman masuk),
+  `public/img/logo/mark.png` (lambangnya saja di ubin putih, untuk sidebar lewat `x-app-logo`; tulisannya tidak
+  terbaca di bawah ~100 px), `favicon.ico`, `favicon-192.png`, dan `apple-touch-icon.png`. Untuk ukuran kecil tinta
+  lambang ditebalkan sedikit supaya tidak memudar. Dibuat ulang dari akar repo:
+  `.venv/Scripts/python web/tools/logo.py web`. Tulisan aksara di gambar itu belum diperiksa pembaca aksara.
 - **Halaman masuk:** panel kiri berisi korsel tiga foto (naskah beraksara Jawa di Museum Sonobudoyo, halaman
   Serat Damar Wulan, gerbang Kraton Yogyakarta), latarnya foto naskah yang diburamkan. Semua dari Wikimedia Commons
   berlisensi bebas (CC0, domain publik, CC BY 4.0); sumber dan pembuatnya di `public/img/login/SUMBER.md` dan di
