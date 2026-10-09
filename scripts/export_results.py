@@ -8,7 +8,10 @@ dasar + beam 568 dtk, lalu tiap run lanjutan (fase6, fase7) yang ikut menambah s
 lama bila training sedang berjalan.
 
 Keluaran di out/results/ (ditimpa):
-  manifest.json      skema, waktu, pipeline, gerbang G1-G4, metrik agregat, ablasi, kesalahan aksara
+  manifest.json      skema, waktu, pipeline, gerbang G1-G4, metrik agregat (CER, CER tanpa spasi, baris persis, dan
+                     sejak 2026-10-09 recall, presisi, F1, akurasi karakter dari penjajaran src/metrics.py), ablasi,
+                     metrik per aksara (`class_metrics`, tiap pipeline yang punya prediksi di semua baris), kesalahan
+                     aksara
   lines.jsonl        satu baris data nyata per baris: id, path citra, ukuran, label, tag
   predictions.jsonl  satu prediksi per (baris, pipeline): teks, CER, segmen beda per suku kata, kolom citra
 
@@ -46,6 +49,7 @@ from src.charlm import CharLM  # noqa: E402
 from src.decode import cer  # noqa: E402
 from src.evaluate import TARGETS  # noqa: E402
 from src.infer import load_checkpoint  # noqa: E402
+from src.metrics import char_metrics, class_metrics  # noqa: E402
 from src.tokenizer import nfc  # noqa: E402
 
 SCHEMA = 1
@@ -128,9 +132,26 @@ def read_json(path: Path) -> dict:
 
 
 def aggregate(refs: dict, hyps: dict, names: list[str]) -> dict:
+    """Metrik satu pipeline pada baris `names`: CER (angka utama), CER tanpa spasi, baris persis, dan recall,
+    presisi, F1, akurasi karakter dari penjajaran src/metrics.py (pelengkap untuk tabel perbandingan web)."""
     rr, hh = [refs[n] for n in names], [hyps[n] for n in names]
+    chars = char_metrics(zip(rr, hh))
     return {"lines": len(names), "cer": cer(rr, hh), "cer_no_space": cer(rr, [h.replace(" ", "") for h in hh]),
-            "exact": sum(a == b for a, b in zip(rr, hh)) / len(names)}
+            "exact": sum(a == b for a, b in zip(rr, hh)) / len(names),
+            "precision": chars["precision"], "recall": chars["recall"], "f1": chars["f1"],
+            "char_accuracy": chars["char_accuracy"]}
+
+
+def class_metrics_block(refs: dict, hyps: dict[str, dict[str, str]], names: list[str], scope: str) -> dict:
+    """Recall, presisi, F1 per karakter untuk tiap pipeline yang punya prediksi di SEMUA baris `names`
+    (manifest kunci `class_metrics`; halaman Kesalahan aksara web)."""
+    items = []
+    for key, hh in hyps.items():
+        if any(n not in hh for n in names):
+            continue
+        for entry in class_metrics([(refs[n], hh[n]) for n in names]):
+            items.append({"pipeline": key, **entry})
+    return {"scope": scope, "items": items}
 
 
 def write_atomic(path: Path, text: str) -> None:
@@ -425,6 +446,7 @@ def main(argv=None) -> None:
         "gates": gates,
         "metrics": metrics,
         "ablation": read_json(ROOT / "out/ablation.json"),
+        "class_metrics": class_metrics_block(refs, hyps, names, "nusaaksara_745"),
         "confusion": {
             "pipeline": official_key, "scope": "nusaaksara_745",
             "totals": {kinds[k]: sum(c for (op, _, _), c in confusion.items() if op == k) for k in kinds},

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\AblationRun;
+use App\Models\ClassMetric;
 use App\Models\Confusion;
 use App\Models\Gate;
 use App\Models\Line;
@@ -82,8 +83,21 @@ class ResultImporter
 
             Metric::where('scope', '!=', 'translit_draft')->delete();
             foreach ($manifest['metrics'] as $m) {
+                // precision, recall, f1, char_accuracy: kunci opsional (ekspor sebelum 2026-10-09 tidak punya) -> null.
                 Metric::create(array_intersect_key($m, array_flip(
-                    ['scope', 'pipeline', 'lines', 'cer', 'cer_no_space', 'exact', 'better', 'worse'])));
+                    ['scope', 'pipeline', 'lines', 'cer', 'cer_no_space', 'exact', 'better', 'worse',
+                        'precision', 'recall', 'f1', 'char_accuracy'])));
+            }
+
+            // Per karakter (opsional di manifest): satu baris per (cakupan, pipeline, karakter).
+            ClassMetric::query()->delete();
+            $classScope = $manifest['class_metrics']['scope'] ?? 'nusaaksara_745';
+            foreach (array_chunk($manifest['class_metrics']['items'] ?? [], 200) as $chunk) {
+                ClassMetric::insert(array_map(fn ($c) => [
+                    'scope' => $classScope, 'pipeline' => $c['pipeline'], 'char' => $c['char'], 'code' => $c['code'],
+                    'ref' => $c['ref'], 'hyp' => $c['hyp'], 'tp' => $c['tp'], 'fn' => $c['fn'], 'fp' => $c['fp'],
+                    'precision' => $c['precision'] ?? null, 'recall' => $c['recall'] ?? null, 'f1' => $c['f1'] ?? null,
+                ], $chunk));
             }
 
             Gate::query()->delete();

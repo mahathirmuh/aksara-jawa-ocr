@@ -230,23 +230,24 @@ langka). Dari alignment satu baris: M cocok, S substitusi, D hapus, I sisip, den
 | Accuracy karakter | M / (M + S + D + I) | porsi langkah alignment yang benar, terikat [0, 1]; opsional, bila user ingin kolom "accuracy" tingkat karakter |
 | Per kelas (92 karakter) | TP = M pada c; FN = S + D dengan referensi c; FP = S + I dengan hipotesis c → P, R, F1 per kelas, macro-F1, dan per kelompok (aksara, sandhangan, pangkon, angka, pada) | menjawab "aksara mana yang lemah"; pelengkap tabel kebingungan halaman Kesalahan |
 
-Perubahan yang dibutuhkan (tanpa mengubah angka resmi):
+Perubahan yang dibutuhkan (tanpa mengubah angka resmi). **Butir 1-4 DIKERJAKAN 2026-10-09** (commit di cabang ini;
+rincian di CLAUDE.md "Metrik karakter"); angkanya baru tampil setelah `php artisan migrate`, `export_results.py`,
+dan `aksara:import` dijalankan di laptop.
 
-1. Pindahkan `alignment()` dan `glyph_class()` dari `scripts/compare_runs.py` ke `src/align.py` (yang sudah memuat
-   `line_cer`, `syllable_diff`); `compare_runs` mengimpornya. Tambah `char_counts(ref, hyp) -> (M, S, D, I)` dan
-   `prf(pairs)`.
-2. `src/evaluate.py::summarize` menambah `precision`, `recall`, `f1`, `char_accuracy` (laporan `out/eval/*.json` lama
-   tanpa kunci itu tetap sah; `gate_problem` tidak membacanya).
+1. ~~Pindahkan ke `src/align.py`~~ → dipindah ke modul baru **`src/metrics.py`** (tanpa torch): `alignment`,
+   `glyph_class`, `char_counts`, `rates`, `char_metrics`, `class_metrics`, `macro_f1`; `compare_runs` mengimpornya
+   dan tetap mengekspor namanya.
+2. `src/evaluate.py::summarize` menambah `precision`, `recall`, `f1`, `char_accuracy`, `counts` (laporan
+   `out/eval/*.json` lama tanpa kunci itu tetap sah; `gate_problem` tidak membacanya).
 3. `scripts/export_results.py::aggregate` menambah kunci yang sama ke tiap metrik manifest (`nusaaksara_745`,
-   `blind_50`, dan scope dev baru), plus blok per kelas `class_metrics` untuk pipeline yang punya prediksi 745 baris.
-   Kontrak data: skema tetap 1 dengan kunci opsional (web mengabaikan yang tidak dikenal), atau naikkan ke skema 2 bila
-   kolom dibuat wajib.
-4. Web: migrasi kolom nullable `precision`, `recall`, `f1`, `char_accuracy` di `metrics`
-   (`web/database/migrations/2026_09_24_000001_create_aksara_tables.php`), `ResultImporter.php:84-86` meneruskannya,
-   `Metric` cast; tabel baru `class_metrics` (pipeline, char, tp, fn, fp, precision, recall, f1). Halaman Perbandingan
-   (`perbandingan.blade.php:19-37`) menambah kolom P / R / F1 di tabel 745 baris; halaman Kesalahan menambah tabel per
-   kelas dengan pemilih pipeline. Test halaman memakai atribut `data-*` per sel (aturan tinjauan 2026-10-06).
-5. Untuk ablasi arsitektur: kontrak baru `manifest["architecture_ablation"]` (bukan `ablation_runs`, yang diganti utuh
+   `blind_50`), plus blok `class_metrics` untuk pipeline yang punya prediksi di semua baris. Skema tetap 1 dengan
+   kunci opsional.
+4. Web: migrasi `2026_10_09_000001_add_character_metrics` (kolom nullable di `metrics`, tabel `class_metrics`),
+   `ResultImporter` meneruskannya, model `ClassMetric`. Perbandingan: kolom Presisi / Recall / F1 di tabel 745 baris
+   dan uji buta, definisi di bawah tabel. Kesalahan aksara: macro-F1 dan mikro di kepala, 20 aksara F1 terendah
+   (≥ 10 kemunculan di label) untuk pipeline resmi; pemilih pipeline belum (semua pipeline sudah ada di tabel
+   `class_metrics`). Test `web/tests/Feature/CharacterMetricsTest.php` memakai atribut `data-row|blind|cell|char|part`.
+5. **Belum:** untuk ablasi arsitektur: kontrak baru `manifest["architecture_ablation"]` (bukan `ablation_runs`, yang diganti utuh
    saat impor dan milik ablasi augmentasi): satu baris per lengan dan scope (`synth_dev_clean`, `synth_dev_aug`,
    `nusaaksara_745`) dengan cer, precision, recall, f1, exact, params, ms_per_sample, ms_per_line_cpu, diff_vs_control,
    ci_low, ci_high (dari `out/compare/arch/`), kontrol, seed, status klaim. Pipeline lengan masuk `PIPELINES` lewat

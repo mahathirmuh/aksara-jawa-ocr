@@ -467,3 +467,36 @@ def test_gate_problem_accepts_valid_reports_and_counts_rejected_lines():
     report = gate_report("G1", "fase7_track")
     report["results"]["NotoSansJavanese-Regular.ttf"] = dict(report["results"]["javatext.ttf"])
     assert "bukan javatext.ttf saja" in gate_problem("G1", report, "fase7_track", 745)
+
+
+# --- metrik karakter (recall, presisi, F1) untuk tabel perbandingan web ------------------------------------
+
+
+def test_aggregate_adds_character_metrics_consistent_with_cer():
+    from export_results import aggregate
+
+    ka, na, ta = "ꦏ", "ꦤ", "ꦠ"
+    refs = {"b1": ka + na + ta, "b2": ka + na}
+    hyps = {"b1": ka + na + ta, "b2": ka}  # b2: na hilang -> M 4, D 1
+    m = aggregate(refs, hyps, ["b1", "b2"])
+    assert m["lines"] == 2 and m["cer"] == pytest.approx(1 / 5) and m["exact"] == 0.5
+    assert (m["precision"], m["recall"], m["char_accuracy"]) == (1.0, pytest.approx(0.8), pytest.approx(0.8))
+    assert m["f1"] == pytest.approx(2 * 0.8 / 1.8)
+    # CER dan 1 - recall sama-sama memakai pembilang hapus + tertukar bila tidak ada sisipan.
+    assert m["cer"] == pytest.approx(1 - m["recall"])
+
+
+def test_class_metrics_block_only_covers_pipelines_with_every_line():
+    from export_results import class_metrics_block
+
+    ka, na, ta = "ꦏ", "ꦤ", "ꦠ"
+    refs = {"b1": ka + na + ta, "b2": ka + na}
+    hyps = {"crnn_a": {"b1": ka + na + ta, "b2": ka}, "vlm": {"b1": ka + na + ta}}  # vlm hanya 1 baris: dilewati
+    block = class_metrics_block(refs, hyps, ["b1", "b2"], "nusaaksara_745")
+    assert block["scope"] == "nusaaksara_745"
+    assert {it["pipeline"] for it in block["items"]} == {"crnn_a"}
+    rows = {it["char"]: it for it in block["items"]}
+    assert rows[na] == {"pipeline": "crnn_a", "char": na, "code": "U+A9A4", "name": "JAVANESE LETTER NA",
+                        "ref": 2, "hyp": 1, "tp": 1, "fn": 1, "fp": 0, "precision": 1.0, "recall": 0.5,
+                        "f1": pytest.approx(2 * 1.0 * 0.5 / 1.5)}
+    assert [it["char"] for it in block["items"]] == [ka, na, ta]  # paling sering di referensi dulu

@@ -143,12 +143,12 @@ dibangun ulang dari file. Cadangkan labelnya:
 | Menu | Isi |
 |---|---|
 | Ringkasan | Gerbang G1–G4, jarak G3 ke target, status empat tahap alur, fase |
-| Perbandingan | CER per pipeline (745 baris, 50 baris uji buta), pipeline yang direncanakan, hasil sintetis |
+| Perbandingan | CER, CER tanpa spasi, baris persis, presisi, recall, F1 per pipeline (745 baris, 50 baris uji buta) dengan definisinya, pipeline yang direncanakan, hasil sintetis |
 | Ablasi | 12 run augmentasi Fase 5 |
 | Dataset | Kartu data: besar korpus, pembagian latih / validasi / uji dengan arti tiap bagian dan berapa yang dipakai run resmi, asal korpus (dari artikel ke baris, sebaran panjang), rantai checkpoint run resmi (langkah, sampel, baris berbeda), daftar dataset (peran, sumber, lisensi, boleh disebar atau tidak), font per peran dengan catatannya, batasan data, dan data pendukung |
 | Metode | Daftar metode dan machine learning yang dipakai, per tahap: pembaca aksara (CNN, BiLSTM, lapisan keluaran, CTC, decoding greedy, tokenizer urutan visual, normalisasi kontras), data latih sintetis (render, variasi font, augmentasi, jarak antar suku kata, buang spasi, sisipan aksara langka), pelatihan (AdamW, OneCycle, pemotongan gradien, batch per panjang, pelatihan bertahap), koreksi sesudah baca (beam search + model bahasa karakter), evaluasi dan statistik (CER, gerbang, bootstrap berpasangan, run kontrol, ablasi, evaluasi sintetis tertarget, uji buta VLM), lalu tahap lanjutan alur milik web (alih aksara, NLLB-200, chrF/BLEU, tingkat tutur, pemulih tanda é). Tiap butir punya jenis, status (dipakai model resmi, dipakai, tersedia, diuji lalu tidak dipakai, pembanding), penjelasan, berkas kodenya, dan bila ada: pengaturan, bukti terukur dengan sumbernya, serta catatan batasan (mis. font uji yang sekeluarga dengan font latih, font latih bercacat, ablasi satu seed, angka terjemahan yang dihitung dengan ejaan yang tidak dikenal modelnya). Di atasnya: empat angka pokok dan alur dari citra ke teks Latin, yang lalu bercabang ke arti dan tingkat tutur; di bawahnya: metode yang direncanakan |
 | Penjelajah baris | Citra, label, transliterasi, arti, tingkat tutur, dan keluaran tiap pipeline dengan beda per suku kata; arahkan kursor ke suku kata CRNN greedy untuk melihat kolom citra yang dibacanya |
-| Kesalahan aksara | Aksara tertukar, hilang, tambahan |
+| Kesalahan aksara | Aksara tertukar, hilang, tambahan; recall, presisi, F1 per aksara (macro-F1, mikro, 20 aksara F1 terendah) untuk pipeline resmi |
 | Demo | Unggah potongan satu baris → FastAPI `/predict`, dengan skor CTC dan LM setiap kandidat |
 | Terjemahan | Indonesia → Jawa beraksara Jawa dan sebaliknya. Model NLLB lokal menerjemahkan (per kalimat, paling banyak 12); web memulihkan tanda é (`TalingRestorer`), mengalihaksarakan (`AksaraWriter`, `Transliterator`), dan menampilkan teks Jawa Latin yang boleh disunting sehingga aksaranya mengikuti. Alih aksara tetap jalan tanpa layanan model. Tautan: `?arah=jv-id`, `?q=`, `?jawa=` |
 | Kamus | Satu kotak pencarian untuk lima rujukan alur. **Kamus bahasa Jawa** dan **kamus bahasa Indonesia** (data pihak ketiga, `aksara:dictionary`): kata dicari tanpa peduli diakritik dan huruf besar, hasil diurutkan persis sama → berawalan → memuat, bisa dicari balik dari artinya (arti kamus Jawa sebagian berbahasa Indonesia, jadi "makan" menemukan mangan dan dhahar), frasa dan imbuhan ("mau tak mau", "-an") dicari seperti diketik, beberapa kata sekaligus diartikan per kata, dan aksara yang ditempel dicari lewat bacaan Latin drafnya dan ejaan aksaranya. Lalu **kamus aksara** (91 codepoint charset tokenizer: nama, kode, bacaan Latin draf, jumlah kemunculan di label uji), **kamus koreksi OCR** (model bahasa karakter untuk beam search: greedy vs beam + LM per data, dari hasil yang diimpor), **leksikon tingkat tutur** (kata penanda ngoko/madya/krama tahap 4). Aksara yang ditempel ke kotak cari diurai per codepoint |
@@ -195,7 +195,17 @@ bergaris tipis, tabel rapat 12 px, huruf Inter 13 px. Stack tetap Tailwind 4 + F
 ## Kontrak data (skema 1)
 
 `../out/results/` dari `scripts/export_results.py`: `manifest.json` (pipeline, pipeline resmi, gerbang, metrik,
-ablasi, kesalahan aksara), `lines.jsonl`, `predictions.jsonl`. `aksara:import` menolak skema lain.
+ablasi, kesalahan aksara, metrik per aksara), `lines.jsonl`, `predictions.jsonl`. `aksara:import` menolak skema lain.
+
+**Metrik karakter (sejak 2026-10-09, kunci opsional di tiap butir `metrics`; ekspor lama tanpa kunci ini tetap
+diimpor dengan nilai null dan halaman menampilkan "–"):** `precision`, `recall`, `f1`, `char_accuracy`, dihitung
+`src/metrics.py` dari penjajaran karakter yang sama dengan recall aksara langka `scripts/compare_runs.py` (biaya
+Levenshtein minimum, lalu kecocokan terbanyak). Dari jumlah cocok M, tertukar S, hilang D, tambahan I: CER = (S + D +
+I)/|label|, recall = M/|label|, presisi = M/|keluaran|, F1 harmonik keduanya, akurasi karakter = M/(M + S + D + I).
+`class_metrics` (`scope`, `items[]` dengan `pipeline`, `char`, `code`, `name`, `ref`, `hyp`, `tp`, `fn`, `fp`,
+`precision`, `recall`, `f1`) = angka yang sama per karakter, untuk tiap pipeline yang punya prediksi di semua baris;
+tabel `class_metrics` diganti utuh saat impor. Perbandingan menampilkan presisi/recall/F1 di samping CER;
+Kesalahan aksara menampilkan macro-F1, mikro, dan aksara dengan F1 terendah (yang muncul ≥ 10 kali di label).
 
 **Kartu data (skema 1, kontrak sendiri):** `../out/results/datasets.json` dari `scripts/export_datasets.py`, diimpor
 `php artisan aksara:datasets` (atau ikut `aksara:import`) ke tabel `dataset_reports`: satu baris berisi dokumennya

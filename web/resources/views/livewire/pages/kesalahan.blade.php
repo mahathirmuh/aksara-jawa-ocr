@@ -60,9 +60,54 @@
                 @endforeach
 
                 <div class="alert alert-info @[60rem]:col-span-2">
-                    <p class="max-w-[85ch]">Spasi diabaikan di halaman ini. Penghapusan mendominasi: model paling sering melewatkan tanda kecil seperti wulu dan cecak, terutama pada potongan bertekstur raster.</p>
+                    <p class="max-w-[85ch]">Spasi diabaikan di tiga daftar di atas. Penghapusan mendominasi: model paling sering melewatkan tanda kecil seperti wulu dan cecak, terutama pada potongan bertekstur raster.</p>
                 </div>
             </div>
         </div>
+
+        {{-- Per aksara: recall, presisi, F1 tiap karakter dari penjajaran yang sama dengan CER (manifest class_metrics,
+             pipeline resmi). Daftar = aksara yang cukup sering di label (>= MIN_REF) dengan F1 terendah. Ekspor lama tidak
+             punya tabel ini: diberi petunjuk ekspor ulang, bukan tabel kosong. --}}
+        <section class="card" data-part="per-aksara">
+            <div class="card-body">
+                <div class="mb-3 flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
+                    <div>
+                        <h2 class="section-title">Per aksara: recall, presisi, F1</h2>
+                        <p class="card-subtitle max-w-4xl">Recall = bagian kemunculan aksara itu di label yang terbaca benar; presisi = bagian keluaran model untuk aksara itu yang benar; F1 = rata-rata harmonik keduanya. Dihitung dari penjajaran karakter yang sama dengan CER, termasuk spasi.</p>
+                    </div>
+                    @if ($hasClasses)
+                        <p class="page-aside" data-part="ringkasan-aksara">
+                            macro-F1 {{ pct($macroF1, 1) }} atas {{ $classCount }} aksara di label
+                            @if ($micro) · mikro: presisi {{ pct($micro->precision, 1) }} · recall {{ pct($micro->recall, 1) }} · F1 {{ pct($micro->f1, 1) }} @endif
+                        </p>
+                    @endif
+                </div>
+                @if (! $hasClasses)
+                    <div class="alert alert-warning" role="note" data-part="tanpa-per-aksara">
+                        <p class="min-w-0">Hasil yang diimpor berasal dari ekspor sebelum metrik per aksara ada. Jalankan ulang <code class="code">scripts/export_results.py</code> lalu <code class="code">php artisan aksara:import</code>.</p>
+                    </div>
+                @else
+                    <p class="text-muted mb-2 text-xs">{{ $weakest->count() }} aksara dengan F1 terendah di antara yang muncul paling sedikit {{ App\Livewire\Pages\Kesalahan::MIN_REF }} kali di label.</p>
+                    <div class="table-wrap">
+                        <table class="data-table min-w-[40rem]">
+                            <thead><tr><th>Aksara</th><th>Nama</th><th class="r">Di label</th><th class="r">Dikeluarkan</th><th class="r">Recall</th><th class="r">Presisi</th><th class="r">F1</th></tr></thead>
+                            <tbody>
+                                @foreach ($weakest as $c)
+                                    <tr data-char="{{ $c->code }}">
+                                        <td class="jv text-2xl leading-snug">{{ $c->char === ' ' ? '␣' : $c->char }}</td>
+                                        <td class="text-xs">{{ aksara_name($c->char) }} <span class="code">{{ $c->code }}</span></td>
+                                        <td class="r num">{{ nfmt($c->ref) }}</td>
+                                        <td class="r num">{{ nfmt($c->hyp) }}</td>
+                                        <td class="r num">{{ pct($c->recall, 1) }}</td>
+                                        <td class="r num">{{ pct($c->precision, 1) }}</td>
+                                        <td class="r num font-semibold">{{ pct($c->f1, 1) }}</td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                @endif
+            </div>
+        </section>
     @endif
 </div>

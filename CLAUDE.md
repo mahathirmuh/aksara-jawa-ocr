@@ -587,6 +587,17 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     gerbang, metrik, ablasi, kesalahan aksara), `lines.jsonl`, `predictions.jsonl` (teks, CER, segmen beda
     per suku kata dari `src/align.py`, kolom citra per suku kata dari alignment CTC). Skrip berhenti kalau
     angka 745 baris beda dari laporan resmi. Uji buta VLM tersimpan di `out/eval/vlm_blind_50.json`.
+    **Metrik karakter (permintaan user 2026-10-09 "perbandingan jelas accuracy precision recall f1 score di
+    webnya"; dikerjakan 2026-10-09, belum diekspor ulang di laptop):** `src/metrics.py` (tanpa torch) memuat
+    `alignment`/`glyph_class` yang dipindah dari `scripts/compare_runs.py` (nama tetap diekspor dari sana) plus
+    `char_metrics`, `class_metrics`, `macro_f1`. `src.evaluate.summarize` dan `export_results.aggregate` menambah
+    `precision`, `recall`, `f1`, `char_accuracy` (M/|ref|, M/|hyp|, harmonik, M/(M+S+D+I); CER tetap angka
+    gerbang), manifest menambah `class_metrics` (per karakter per pipeline yang punya prediksi di semua baris).
+    Web: migrasi `2026_10_09_000001_add_character_metrics` (kolom nullable di `metrics`, tabel `class_metrics`),
+    halaman Perbandingan (kolom Presisi/Recall/F1 + definisi) dan Kesalahan (macro-F1, mikro, 20 aksara F1 terendah
+    dengan ≥ 10 kemunculan di label; `Kesalahan::MIN_REF`). Ekspor lama tanpa kunci itu tetap diimpor (null, "–",
+    petunjuk ekspor ulang). Test mandiri `web/tests/Feature/CharacterMetricsTest.php` membangun kontraknya dari
+    teks sintetis. Untuk melihat angkanya di web: `php artisan migrate`, `export_results.py`, `aksara:import`.
   - **Angka resmi = satu run, ditetapkan di satu tempat (2026-10-04).** `OFFICIAL_RUN` di
     `scripts/export_results.py` menentukan pipeline resmi: gerbang G1–G3 di manifest dibaca dari laporan
     `out/eval/<run>_G1_10k.json`, `_G2_10k.json`, `_G3_full.json` (run lama `fase5_fonts` memakai awalan

@@ -22,6 +22,7 @@ from torch.utils.data import DataLoader
 from src.dataset import TRAIN_FONTS, LengthBucketSampler, SyntheticLines, collate
 from src.decode import cer, greedy_decode
 from src.infer import load_checkpoint, predict
+from src.metrics import char_metrics
 from src.tokenizer import nfc
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,6 +70,9 @@ def evaluate_real(model, tokenizer, labels_path: Path, pad_ratio: float = 0.0, l
 
 def summarize(pairs) -> dict:
     worst = sorted(pairs, key=lambda p: Levenshtein.distance(*p) / max(1, len(p[0])), reverse=True)
+    # Recall, presisi, F1, akurasi karakter dari penjajaran yang sama dengan scripts/compare_runs.py (src/metrics.py);
+    # pelengkap CER untuk tabel perbandingan web, bukan angka gerbang. Dihitung pada string NFC seperti CER.
+    chars = char_metrics((nfc(r), nfc(h)) for r, h in pairs)
     return {
         "lines": len(pairs),
         "cer": cer([r for r, _ in pairs], [h for _, h in pairs]),
@@ -76,6 +80,11 @@ def summarize(pairs) -> dict:
         # menulis spasi di celah antarkata. Dicatat terpisah supaya porsinya terlihat.
         "cer_hyp_no_space": cer([r for r, _ in pairs], [h.replace(" ", "") for _, h in pairs]),
         "exact_line_accuracy": sum(r == h for r, h in pairs) / max(1, len(pairs)),
+        "precision": chars["precision"],
+        "recall": chars["recall"],
+        "f1": chars["f1"],
+        "char_accuracy": chars["char_accuracy"],
+        "counts": chars["counts"],
         "worst": [{"ref": r, "hyp": h} for r, h in worst[:20] if r != h],
     }
 

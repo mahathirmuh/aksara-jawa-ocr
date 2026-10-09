@@ -45,6 +45,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.align import line_cer  # noqa: E402
 from src.evaluate import summarize  # noqa: E402
+from src.metrics import alignment, glyph_class  # noqa: E402, F401  (penjajaran; dipindah ke src/metrics.py)
 from src.text_augment import RARE_MAX_LINE_FRACTION, RareText  # noqa: E402
 from src.tokenizer import TOKENIZER_PATH, Tokenizer, nfc  # noqa: E402
 from src.train import SPLITS_DIR, read_split  # noqa: E402
@@ -149,62 +150,6 @@ def paired_lines(lines: Sequence[dict], predictions: Sequence[dict], a: str, b: 
 
 
 # --- per baris -------------------------------------------------------------------------------------------
-
-
-def glyph_class(ch: str) -> int:
-    """Kelas karakter untuk memutus seri penjajaran: 0 spasi, 1 tanda gabung (sandhangan, pangkon: kategori Unicode M),
-    2 lainnya (aksara, angka, pada)."""
-    if ch.isspace():
-        return 0
-    return 1 if unicodedata.category(ch).startswith("M") else 2
-
-
-def alignment(reference: str, hypothesis: str) -> list[tuple[str, int | None, int | None]]:
-    """Penjajaran karakter berbiaya Levenshtein minimum; di antara yang seri, yang kecocokannya terbanyak, lalu yang
-    substitusinya paling banyak sekelas (`glyph_class`).
-
-    Hasil: (tag, i, j) per langkah, urut dari kiri; tag equal/replace/delete/insert, i indeks referensi dan j indeks
-    hipotesis (None bila langkah itu tidak memakainya). Opcodes rapidfuzz memilih di antara penjajaran seri tanpa
-    melihat kecocokan: "ꦢꦪ" vs "ꦪ " (ꦢ tidak terbaca, ada spasi tambahan) dijajarkan sebagai dua substitusi, sehingga
-    ꦪ yang terbaca benar dihitung salah. Pada keluaran nyata 1-2% karakter benar hilang dengan cara itu (2026-10-03).
-    Kriteria ketiga memasangkan glyph dengan glyph: tanpa itu "ꦏꦊ" vs "ꦏ꧒ " (nga lelet terbaca angka dua, lalu spasi
-    tambahan) dijajarkan sebagai ꦊ -> spasi, dan "ꦦꦂ" vs "꧘" (pa murda terbaca angka delapan, layar hilang) sebagai
-    ꦂ -> ꧘, sehingga kebingungan homoglif hilang dari hitungan (crnn_fonts, nga lelet -> angka dua: hanya 12 dari 21
-    tercatat; 2026-10-03). Jumlah edit dan kecocokan tidak berubah olehnya. Bila masih seri, pilihannya deterministik
-    (diagonal, lalu hapus, lalu sisip, dari ujung kanan).
-    """
-    n, m = len(reference), len(hypothesis)
-    big = n + m + 1  # lebih besar dari jumlah kecocokan maupun jumlah substitusi yang mungkin
-    edit = big * big  # nilai = edit * jumlah edit - big * kecocokan - substitusi sekelas: urutan leksikografis
-    ref_class = [glyph_class(ch) for ch in reference]
-    hyp_class = [glyph_class(ch) for ch in hypothesis]
-
-    def diagonal(i: int, j: int) -> int:
-        return -big if reference[i] == hypothesis[j] else edit - (ref_class[i] == hyp_class[j])
-
-    table = [list(range(0, (m + 1) * edit, edit))]
-    for i in range(1, n + 1):
-        ch, cls, prev, row = reference[i - 1], ref_class[i - 1], table[-1], [i * edit]
-        for j in range(1, m + 1):
-            diag = prev[j - 1] + (-big if ch == hypothesis[j - 1] else edit - (cls == hyp_class[j - 1]))
-            row.append(min(diag, prev[j] + edit, row[j - 1] + edit))
-        table.append(row)
-    ops: list[tuple[str, int | None, int | None]] = []
-    i, j = n, m
-    while i or j:
-        value = table[i][j]
-        if i and j and value == table[i - 1][j - 1] + diagonal(i - 1, j - 1):
-            i, j = i - 1, j - 1
-            ops.append(("equal" if reference[i] == hypothesis[j] else "replace", i, j))
-            continue
-        if i and value == table[i - 1][j] + edit:
-            i -= 1
-            ops.append(("delete", i, None))
-        else:
-            j -= 1
-            ops.append(("insert", None, j))
-    ops.reverse()
-    return ops
 
 
 def mask_from(ops: Sequence[tuple[str, int | None, int | None]], length: int) -> list[bool]:
