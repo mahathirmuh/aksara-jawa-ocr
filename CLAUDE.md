@@ -202,6 +202,13 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   hilang (0/10, terbaca taling/suku), aksara murda/nga lelet tertukar angka Jawa, cecak↔layar,
   deretan suku kata bertaling runtuh jadi taling bertumpuk, potongan bertekstur raster kehilangan
   aksara dasar.
+- **Ablasi model/metode ML lain (studi 2026-10-09; BELUM diputuskan user, belum ada kode maupun angka):** rencana
+  lengkap di `docs/ablasi_model.md`: kandidat yang layak di laptop ini (CRNN urutan logis, CNN + Transformer-encoder +
+  CTC, CNN-only + CTC, decoder atensi kecil) dan yang ditolak dengan alasan (TrOCR, PARSeq, SVTR, LoRA VLM, Tesseract
+  `jav` = Latin, bukan aksara Jawa), protokol satu-faktor dari nol dengan CRNN kontrol dua seed, titik akhir yang
+  dipraregistrasi, definisi accuracy/precision/recall/F1 tingkat karakter dari alignment `compare_runs.alignment` untuk
+  web (permintaan user 2026-10-09), perubahan kode berurutan, biaya, dan 9 pertanyaan keputusan. Jangan mulai run
+  sebelum pertanyaan di §12 dokumen itu dijawab dan protokolnya disalin bertanggal ke sini.
 - **Ablasi koreksi pasca-OCR (keputusan user 2026-09-14; BELUM dikerjakan, setelah ablasi Fase 5).**
   Beam search + n-gram LM ada di PLAN.md §3; korektor LLM = perluasan yang disetujui user. Semua
   kondisi memakai keluaran checkpoint CRNN yang SAMA; angka greedy selalu dilaporkan di sampingnya.
