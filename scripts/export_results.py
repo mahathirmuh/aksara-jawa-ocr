@@ -38,7 +38,6 @@ from pathlib import Path
 
 import torch
 from PIL import Image
-from rapidfuzz.distance import Levenshtein
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -49,7 +48,7 @@ from src.charlm import CharLM  # noqa: E402
 from src.decode import cer  # noqa: E402
 from src.evaluate import TARGETS  # noqa: E402
 from src.infer import load_checkpoint  # noqa: E402
-from src.metrics import char_metrics, class_metrics  # noqa: E402
+from src.metrics import alignment, char_metrics, class_metrics  # noqa: E402
 from src.tokenizer import nfc  # noqa: E402
 
 SCHEMA = 1
@@ -429,11 +428,15 @@ def main(argv=None) -> None:
         metrics.append({"scope": scope, "pipeline": "crnn_fonts", "lines": block["lines"], "cer": block["greedy_cer"]})
         metrics.append({"scope": scope, "pipeline": "crnn_fonts_beam", "lines": block["lines"], "cer": block["beam_cer"]})
 
+    # Kesalahan aksara (halaman Kesalahan) dari penjajaran yang SAMA dengan metrik per aksara (src/metrics.py:
+    # biaya minimum, lalu kecocokan terbanyak, lalu substitusi sekelas), supaya kedua tabel di halaman itu tidak
+    # saling bertentangan; spasi dibuang dari kedua sisi seperti semula (rapidfuzz.editops dipakai sampai 2026-10-09).
     confusion = Counter()
     for n in names:
         r, h = refs[n].replace(" ", ""), hyps[official_key][n].replace(" ", "")
-        for op in Levenshtein.editops(r, h):
-            confusion[(op.tag, r[op.src_pos] if op.tag != "insert" else "", h[op.dest_pos] if op.tag != "delete" else "")] += 1
+        for tag, i, j in alignment(r, h):
+            if tag != "equal":
+                confusion[(tag, r[i] if tag != "insert" else "", h[j] if tag != "delete" else "")] += 1
     kinds = {"replace": "sub", "delete": "del", "insert": "ins"}
 
     manifest = {

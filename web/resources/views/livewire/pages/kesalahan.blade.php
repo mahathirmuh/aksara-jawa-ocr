@@ -78,7 +78,7 @@
                     @if ($hasClasses)
                         <p class="page-aside" data-part="ringkasan-aksara">
                             macro-F1 {{ pct($macroF1, 1) }} atas {{ $classCount }} aksara di label
-                            @if ($micro) · mikro: presisi {{ pct($micro->precision, 1) }} · recall {{ pct($micro->recall, 1) }} · F1 {{ pct($micro->f1, 1) }} @endif
+                            @if ($micro) · mikro: presisi {{ pct($micro->precision, 1) }} · recall {{ pct($micro->recall, 1) }} · F1 {{ pct($micro->f1, 1) }} · akurasi karakter {{ pct($micro->char_accuracy, 1) }} @endif
                         </p>
                     @endif
                 </div>
@@ -87,7 +87,7 @@
                         <p class="min-w-0">Hasil yang diimpor berasal dari ekspor sebelum metrik per aksara ada. Jalankan ulang <code class="code">scripts/export_results.py</code> lalu <code class="code">php artisan aksara:import</code>.</p>
                     </div>
                 @else
-                    <p class="text-muted mb-2 text-xs">{{ $weakest->count() }} aksara dengan F1 terendah di antara yang muncul paling sedikit {{ App\Livewire\Pages\Kesalahan::MIN_REF }} kali di label.</p>
+                    <p class="text-muted mb-2 text-xs">{{ $weakest->count() }} aksara dengan F1 terendah di antara yang muncul paling sedikit {{ App\Livewire\Pages\Kesalahan::MIN_REF }} kali di label. Aksara yang tidak pernah dikeluarkan model: recall 0, presisi tidak terdefinisi ("–"), F1 0. Daftar kebingungan di atas dan tabel ini dihitung dari penjajaran karakter yang sama.</p>
                     <div class="table-wrap">
                         <table class="data-table min-w-[40rem]">
                             <thead><tr><th>Aksara</th><th>Nama</th><th class="r">Di label</th><th class="r">Dikeluarkan</th><th class="r">Recall</th><th class="r">Presisi</th><th class="r">F1</th></tr></thead>
@@ -96,11 +96,11 @@
                                     <tr data-char="{{ $c->code }}">
                                         <td class="jv text-2xl leading-snug">{{ $c->char === ' ' ? '␣' : $c->char }}</td>
                                         <td class="text-xs">{{ aksara_name($c->char) }} <span class="code">{{ $c->code }}</span></td>
-                                        <td class="r num">{{ nfmt($c->ref) }}</td>
-                                        <td class="r num">{{ nfmt($c->hyp) }}</td>
-                                        <td class="r num">{{ pct($c->recall, 1) }}</td>
-                                        <td class="r num">{{ pct($c->precision, 1) }}</td>
-                                        <td class="r num font-semibold">{{ pct($c->f1, 1) }}</td>
+                                        <td class="r num" data-cell="ref">{{ nfmt($c->ref) }}</td>
+                                        <td class="r num" data-cell="hyp">{{ nfmt($c->hyp) }}</td>
+                                        <td class="r num" data-cell="recall">{{ pct($c->recall, 1) }}</td>
+                                        <td class="r num" data-cell="precision">{{ pct($c->precision, 1) }}</td>
+                                        <td class="r num font-semibold" data-cell="f1">{{ pct($c->f1, 1) }}</td>
                                     </tr>
                                 @endforeach
                             </tbody>

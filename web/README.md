@@ -143,7 +143,7 @@ dibangun ulang dari file. Cadangkan labelnya:
 | Menu | Isi |
 |---|---|
 | Ringkasan | Gerbang G1–G4, jarak G3 ke target, status empat tahap alur, fase |
-| Perbandingan | CER, CER tanpa spasi, baris persis, presisi, recall, F1 per pipeline (745 baris, 50 baris uji buta) dengan definisinya, pipeline yang direncanakan, hasil sintetis |
+| Perbandingan | CER, CER tanpa spasi, baris persis (akurasi baris), akurasi karakter, presisi, recall, F1 per pipeline (745 baris, 50 baris uji buta) dengan definisinya, pipeline yang direncanakan, hasil sintetis |
 | Ablasi | 12 run augmentasi Fase 5 |
 | Dataset | Kartu data: besar korpus, pembagian latih / validasi / uji dengan arti tiap bagian dan berapa yang dipakai run resmi, asal korpus (dari artikel ke baris, sebaran panjang), rantai checkpoint run resmi (langkah, sampel, baris berbeda), daftar dataset (peran, sumber, lisensi, boleh disebar atau tidak), font per peran dengan catatannya, batasan data, dan data pendukung |
 | Metode | Daftar metode dan machine learning yang dipakai, per tahap: pembaca aksara (CNN, BiLSTM, lapisan keluaran, CTC, decoding greedy, tokenizer urutan visual, normalisasi kontras), data latih sintetis (render, variasi font, augmentasi, jarak antar suku kata, buang spasi, sisipan aksara langka), pelatihan (AdamW, OneCycle, pemotongan gradien, batch per panjang, pelatihan bertahap), koreksi sesudah baca (beam search + model bahasa karakter), evaluasi dan statistik (CER, gerbang, bootstrap berpasangan, run kontrol, ablasi, evaluasi sintetis tertarget, uji buta VLM), lalu tahap lanjutan alur milik web (alih aksara, NLLB-200, chrF/BLEU, tingkat tutur, pemulih tanda é). Tiap butir punya jenis, status (dipakai model resmi, dipakai, tersedia, diuji lalu tidak dipakai, pembanding), penjelasan, berkas kodenya, dan bila ada: pengaturan, bukti terukur dengan sumbernya, serta catatan batasan (mis. font uji yang sekeluarga dengan font latih, font latih bercacat, ablasi satu seed, angka terjemahan yang dihitung dengan ejaan yang tidak dikenal modelnya). Di atasnya: empat angka pokok dan alur dari citra ke teks Latin, yang lalu bercabang ke arti dan tingkat tutur; di bawahnya: metode yang direncanakan |
@@ -204,8 +204,11 @@ Levenshtein minimum, lalu kecocokan terbanyak). Dari jumlah cocok M, tertukar S,
 I)/|label|, recall = M/|label|, presisi = M/|keluaran|, F1 harmonik keduanya, akurasi karakter = M/(M + S + D + I).
 `class_metrics` (`scope`, `items[]` dengan `pipeline`, `char`, `code`, `name`, `ref`, `hyp`, `tp`, `fn`, `fp`,
 `precision`, `recall`, `f1`) = angka yang sama per karakter, untuk tiap pipeline yang punya prediksi di semua baris;
-tabel `class_metrics` diganti utuh saat impor. Perbandingan menampilkan presisi/recall/F1 di samping CER;
-Kesalahan aksara menampilkan macro-F1, mikro, dan aksara dengan F1 terendah (yang muncul ≥ 10 kali di label).
+tabel `class_metrics` diganti utuh saat impor. F1 = 2M/(|label| + |keluaran|): 0 bila tidak ada yang cocok, jadi aksara
+di label yang tidak pernah dikeluarkan model ikut sebagai F1 0 (presisi-nya null); null hanya bila keduanya kosong.
+Daftar kebingungan (`confusion`) sejak 2026-10-09 dihitung dari penjajaran yang sama (sebelumnya opcodes rapidfuzz),
+jadi angkanya bisa bergeser 1-2% dari ekspor lama. Perbandingan menampilkan akurasi karakter, presisi, recall, F1 di
+samping CER; Kesalahan aksara menampilkan macro-F1, mikro, dan aksara dengan F1 terendah (yang muncul ≥ 10 kali di label).
 
 **Kartu data (skema 1, kontrak sendiri):** `../out/results/datasets.json` dari `scripts/export_datasets.py`, diimpor
 `php artisan aksara:datasets` (atau ikut `aksara:import`) ke tabel `dataset_reports`: satu baris berisi dokumennya

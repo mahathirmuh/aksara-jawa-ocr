@@ -597,7 +597,15 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     halaman Perbandingan (kolom Presisi/Recall/F1 + definisi) dan Kesalahan (macro-F1, mikro, 20 aksara F1 terendah
     dengan ≥ 10 kemunculan di label; `Kesalahan::MIN_REF`). Ekspor lama tanpa kunci itu tetap diimpor (null, "–",
     petunjuk ekspor ulang). Test mandiri `web/tests/Feature/CharacterMetricsTest.php` membangun kontraknya dari
-    teks sintetis. Untuk melihat angkanya di web: `php artisan migrate`, `export_results.py`, `aksara:import`.
+    teks sintetis dan membaca sel per `data-cell`. Untuk melihat angkanya di web: `php artisan migrate`,
+    `export_results.py`, `aksara:import`. **Aturan dari tinjauan adversarial 2026-10-09 (7 temuan bertahan dari
+    11):** F1 = 2M/(|ref| + |hyp|) selalu terdefinisi bila salah satu sisi ada (`src.metrics.f1_of`): aksara di
+    label yang tidak pernah dikeluarkan model mendapat F1 0 dan IKUT macro-F1 serta daftar terlemah (versi pertama
+    memberi None dan justru membuang kasus terburuk: `fase7_track` tidak pernah mengeluarkan 44 codepoint langka);
+    presisi tetap None bila hyp 0. Blok `confusion` manifest dihitung dari `src.metrics.alignment` yang sama dengan
+    `class_metrics` (dulu `Levenshtein.editops`, pemutus seri berbeda 1-2% karakter), masih tanpa spasi. Kolom
+    Akurasi karakter (M/(M+S+D+I)) ditampilkan di Perbandingan karena user meminta "accuracy"; Baris persis =
+    akurasi tingkat baris.
   - **Angka resmi = satu run, ditetapkan di satu tempat (2026-10-04).** `OFFICIAL_RUN` di
     `scripts/export_results.py` menentukan pipeline resmi: gerbang G1–G3 di manifest dibaca dari laporan
     `out/eval/<run>_G1_10k.json`, `_G2_10k.json`, `_G3_full.json` (run lama `fase5_fonts` memakai awalan

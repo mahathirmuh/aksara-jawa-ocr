@@ -8,7 +8,7 @@ S substitusi, D hapus, I sisip, dengan |referensi| = M + S + D dan |hipotesis| =
     CER       = (S + D + I) / |referensi|          (bisa > 1)
     recall    = M / |referensi|                     bagian referensi yang terbaca benar
     presisi   = M / |hipotesis|                     bagian keluaran yang benar; turun bila model mengarang
-    F1        = 2 x presisi x recall / (presisi + recall)
+    F1        = 2M / (|referensi| + |hipotesis|)    = harmonik presisi dan recall; 0 bila M = 0 (zero_division=0)
     akurasi   = M / (M + S + D + I)                 porsi langkah penjajaran yang benar, selalu 0..1
 
 Semua agregat mikro (dijumlahkan atas semua baris). Per kelas (tiap karakter c): TP = M pada c, FN = S + D dengan
@@ -89,11 +89,17 @@ def rates(match: int, sub: int, dele: int, ins: int) -> dict[str, float | None]:
     ref_len, hyp_len, steps = match + sub + dele, match + sub + ins, match + sub + dele + ins
     recall = match / ref_len if ref_len else None
     precision = match / hyp_len if hyp_len else None
-    f1 = None
-    if recall is not None and precision is not None:
-        f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
-    return {"precision": precision, "recall": recall, "f1": f1,
+    return {"precision": precision, "recall": recall, "f1": f1_of(match, ref_len, hyp_len),
             "char_accuracy": match / steps if steps else None}
+
+
+def f1_of(match: int, ref_len: int, hyp_len: int) -> float | None:
+    """F1 = 2M / (|referensi| + |hipotesis|). None hanya bila keduanya kosong; 0 bila tidak ada yang cocok padahal
+    ada referensi atau keluaran (konvensi zero_division=0: aksara di label yang tidak pernah dikeluarkan model adalah
+    kasus terburuk, bukan kasus tak terdefinisi, dan harus ikut dalam rata-rata dan daftar terlemah)."""
+    if not ref_len and not hyp_len:
+        return None
+    return 2 * match / (ref_len + hyp_len)
 
 
 def char_metrics(pairs: Iterable[tuple[str, str]]) -> dict:
@@ -114,7 +120,9 @@ def class_metrics(pairs: Sequence[tuple[str, str]]) -> list[dict]:
     atau hipotesis, diurutkan dari yang paling sering di referensi.
 
     tp = cocok; fn = substitusi/hapus dengan referensi karakter itu; fp = substitusi/sisip dengan hipotesis karakter
-    itu. Sebuah substitusi c -> d menambah fn untuk c dan fp untuk d.
+    itu. Sebuah substitusi c -> d menambah fn untuk c dan fp untuk d. Presisi None bila karakter tidak pernah
+    dikeluarkan, recall None bila tidak ada di referensi; F1 selalu terdefinisi (`f1_of`): 0 untuk karakter di label
+    yang tidak pernah terbaca.
     """
     tp, fn, fp = Counter(), Counter(), Counter()
     for reference, hypothesis in pairs:
@@ -132,18 +140,16 @@ def class_metrics(pairs: Sequence[tuple[str, str]]) -> list[dict]:
     out = []
     for ch in sorted(chars, key=lambda c: (-(tp[c] + fn[c]), c)):
         ref_total, hyp_total = tp[ch] + fn[ch], tp[ch] + fp[ch]
-        recall = tp[ch] / ref_total if ref_total else None
-        precision = tp[ch] / hyp_total if hyp_total else None
-        f1 = None
-        if recall is not None and precision is not None:
-            f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
         out.append({"char": ch, "code": f"U+{ord(ch):04X}", "name": unicodedata.name(ch, "?"),
                     "ref": ref_total, "hyp": hyp_total, "tp": tp[ch], "fn": fn[ch], "fp": fp[ch],
-                    "precision": precision, "recall": recall, "f1": f1})
+                    "precision": tp[ch] / hyp_total if hyp_total else None,
+                    "recall": tp[ch] / ref_total if ref_total else None,
+                    "f1": f1_of(tp[ch], ref_total, hyp_total)})
     return out
 
 
 def macro_f1(classes: Iterable[dict]) -> float | None:
-    """Rata-rata F1 kelas yang muncul di referensi (ref > 0); None bila tidak ada kelas."""
+    """Rata-rata F1 semua kelas yang muncul di referensi (ref > 0), termasuk yang F1-nya 0 karena tidak pernah
+    dikeluarkan; None bila tidak ada kelas."""
     values = [c["f1"] for c in classes if c["ref"] and c["f1"] is not None]
     return sum(values) / len(values) if values else None

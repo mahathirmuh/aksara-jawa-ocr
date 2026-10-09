@@ -28,9 +28,11 @@ class Kesalahan extends Component
         $limits = ['sub' => 14, 'del' => 10, 'ins' => 10];
         $pipeline = Pipeline::official();
         $classes = ClassMetric::where('scope', self::SCOPE)->where('pipeline', $pipeline?->key ?? '')->get();
-        // Macro-F1 = rata-rata F1 aksara yang ada di label; F1 null (tidak pernah dikeluarkan dan tidak ada di label)
-        // tidak ikut. Mikro (presisi, recall, F1 seluruh karakter) dari tabel metrics, pipeline yang sama.
-        $scored = $classes->filter(fn ($c) => $c->ref > 0 && $c->f1 !== null);
+        // Macro-F1 = rata-rata F1 semua aksara yang ada di label. Aksara yang ada di label tetapi tidak pernah
+        // dikeluarkan model punya F1 0 (src/metrics.py, konvensi zero_division=0) dan ikut: itulah kasus terburuk,
+        // jadi harus masuk rata-rata dan daftar terlemah. Mikro (presisi, recall, F1, akurasi seluruh karakter) dari
+        // tabel metrics, pipeline yang sama.
+        $scored = $classes->filter(fn ($c) => $c->ref > 0);
 
         return view('livewire.pages.kesalahan', [
             'lists' => collect($limits)->map(fn ($n, $kind) => Confusion::where('kind', $kind)->orderByDesc('count')->limit($n)->get()),
@@ -38,9 +40,14 @@ class Kesalahan extends Component
             // Ekspor menghitung kesalahan aksara dari pipeline resmi (manifest: confusion.pipeline = official).
             'pipeline' => $pipeline,
             'micro' => Metric::where('scope', self::SCOPE)->where('pipeline', $pipeline?->key ?? '')->first(),
-            'macroF1' => $scored->isEmpty() ? null : $scored->avg('f1'),
+            'macroF1' => $scored->isEmpty() ? null : $scored->avg(fn ($c) => $c->f1 ?? 0.0),
             'classCount' => $scored->count(),
-            'weakest' => $classes->filter(fn ($c) => $c->ref >= self::MIN_REF && $c->f1 !== null)
+            'weakest' => $classes->filter(fn ($c) => $c->ref >= self::MIN_REF)
+                ->map(function ($c) {
+                    $c->f1 ??= 0.0;  // ekspor yang masih menulis null untuk "tidak pernah dikeluarkan"
+
+                    return $c;
+                })
                 ->sortBy([['f1', 'asc'], ['ref', 'desc'], ['code', 'asc']])->take(self::WEAKEST)->values(),
             'hasClasses' => $classes->isNotEmpty(),
         ]);

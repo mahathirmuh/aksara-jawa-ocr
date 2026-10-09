@@ -15,16 +15,17 @@
                      ikut terlihat tanpa menggeser tabel. Baris pipeline resmi disorot (.is-highlight). Presisi, recall,
                      F1 = metrik karakter dari penjajaran yang sama dengan CER (src/metrics.py); null pada ekspor lama. --}}
                 <div class="table-wrap">
-                    <table class="data-table min-w-[62rem]">
-                        <thead><tr><th class="w-[14.5rem] sm:w-[36%]">Pipeline</th><th class="r">CER</th><th class="r">CER tanpa spasi</th><th class="r">Baris persis</th><th class="r">Presisi</th><th class="r">Recall</th><th class="r">F1</th><th class="sm:w-[24%]">Catatan</th></tr></thead>
+                    <table class="data-table min-w-[68rem]">
+                        <thead><tr><th class="w-[14.5rem] sm:w-[32%]">Pipeline</th><th class="r">CER</th><th class="r">CER tanpa spasi</th><th class="r">Baris persis</th><th class="r">Akurasi karakter</th><th class="r">Presisi</th><th class="r">Recall</th><th class="r">F1</th><th class="sm:w-[22%]">Catatan</th></tr></thead>
                         <tbody>
                             @foreach ($full as $m)
                                 @php($p = $pipelines[$m->pipeline] ?? null)
                                 <tr @class(['is-highlight' => $m->pipeline === $official?->key]) data-row="{{ $m->pipeline }}">
                                     <td><div class="text-sm font-semibold">{{ $p?->label ?? $m->pipeline }}</div><div class="code mt-0.5">{{ $p?->config }}</div></td>
-                                    <td class="r num text-sm font-semibold">{{ pct($m->cer, 2) }}</td>
-                                    <td class="r num">{{ pct($m->cer_no_space, 2) }}</td>
-                                    <td class="r num">{{ pct($m->exact, 1) }}</td>
+                                    <td class="r num text-sm font-semibold" data-cell="cer">{{ pct($m->cer, 2) }}</td>
+                                    <td class="r num" data-cell="cer_no_space">{{ pct($m->cer_no_space, 2) }}</td>
+                                    <td class="r num" data-cell="exact">{{ pct($m->exact, 1) }}</td>
+                                    <td class="r num" data-cell="char_accuracy">{{ pct($m->char_accuracy, 1) }}</td>
                                     <td class="r num" data-cell="precision">{{ pct($m->precision, 1) }}</td>
                                     <td class="r num" data-cell="recall">{{ pct($m->recall, 1) }}</td>
                                     <td class="r num font-semibold" data-cell="f1">{{ pct($m->f1, 1) }}</td>
@@ -47,7 +48,8 @@
                     CER = (tertukar + hilang + tambahan) / panjang label. Dari penjajaran karakter yang sama:
                     recall = bagian karakter label yang terbaca benar (1 − recall = tertukar + hilang per panjang label),
                     presisi = bagian keluaran model yang benar (turun bila model menambah karakter), F1 = rata-rata harmonik
-                    keduanya. Semua dihitung per karakter atas seluruh baris, termasuk spasi.
+                    keduanya, akurasi karakter = cocok / (cocok + tertukar + hilang + tambahan). Baris persis = akurasi
+                    tingkat baris (seluruh baris sama dengan label). Semua dihitung per karakter atas seluruh baris, termasuk spasi.
                     @if ($full->contains(fn ($m) => $m->f1 === null))
                         "–" = hasil diimpor dari ekspor sebelum metrik ini ada; jalankan ulang <code class="code">export_results.py</code> lalu <code class="code">aksara:import</code>.
                     @endif
@@ -114,10 +116,10 @@
                     </div>
                     <div class="table-wrap mt-4">
                         <table class="data-table">
-                            <thead><tr><th>Pipeline</th><th class="r">CER</th><th class="r">Tanpa spasi</th><th class="r">Presisi</th><th class="r">Recall</th><th class="r">F1</th></tr></thead>
+                            <thead><tr><th>Pipeline</th><th class="r">CER</th><th class="r">Tanpa spasi</th><th class="r">Akurasi</th><th class="r">Presisi</th><th class="r">Recall</th><th class="r">F1</th></tr></thead>
                             <tbody>
                                 @foreach ($blind as $m)
-                                    <tr @class(['is-highlight' => $m->pipeline === $official?->key]) data-blind="{{ $m->pipeline }}"><td>{{ $pipelines[$m->pipeline]->label ?? $m->pipeline }}</td><td class="r num">{{ pct($m->cer) }}</td><td class="r num">{{ pct($m->cer_no_space) }}</td><td class="r num">{{ pct($m->precision) }}</td><td class="r num">{{ pct($m->recall) }}</td><td class="r num font-semibold">{{ pct($m->f1) }}</td></tr>
+                                    <tr @class(['is-highlight' => $m->pipeline === $official?->key]) data-blind="{{ $m->pipeline }}"><td>{{ $pipelines[$m->pipeline]->label ?? $m->pipeline }}</td><td class="r num" data-cell="cer">{{ pct($m->cer) }}</td><td class="r num" data-cell="cer_no_space">{{ pct($m->cer_no_space) }}</td><td class="r num" data-cell="char_accuracy">{{ pct($m->char_accuracy) }}</td><td class="r num" data-cell="precision">{{ pct($m->precision) }}</td><td class="r num" data-cell="recall">{{ pct($m->recall) }}</td><td class="r num font-semibold" data-cell="f1">{{ pct($m->f1) }}</td></tr>
                                 @endforeach
                             </tbody>
                         </table>

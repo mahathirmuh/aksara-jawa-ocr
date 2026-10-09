@@ -6,7 +6,7 @@ from functools import lru_cache
 import pytest
 from rapidfuzz.distance import Levenshtein
 
-from src.metrics import alignment, char_counts, char_metrics, class_metrics, glyph_class, macro_f1, rates
+from src.metrics import alignment, char_counts, char_metrics, class_metrics, f1_of, glyph_class, macro_f1, rates
 
 KA, NA, TA, DA, YA = "ꦏ", "ꦤ", "ꦠ", "ꦢ", "ꦪ"
 KA_MURDA, TWO, LAYAR, WULU, TALING = "ꦑ", "꧒", "ꦂ", "ꦶ", "ꦺ"
@@ -67,10 +67,14 @@ def test_rates_follow_the_formulas_and_handle_empty_sides():
     assert r["f1"] == pytest.approx(2 * (8 / 11) * (8 / 10) / (8 / 11 + 8 / 10))
     assert r["char_accuracy"] == pytest.approx(8 / 12)
     assert rates(0, 0, 0, 0) == {"precision": None, "recall": None, "f1": None, "char_accuracy": None}
-    # Referensi ada, keluaran kosong: recall 0, presisi tidak terdefinisi, F1 tidak terdefinisi.
-    assert rates(0, 0, 3, 0) == {"precision": None, "recall": 0.0, "f1": None, "char_accuracy": 0.0}
+    # Referensi ada, keluaran kosong: recall 0, presisi tidak terdefinisi, F1 = 0 (kasus terburuk, bukan tak terdefinisi).
+    assert rates(0, 0, 3, 0) == {"precision": None, "recall": 0.0, "f1": 0.0, "char_accuracy": 0.0}
+    # Keluaran ada, referensi kosong: presisi 0, recall tidak terdefinisi, F1 = 0.
+    assert rates(0, 0, 0, 2) == {"precision": 0.0, "recall": None, "f1": 0.0, "char_accuracy": 0.0}
     # Keduanya ada tetapi tidak ada yang cocok: F1 = 0, bukan pembagian dengan nol.
     assert rates(0, 2, 0, 0)["f1"] == 0.0
+    # F1 = 2M / (|ref| + |hyp|) sama dengan harmonik presisi dan recall bila keduanya terdefinisi.
+    assert f1_of(8, 10, 11) == pytest.approx(r["f1"])
 
 
 def test_char_metrics_is_micro_over_lines_and_consistent_with_cer():
@@ -95,11 +99,13 @@ def test_class_metrics_assign_substitutions_to_both_classes():
     assert rows[KA] == {"char": KA, "code": "U+A98F", "name": "JAVANESE LETTER KA", "ref": 3, "hyp": 3,
                         "tp": 3, "fn": 0, "fp": 0, "precision": 1.0, "recall": 1.0, "f1": 1.0}
     assert (rows[NA]["ref"], rows[NA]["tp"], rows[NA]["fn"], rows[NA]["fp"]) == (2, 0, 2, 0)
-    assert rows[NA]["recall"] == 0.0 and rows[NA]["precision"] is None and rows[NA]["f1"] is None
+    # Ada di label, tidak pernah dikeluarkan: recall 0, presisi tak terdefinisi, F1 0 (ikut dihitung sebagai terburuk).
+    assert rows[NA]["recall"] == 0.0 and rows[NA]["precision"] is None and rows[NA]["f1"] == 0.0
     assert (rows[TA]["ref"], rows[TA]["tp"], rows[TA]["fn"], rows[TA]["fp"]) == (1, 1, 0, 1)
     assert rows[TA]["precision"] == pytest.approx(0.5) and rows[TA]["recall"] == 1.0
     assert rows[TA]["f1"] == pytest.approx(2 * 0.5 * 1.0 / 1.5)
     assert (rows[WULU]["ref"], rows[WULU]["fp"], rows[WULU]["recall"], rows[WULU]["precision"]) == (0, 1, None, 0.0)
+    assert rows[WULU]["f1"] == 0.0
     # Urut dari yang paling sering di referensi; kelas yang hanya ada di keluaran di belakang.
     assert [c["char"] for c in class_metrics(pairs)] == [KA, NA, TA, WULU]
     # Jumlah tp semua kelas = match mikro; fn = sub + del; fp = sub + ins.
@@ -107,6 +113,6 @@ def test_class_metrics_assign_substitutions_to_both_classes():
     assert sum(c["tp"] for c in rows.values()) == micro["match"]
     assert sum(c["fn"] for c in rows.values()) == micro["sub"] + micro["del"]
     assert sum(c["fp"] for c in rows.values()) == micro["sub"] + micro["ins"]
-    # Macro-F1 hanya atas kelas yang ada di referensi dan punya F1 (wulu dan NA tidak ikut).
-    assert macro_f1(rows.values()) == pytest.approx((1.0 + rows[TA]["f1"]) / 2)
+    # Macro-F1 atas semua kelas yang ada di referensi, termasuk NA dengan F1 0; wulu (hanya di keluaran) tidak ikut.
+    assert macro_f1(rows.values()) == pytest.approx((1.0 + 0.0 + rows[TA]["f1"]) / 3)
     assert macro_f1([]) is None

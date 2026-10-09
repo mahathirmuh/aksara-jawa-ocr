@@ -244,9 +244,12 @@ dan `aksara:import` dijalankan di laptop.
    kunci opsional.
 4. Web: migrasi `2026_10_09_000001_add_character_metrics` (kolom nullable di `metrics`, tabel `class_metrics`),
    `ResultImporter` meneruskannya, model `ClassMetric`. Perbandingan: kolom Presisi / Recall / F1 di tabel 745 baris
-   dan uji buta, definisi di bawah tabel. Kesalahan aksara: macro-F1 dan mikro di kepala, 20 aksara F1 terendah
-   (≥ 10 kemunculan di label) untuk pipeline resmi; pemilih pipeline belum (semua pipeline sudah ada di tabel
-   `class_metrics`). Test `web/tests/Feature/CharacterMetricsTest.php` memakai atribut `data-row|blind|cell|char|part`.
+   dan uji buta (juga kolom Akurasi karakter; Baris persis = akurasi tingkat baris), definisi di bawah tabel.
+   Kesalahan aksara: macro-F1 dan mikro di kepala, 20 aksara F1 terendah (≥ 10 kemunculan di label) untuk pipeline
+   resmi; aksara di label yang tidak pernah dikeluarkan model diberi F1 0 (konvensi zero_division=0), bukan
+   dikecualikan; daftar kebingungan halaman itu kini dihitung dari penjajaran yang sama. Pemilih pipeline belum
+   (semua pipeline sudah ada di tabel `class_metrics`). Test `web/tests/Feature/CharacterMetricsTest.php` membaca
+   sel per atribut `data-cell` di dalam baris `data-row|blind|char`, dan bagian `data-part`.
 5. **Belum:** untuk ablasi arsitektur: kontrak baru `manifest["architecture_ablation"]` (bukan `ablation_runs`, yang diganti utuh
    saat impor dan milik ablasi augmentasi): satu baris per lengan dan scope (`synth_dev_clean`, `synth_dev_aug`,
    `nusaaksara_745`) dengan cer, precision, recall, f1, exact, params, ms_per_sample, ms_per_line_cpu, diff_vs_control,
