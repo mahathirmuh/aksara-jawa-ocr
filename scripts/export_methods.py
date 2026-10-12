@@ -114,7 +114,10 @@ TREATMENTS = {"fonts": "font tambahan", "tracking": "jarak antar suku kata", "ra
 # yang harus sama di keduanya di samping argumen data (`data_recipe`).
 TREATMENT_KEYS = {"fonts": ("extra_fonts",), "tracking": ("track_prob", "track_max"),
                   "rare": ("rare_insert_prob", "rare_opener_prob", "rare_max_similarity", "rare_attach")}
-TRAINING_KEYS = ("batch_size", "lr", "weight_decay", "steps")
+# Termasuk bobot awal (`init`) dan cara melatih (packing LSTM, pemotongan gradien, ukuran model, pemecahan batch
+# lebar): kontrol yang berangkat dari bobot lain atau dilatih dengan cara lain bukan kontrol.
+TRAINING_KEYS = ("batch_size", "lr", "weight_decay", "steps", "init", "packed", "clip", "channels", "hidden",
+                 "overfit", "max_batch_columns", "real_augment", "real_pad_ratio", "real_repeat")
 # Aturan "spasi selalu dibuang pada font berspasi sempit" (src.dataset.MIN_SPACE_RATIO) ditambahkan 2026-09-14, sesudah
 # run-run ini dilatih (CLAUDE.md, "Lebar spasi font tambahan"): di font berspasi sempit, labelnya masih memuat spasi
 # yang nyaris tidak tampak di citra. Hanya berakibat pada run yang memakai font semacam itu (font tambahan).
@@ -361,8 +364,30 @@ def control_run(root: Path, kind: str, run: str) -> str | None:
         return None
     a, b = data_recipe(ours[1]), data_recipe(theirs[1])
     same_data = all(a[key] == b[key] for key in a if key not in TREATMENT_KEYS[kind])
-    same_training = all(ours[1].get(key) == theirs[1].get(key) for key in TRAINING_KEYS)
+    same_training = all(training_value(ours[1], key) == training_value(theirs[1], key) for key in TRAINING_KEYS)
     return control if is_treated(kind, a) and not is_treated(kind, b) and same_data and same_training else None
+
+
+def training_value(args: dict, key: str):
+    """Nilai argumen pelatihan yang bisa dibandingkan: jalur bobot awal tanpa beda pemisah folder, kosong = None."""
+    value = args.get(key)
+    if key == "init":
+        return str(value or "").replace("\\", "/")
+    return value
+
+
+def resume_points(root: Path, run: str) -> list[int] | None:
+    """Langkah tempat proses-proses sebuah run mulai (0 dan tiap titik lanjut), dari log-nya; None bila log tidak ada
+    atau tidak mencatat satu pun awal proses. Proses yang diulang dari langkah yang sama dihitung sekali."""
+    steps = {row.get("step") or 0 for row in read_log(root / "out/checkpoints" / run / "log.jsonl") if row.get("event") == "start"}
+    return sorted(steps) or None
+
+
+def same_resume_points(root: Path, pairs: list[tuple[str, str]]) -> bool:
+    """Apakah tiap pasangan (run perlakuan, run kontrol) dihentikan dan dilanjutkan di langkah yang sama. Pasangan
+    yang log-nya tidak ada tidak bisa dipastikan, jadi jawabannya tidak."""
+    points = [(resume_points(root, treated), resume_points(root, control)) for treated, control in pairs]
+    return bool(points) and all(a is not None and a == b for a, b in points)
 
 
 def font_facts(root: Path, link: dict, charset: list[str], recorded: dict[str, int]) -> dict:
@@ -879,6 +904,22 @@ def training_group(links: list[dict], complete: bool, code: dict, device: str | 
     }
 
 
+def beam_weights(official: str, pipelines: list[dict]) -> tuple[float, float]:
+    """Bobot model bahasa dan bonus panjang beam + LM yang ditampilkan kartu. Bobot disetel per checkpoint: bila beam +
+    LM checkpoint resmi ("<resmi>_beam") ada di manifest, bobotnya dibaca dari konfigurasi pipeline itu; kalau tidak,
+    bobot fase5_fonts (ALPHA, BETA). Konfigurasi yang bobotnya tidak terbaca menghentikan ekspor: kartu tidak boleh
+    menampilkan bobot checkpoint lain di samping angka checkpoint resmi."""
+    config = next((p.get("config") or "" for p in pipelines if official and p["key"] == f"{official}_beam"), None)
+    if config is None or official == "crnn_fonts":  # crnn_fonts_beam memang dibaca dengan ALPHA/BETA
+        return ALPHA, BETA
+    weights = re.search(r"α (\S+) · β (\S+)", config)
+    try:
+        return float(weights[1]), float(weights[2])
+    except (TypeError, ValueError):
+        raise SystemExit(f"bobot beam + LM pipeline {official}_beam tidak terbaca dari konfigurasinya ({config!r}); "
+                         "ekspor dihentikan") from None
+
+
 def decoding_group(official: str, evidence: Evidence, root: Path) -> dict:
     lm = re.fullmatch(r"o(\d+)_n(\d+)_ds([\d.]+)\.pkl", LM_PATH.name)
 
@@ -897,13 +938,7 @@ def decoding_group(official: str, evidence: Evidence, root: Path) -> dict:
         note = measured("crnn_fonts", "fase5_fonts")
         if note:
             note += " Belum diuji pada checkpoint resmi."
-    # Bobot LM disetel per checkpoint: bila beam + LM checkpoint resmi ada di manifest, bobotnya dibaca dari
-    # konfigurasi pipeline itu; kalau tidak, bobot fase5_fonts (ALPHA, BETA).
-    alpha, beta = ALPHA, BETA
-    config = next((p.get("config") or "" for p in evidence.manifest["pipelines"] if official and p["key"] == f"{official}_beam"), "")
-    weights = re.search(r"α ([\d.]+) · β ([\d.]+)", config)
-    if weights:
-        alpha, beta = float(weights[1]), float(weights[2])
+    alpha, beta = beam_weights(official, evidence.manifest["pipelines"])
     settings = [("Lebar beam", str(WIDTH)), ("Bobot model bahasa", dec(alpha)), ("Bonus panjang", dec(beta))]
     if lm and (root / LM_PATH.relative_to(ROOT)).exists():
         settings.append(("Model bahasa", f"n-gram karakter order {lm[1]}, penghalusan Witten-Bell, {num(int(lm[2]))} baris latih"))
@@ -986,9 +1021,9 @@ def evaluation_group(run: str, args: dict, real: dict, evidence: Evidence, root:
     if pairs:
         methods.append(entry(
             "control", "Run kontrol", "evaluation", "used",
-            f"Untuk perlakuan yang diuji tersendiri ({listing(kinds)}) dilatih model pembanding dengan jumlah langkah, "
-            "data, dan titik lanjut yang sama, tanpa perlakuan itu. Selisihnya memisahkan pengaruh perlakuan dari "
-            "pengaruh tambahan pelatihan.",
+            f"Untuk perlakuan yang diuji tersendiri ({listing(kinds)}) dilatih model pembanding dengan bobot awal, jumlah "
+            f"langkah, {'data, dan titik lanjut' if same_resume_points(root, [pair[1:] for pair in pairs]) else 'dan data'} "
+            "yang sama, tanpa perlakuan itu. Selisihnya memisahkan pengaruh perlakuan dari pengaruh tambahan pelatihan.",
             [(f"Kontrol {TREATMENTS[kind]}", "; ".join(f"{control} (untuk {treated})" for k, treated, control in pairs if k == kind))
              for kind in CONTROLS if any(pair[0] == kind for pair in pairs)],
             files=["scripts/run_fase6_ctrl.sh", "scripts/run_fase7_ctrl.sh"]))

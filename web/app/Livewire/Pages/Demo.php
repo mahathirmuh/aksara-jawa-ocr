@@ -74,6 +74,8 @@ class Demo extends Component
 
         return view('livewire.pages.demo', [
             'reader' => $reader,
+            // Bobot LM dari layanan (jawaban baca lebih dulu, lalu /health): disetel per checkpoint, jadi tidak ditulis di sini.
+            'weights' => OcrService::beamWeights($this->result, $this->service),
             'pipelines' => array_map(fn ($name) => "{$reader} · {$name}", OcrService::PIPELINES),
         ]);
     }

@@ -161,8 +161,8 @@ class TranslationService
      * Bahasa Jawa beraksara Latin seperti yang dikenal model: pepet tanpa tanda. Draf transliterasi menulis pepet
      * "ê", ejaan yang nyaris tidak ada di data latih NLLB: terukur 2026-10-05, "pêkên" diterjemahkan "ke sana" dan
      * "sêga" menjadi "tiga buah", sedangkan "peken" -> "pasar" dan "sega" -> "nasi". Tanda é/è tidak mengganggu.
-     * Dipakai semua panggilan langsung ke layanan; batch (inputs()) belum, supaya angka chrF yang sudah dilaporkan
-     * tetap bisa diulang sampai dijalankan ulang.
+     * Dipakai semua panggilan langsung ke layanan, dan sejak 2026-10-12 juga batch (inputs(), selama
+     * BATCH_KEEPS_PEPET_MARK false).
      */
     public static function forModel(string $latin): string
     {

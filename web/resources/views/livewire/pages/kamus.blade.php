@@ -267,8 +267,10 @@
                 <p class="card-subtitle">Bukan kamus kata.@if ($lines) {{ nfmt($unspaced) }} dari {{ nfmt($lines) }} label uji ditulis tanpa spasi, jadi tidak ada batas kata untuk dicocokkan.@endif Kamus di alur ini adalah model bahasa tingkat karakter yang dibangun dari baris teks split train (<span class="font-mono">python -m src.charlm</span>). Saat membaca, beam search menimbang skor CTC dari citra dengan skor model bahasa itu, sehingga urutan aksara yang lazim lebih dipilih. Bobotnya disetel di dev sintetis, bukan di NusaAksara.</p>
             </div>
 
+            {{-- Tabel beam + LM yang membaca checkpoint pipeline resmi, bila sudah diekspor. --}}
+            @php($ownLm = collect($lm)->first(fn ($x) => $official && $x['base']?->key === $official->key))
             @forelse ($lm as $m)
-                <div class="flex flex-col gap-3" wire:key="lm-{{ $m['beam']->key }}">
+                <div class="flex flex-col gap-3" wire:key="lm-{{ $m['beam']->key }}" data-lm="{{ $m['beam']->key }}">
                     <div class="code">{{ $m['beam']->config }}</div>
                     <div class="table-wrap">
                         <table class="data-table">
@@ -294,13 +296,19 @@
                             </tbody>
                         </table>
                     </div>
-                    <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-                        <a href="{{ route('penjelajah', ['tag' => 'beam membaik']) }}" wire:navigate class="text-[var(--primary)] hover:underline">Lihat baris yang membaik</a>
-                        <a href="{{ route('penjelajah', ['tag' => 'beam memburuk']) }}" wire:navigate class="text-[var(--primary)] hover:underline">Lihat baris yang memburuk</a>
-                    </div>
+                    @if ($tagPair === [$m['base']?->key, $m['beam']->key])
+                        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                            <a href="{{ route('penjelajah', ['tag' => 'beam membaik']) }}" wire:navigate class="text-[var(--primary)] hover:underline">Lihat baris yang membaik</a>
+                            <a href="{{ route('penjelajah', ['tag' => 'beam memburuk']) }}" wire:navigate class="text-[var(--primary)] hover:underline">Lihat baris yang memburuk</a>
+                        </div>
+                    @endif
                     @if ($official && $m['base'] && $official->key !== $m['base']->key)
                         <div class="alert alert-warning">
-                            <span>Angka di atas membandingkan greedy dan beam pada checkpoint yang sama, {{ $m['base']->label }}. Kamus belum diukur di atas pipeline resmi {{ $official->label }}, dan bobotnya disetel pada {{ $m['base']->label }}.</span>
+                            @if ($ownLm)
+                                <span>Angka di atas membandingkan greedy dan beam pada checkpoint yang sama, {{ $m['base']->label }}, bukan pipeline resmi {{ $official->label }}. Kamus di atas pipeline resmi ada di tabel {{ $ownLm['beam']->label }}, dengan bobot yang disetel untuk checkpoint itu.</span>
+                            @else
+                                <span>Angka di atas membandingkan greedy dan beam pada checkpoint yang sama, {{ $m['base']->label }}. Kamus belum diukur di atas pipeline resmi {{ $official->label }}, dan bobotnya disetel pada {{ $m['base']->label }}.</span>
+                            @endif
                         </div>
                     @endif
                 </div>

@@ -108,6 +108,9 @@ class Kamus extends Component
             'dictionaries' => $this->dictionaries($query, $latin, $aksaraQuery),
             'lm' => $this->languageModels(),
             'official' => Pipeline::official(),
+            // Tag "beam membaik/memburuk" milik SATU pasangan (Pipeline::beamPair): hanya tabel pasangan itu yang
+            // menautkan ke baris bertag.
+            'tagPair' => Pipeline::beamPair(),
         ]);
     }
 

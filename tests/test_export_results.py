@@ -498,3 +498,84 @@ def test_official_beam_reads_its_weights_from_the_report_of_that_checkpoint(tmp_
     os.utime(path, (old, old))
     with pytest.raises(SystemExit, match="lebih tua dari last_snapshot.pt"):
         official_beam("crnn_fase7_track", "fase7_track", snapshot, beam_dir)
+
+
+def beam_extra() -> dict:
+    """Beam + LM run resmi seperti dikembalikan official_beam, dengan bobot yang bukan bobot fase5_fonts."""
+    report = {"real": {"beam_cer": 0.19}, "dev": {"lines": 300, "greedy_cer": 0.02, "beam_cer": 0.015},
+              "clean_heldout_font": {"lines": 200, "greedy_cer": 0.003, "beam_cer": 0.002}}
+    return {"key": "crnn_fase7_track_beam", "base": "crnn_fase7_track", "alpha": 0.5, "beta": 2.0, "report": report,
+            "path": Path("out/beam/fase7_track_o5.json")}
+
+
+def test_each_checkpoint_is_decoded_with_its_own_beam_weights():
+    import export_results as er
+
+    # Tanpa beam + LM run resmi: hanya pasangan fase5_fonts, dengan bobot fase5_fonts.
+    assert er.beam_decoders(None) == {"crnn_fonts": ("crnn_fonts_beam", er.ALPHA, er.BETA)}
+    assert er.beam_pairs(None) == [("crnn_fonts_beam", "crnn_fonts")] and er.tag_pair(None) == ("crnn_fonts_beam", "crnn_fonts")
+    assert er.beam_official(None) == {}
+    # Dengan beam + LM run resmi: checkpoint resmi dibaca dengan bobot laporannya sendiri, pasangannya paling akhir dan
+    # menentukan tag, dan CER 745 barisnya dicocokkan dengan laporannya.
+    extra = beam_extra()
+    assert (extra["alpha"], extra["beta"]) != (er.ALPHA, er.BETA)
+    assert er.beam_decoders(extra) == {"crnn_fonts": ("crnn_fonts_beam", er.ALPHA, er.BETA),
+                                       "crnn_fase7_track": ("crnn_fase7_track_beam", 0.5, 2.0)}
+    assert er.beam_pairs(extra) == [("crnn_fonts_beam", "crnn_fonts"), ("crnn_fase7_track_beam", "crnn_fase7_track")]
+    assert er.tag_pair(extra) == ("crnn_fase7_track_beam", "crnn_fase7_track")
+    assert er.beam_official(extra) == {"crnn_fase7_track_beam": (0.19, str(Path("out/beam/fase7_track_o5.json")))}
+    assert er.synth_metrics(extra["key"], extra["base"], extra["report"]) == [
+        {"scope": "synth_dev", "pipeline": "crnn_fase7_track", "lines": 300, "cer": 0.02},
+        {"scope": "synth_dev", "pipeline": "crnn_fase7_track_beam", "lines": 300, "cer": 0.015},
+        {"scope": "synth_heldout", "pipeline": "crnn_fase7_track", "lines": 200, "cer": 0.003},
+        {"scope": "synth_heldout", "pipeline": "crnn_fase7_track_beam", "lines": 200, "cer": 0.002}]
+
+
+def test_beam_changes_are_counted_per_pair_and_tags_follow_the_given_pair():
+    import export_results as er
+
+    refs = {"a": "abcd", "b": "abcd", "c": "abcd"}
+    hyps = {"crnn_fonts": {"a": "abcd", "b": "abxx", "c": "abcx"}, "crnn_fonts_beam": {"a": "abcx", "b": "abcd", "c": "abcx"},
+            "crnn_x": {"a": "xxxx", "b": "abcd", "c": "abcd"}, "crnn_x_beam": {"a": "abcd", "b": "abcd", "c": "abcd"}}
+    fonts, official = ("crnn_fonts_beam", "crnn_fonts"), ("crnn_x_beam", "crnn_x")
+    # Negatif = beam membaik. Baris "a": beam fase5_fonts memburuk, beam pasangan resmi membaik.
+    assert er.beam_delta(refs["a"], hyps, "a", fonts) == 0.25 and er.beam_delta(refs["a"], hyps, "a", official) == -1.0
+    assert er.beam_delta(refs["b"], hyps, "b", fonts) == -0.5 and er.beam_delta(refs["c"], hyps, "c", fonts) == 0
+    metrics = [{"scope": "nusaaksara_745", "pipeline": key} for key in hyps] + [{"scope": "blind_50", "pipeline": "crnn_x_beam"}]
+    er.mark_beam_changes(metrics, refs, hyps, list(refs), [fonts, official])
+    assert metrics == [{"scope": "nusaaksara_745", "pipeline": "crnn_fonts"},
+                       {"scope": "nusaaksara_745", "pipeline": "crnn_fonts_beam", "better": 1, "worse": 1},
+                       {"scope": "nusaaksara_745", "pipeline": "crnn_x"},
+                       {"scope": "nusaaksara_745", "pipeline": "crnn_x_beam", "better": 1, "worse": 0},
+                       {"scope": "blind_50", "pipeline": "crnn_x_beam"}]
+
+
+def test_main_uses_the_beam_helpers_of_the_official_run():
+    # main() butuh model dan data nyata, jadi pemakaian pembantunya dijaga lewat sumbernya: bobot beam tidak boleh
+    # tertanam di main, dan pasangan tag, cek angka resmi, serta metrik sintetis harus lewat pembantu yang teruji.
+    import inspect
+
+    import export_results as er
+
+    source = inspect.getsource(er.main)
+    assert "ALPHA" not in source and "BETA" not in source
+    for call in ("decoders = beam_decoders(extra_beam)", "beam_key, alpha, beta = decoders[key]",
+                 "prefix_beam_search(lp, tok.charset, lm, alpha, beta, WIDTH)", "hyps[beam_key][n] = ",
+                 "**beam_official(extra_beam)}", "mark_beam_changes(metrics, refs, hyps, names, beam_pairs(extra_beam))",
+                 "delta = beam_delta(ref, hyps, n, tag_pair(extra_beam))", "check_official(metrics, official)",
+                 'metrics += synth_metrics(extra_beam["key"], extra_beam["base"], extra_beam["report"])',
+                 'pipelines = insert_after(pipelines, [extra_beam["pipeline"]], official_key)'):
+        assert call in source, call
+
+
+def test_demo_service_decodes_with_the_beam_weights_tuned_for_its_checkpoint():
+    # Bobot LM disetel per checkpoint: Demo memakai bobot laporan beam run resmi (out/beam/<run>_o5.json, data lokal).
+    import export_results as er
+    from src import serve
+
+    assert serve.WIDTH == er.WIDTH
+    report = er.ROOT / "out/beam" / f"{OFFICIAL_RUN}_o5.json"
+    if not report.exists():
+        pytest.skip("laporan beam run resmi tidak ada di mesin ini")
+    chosen = json.loads(report.read_text(encoding="utf-8"))["dev"]["chosen"]
+    assert (serve.ALPHA, serve.BETA) == (chosen["alpha"], chosen["beta"])

@@ -23,10 +23,11 @@ use Normalizer;
  * Nama (pilihan, $names; bawaannya mati supaya hasil lama dan angka kecocokan kamus tidak berubah). Kata berhuruf
  * besar ditulis berlapis:
  *  1. nama yang ada di kamus dengan ejaan aksara bermurda/berswara memakai ejaan kamus itu apa adanya (Bima,
- *     Suwarnabhumi, Arjuna), juga di awal kalimat;
+ *     Suwarnabhumi, Arjuna), juga di awal kalimat, kecuali di awal kalimat bila kamus juga memuatnya sebagai kata
+ *     biasa berhuruf kecil (agung, ukir, arga): di situ huruf besarnya tidak membedakan nama dari kata biasa;
  *  2. kata berhuruf besar lain yang bukan kata pertama kalimat dianggap nama: berawalan vokal -> aksara swara (A, I,
  *     U, É, O; pepet tidak punya), selain itu SATU aksara murda pada konsonan pertama yang punya bentuk murda (na,
- *     ka, ta, sa, pa, nya, ga, ba). Lapis ini kaidah umum, BELUM diperiksa pembaca aksara: kamus hanya memuat belasan
+ *     ka, ta, sa, pa, nya, ga, ba) dan tidak menutup suku kata (Thomas, Marwan: tanpa murda). Lapis ini kaidah umum, BELUM diperiksa pembaca aksara: kamus hanya memuat belasan
  *     nama bermurda/berswara, terlalu sedikit untuk menurunkan aturannya, dan di situ nama berswara tidak diberi murda.
  * Huruf besar di awal kalimat bukan tanda nama, jadi kata pertama kalimat hanya kena lapis 1.
  *
@@ -100,6 +101,9 @@ final class AksaraWriter
     /** @var array<string, string>|null nama di kamus (huruf kecil) => ejaan aksaranya */
     private static ?array $names = null;
 
+    /** @var array<string, true>|null nama di kamus yang juga lema biasa berhuruf kecil di kamus yang sama */
+    private static ?array $ordinary = null;
+
     public static function fromLatin(string $text, bool $standard = true, bool $names = false): string
     {
         return self::write($text, $standard, $names)['aksara'];
@@ -120,12 +124,13 @@ final class AksaraWriter
         }
         $text = strtr(mb_strtolower($text), self::LATIN_VARIANTS);
         $known = $names ? self::dictionaryNames() : [];
+        $ordinary = $names ? self::ordinaryNames() : [];
         $found = ['dictionary' => [], 'rule' => []];
         $first = true;   // kata berikutnya adalah kata pertama kalimat
 
         // Potongan: kata, bilangan (boleh berpemisah titik/koma/titik dua: 2,5 atau 10:30), atau satu karakter lain.
         $pattern = '/\x01?[a-zéè]+|[0-9]+(?:[.,:][0-9]+)*|(?P<join>(?<=[a-zéè])[-‐‑–—](?=\x01?[a-zéè]))|./us';
-        $aksara = preg_replace_callback($pattern, function (array $m) use ($standard, $known, &$found, &$first) {
+        $aksara = preg_replace_callback($pattern, function (array $m) use ($standard, $known, $ordinary, &$found, &$first) {
             $piece = $m[0];
             // Tanda hubung di antara dua kata (kata ulang, gabungan): aksara Jawa tidak memakainya; kedua kata ditulis berurutan.
             if (($m['join'] ?? '') !== '') {
@@ -138,7 +143,8 @@ final class AksaraWriter
             }
             if (preg_match('/^[a-zéè]/u', $piece)) {
                 [$opens, $first] = [$first, false];
-                if ($capital && isset($known[$piece])) {
+                // Di awal kalimat huruf besar bukan tanda nama: kata yang juga kata biasa di kamus ditulis biasa.
+                if ($capital && isset($known[$piece]) && ! ($opens && isset($ordinary[$piece]))) {
                     $found['dictionary'][] = $piece;
 
                     return $known[$piece];
@@ -187,18 +193,36 @@ final class AksaraWriter
             return self::$names;
         }
         self::$names = [];
+        $plain = [];
         $special = '/['.implode('', self::MURDA).implode('', array_unique(self::SWARA)).']/u';
         foreach (is_file(self::DICTIONARY) ? gzfile(self::DICTIONARY) : [] as $line) {
             $entry = json_decode($line, true);
             $word = Normalizer::normalize((string) ($entry['word'] ?? ''), Normalizer::FORM_C) ?: '';
             $aksara = (string) ($entry['aksara'] ?? '');
+            if (preg_match('/^\p{Ll}[\p{L}\p{M}]*$/u', $word)) {
+                $plain[strtr($word, self::LATIN_VARIANTS)] = true;
+            }
             if ($aksara === '' || ! preg_match('/^\p{Lu}[\p{L}\p{M}]*$/u', $word) || ! preg_match($special, $aksara)) {
                 continue;
             }
             self::$names[strtr(mb_strtolower($word), self::LATIN_VARIANTS)] ??= $aksara;
         }
+        self::$ordinary = array_intersect_key($plain, self::$names);
 
         return self::$names;
+    }
+
+    /**
+     * Nama di dictionaryNames() yang di kamus juga lema biasa berhuruf kecil (agung, ukir, arga): di awal kalimat
+     * kata-kata itu tidak ditulis sebagai nama.
+     *
+     * @return array<string, true>
+     */
+    public static function ordinaryNames(): array
+    {
+        self::dictionaryNames();
+
+        return self::$ordinary ?? [];
     }
 
     private static function word(string $word, bool $standard, bool $name = false): string
@@ -230,7 +254,11 @@ final class AksaraWriter
             $next = $tokens[$i + 1] ?? null;
             $afterNext = $tokens[$i + 2] ?? null;
             $closes = $afterVowel && isset(self::FINALS[$token]);
-            $big = $murda && ! $closes && isset(self::MURDA[$token]);
+            // Murda hanya pada konsonan yang membuka suku kata (diikuti vokal, atau gugus di awal kata: Njoto), bukan
+            // pada konsonan penutup suku kata (s di Thomas, n di Marwan).
+            $opensSyllable = ($next !== null && isset(self::VOWELS[$next]))
+                || (($next === 'r' || $next === 'y') && $afterNext !== null && isset(self::VOWELS[$afterNext]));
+            $big = $murda && ! $closes && isset(self::MURDA[$token]) && ($opensSyllable || ! $afterVowel);
             $murda = $murda && ! $big;
             if ($next !== null && isset(self::VOWELS[$next])) {
                 $out .= self::syllable($token, '', $next, $standard, $afterPangkon, $big);

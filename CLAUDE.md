@@ -318,7 +318,9 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     yang ejaan aksaranya bermurda/berswara memakai ejaan kamus apa adanya (11 nama: Bima, Suwarnabhumi, Arjuna, Indra,
     ...), juga di awal kalimat; (ii) kata berhuruf besar lain yang bukan kata pertama kalimat = nama: vokal pembuka ->
     aksara swara (pepet tidak punya) dan sesudah itu tanpa murda, selain itu SATU murda pada konsonan pertama yang
-    punya bentuk murda. Lapis (ii) kaidah umum dari pengetahuan Claude, TIDAK diturunkan dari data (kamus hanya punya
+    punya bentuk murda dan tidak menutup suku kata (Thomas, Marwan: tanpa murda; diperbaiki sesudah tinjauan keempat).
+    Enam dari 11 nama kamus (aditya, agung, arga, arya, bima, ukir) juga kata biasa berhuruf kecil di kamus yang sama:
+    di AWAL kalimat kata-kata itu ditulis biasa ("Agung banget omahe" bukan nama), di tengah kalimat tetap ejaan kamus. Lapis (ii) kaidah umum dari pengetahuan Claude, TIDAK diturunkan dari data (kamus hanya punya
     4 entri bermurda dan 20 berswara, pemakaiannya tidak seragam) dan belum diperiksa pembaca aksara; halaman
     menyebut kata mana yang ditulis dengan kaidah itu. Ganti lapis (ii) bila ada pedoman ejaan atau pembaca aksara.
     (3) e tanpa tanda: 53% kata ber-e benar bila semua dibaca pepet; leksikon `web/database/dictionaries/jv-taling.json`
@@ -419,9 +421,9 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     CarakanJawa sama dengan javatext di 72 dari 73 aksara/angka/pada (dihitung ulang tiap ekspor; font latih lain 0
     dari 73). Bagian uji korpus tidak "disimpan sampai akhir": di luar gerbang resmi, 24 tes cepat (sampai 100 baris
     pertama; angka 200 di versi sebelumnya menghitung pasangan baris x font) dan 2 evaluasi penuh run lain juga
-    membacanya, dan 3 evaluasi di luar `out/eval` (dua laporan aksara langka sintetis 2.000 baris, beam + LM 300 baris;
-    kunci kartu `usage.test.others`) mengambil barisnya secara ACAK dari seluruh bagian uji, jadi baris di luar 10.000
-    pertama pun pernah dibaca. NusaAksara sudah dievaluasi paling sedikit 37 kali (36 laporan G3 di `out/eval` + laporan
+    membacanya, dan 4 evaluasi di luar `out/eval` (dua laporan aksara langka sintetis 2.000 baris, dua laporan beam + LM
+    300 baris; kunci kartu `usage.test.others`) mengambil barisnya secara ACAK dari seluruh bagian uji, jadi baris di luar 10.000
+    pertama pun pernah dibaca. NusaAksara sudah dievaluasi paling sedikit 38 kali (36 laporan G3 di `out/eval` + dua laporan
     beam + LM di `out/beam`, kunci kartu `usage.real.others`; pembacaan yang tidak meninggalkan laporan tidak
     terhitung, karena itu halaman menulis "paling sedikit"); halaman menyebut angka-angka itu. Font tiap run: dari log
     run bila mencatatnya (`src.train.start_record` menulis NAMA font perender data latih di event `start`; run sebelum
@@ -510,6 +512,26 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     yang menjalankan dulu kelas test terdekat dengan berkas yang dirusak dan berhenti di kegagalan pertama ~12 per
     menit (seluruh suite hanya untuk mutan yang lolos tahap itu); proses latar yang dilepas dengan `( ... &)` tidak
     ikut mati saat tugasnya dihentikan: cari dan hentikan lewat baris perintahnya.
+    **Putaran keempat (2026-10-12, tinjauan atas perubahan `9955ed2..995a29b`; tidak ada temuan berat):** 9 dari 12
+    temuan putaran ketiga yang diperiksa ulang sudah beres, dan 15 dari 42 mutan baru peninjau lolos, hampir semuanya di
+    kode beam model resmi yang baru ditambahkan hari itu (pola yang sama: kode baru, test belum diuji mutasi). Yang
+    diperbaiki: (1) `control_run` kini juga membandingkan bobot awal (`init`), packing, pemotongan gradien, ukuran
+    model, pemecahan batch lebar, dan pengaturan data nyata; kalimat "titik lanjut yang sama" hanya ditulis bila log
+    semua pasangan mencatat awal proses di langkah yang sama (`resume_points`). (2) Potongan beam di
+    `export_results.main` dipindah ke fungsi kecil yang teruji (`beam_decoders`, `beam_pairs`, `tag_pair`,
+    `beam_official`, `beam_delta`, `mark_beam_changes`, `synth_metrics`); pemakaiannya di `main` dijaga lewat sumbernya,
+    karena `main` butuh model dan data nyata. `export_methods.beam_weights` berhenti bila bobot pipeline beam run resmi
+    tidak terbaca dari konfigurasinya. (3) Halaman Demo tidak lagi menulis α 0,25 (lihat "Angka resmi"). (4) Kamus:
+    tabel pasangan lama menunjuk ke tabel beam + LM pipeline resmi, dan tautan "baris yang membaik/memburuk" hanya ada
+    di tabel pasangan yang menentukan tag itu (`Pipeline::beamPair()`). (5) Nama: lihat butir murda/swara. 40 mutan
+    terhadap perbaikan ini semuanya mati. Jebakan baru: `Http::fake` yang dipanggil dua kali dalam satu test TIDAK
+    mengganti tiruan pertama (yang pertama cocok menang), jadi kasus kedua dan seterusnya dalam sebuah loop tidak
+    pernah teruji. **Temuan ringan yang belum dikerjakan:** kalimat tetap "model tidak pernah dilatih pada foto" untuk
+    run `--real-train` (belum ada run semacam itu); font yang DITAMBAHKAN ke `fonts/extra` sesudah run dilatih
+    dilaporkan sebagai "font latih tidak ada lagi" untuk run tanpa nama font di log; font sebuah run = proses terakhir
+    saja; catatan pepet NLLB bergantung pada konstanta kode, bukan pada run terjemahan yang tersimpan (run lama yang
+    diimpor ulang tampil tanpa catatan); dua aturan pemilihan nama kamus (lema pertama menang, hanya lema berhuruf
+    besar) belum punya test.
     **Menu Metode (permintaan user 2026-10-05: "pada sidebar tambahkan menu method/machine learning, jadi disana list
     method atau machine learning yang digunakan"; isi dan pengelompokannya keputusan Claude, belum dikonfirmasi):**
     `Pages/Metode.php`, kelompok Hasil di bawah Dataset, rute `/metode`. Isinya dari **kartu metode**
@@ -618,7 +640,7 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     `phpunit.xml` memaksa SQLite in-memory (`force="true"`, jadi `DB_*` yang tertinggal di shell diabaikan) dan
     `tests/TestCase.php::createApplication` menolak database bernama `its_aksara` sebelum migrasi. Test memakai folder
     sementara untuk `storage/app/mt` (dulu `TranslationTest` menimpa hasil NLLB; dipulihkan dari DB lewat
-    `php artisan aksara:translate --dump`). 170 test lolos di SQLite (2026-10-12, sesudah nama bermurda/berswara dan beam model resmi; 167 di SQLite dan PostgreSQL uji pada 2026-10-06); 330 test Python.
+    `php artisan aksara:translate --dump`). 171 test lolos di SQLite dan PostgreSQL uji (2026-10-12, sesudah tinjauan keempat); 335 test Python.
     **Port:** Laravel 8010, layanan model 8011, layanan terjemahan 8012 — 8000/8001, 5173, dan 8020 dipakai proyek
     lain milik user di laptop yang sama (jangan dihentikan; cek dulu siapa yang mendengarkan sebelum memakai sebuah
     port, dan beri skrip sementara port 8030 ke atas). Test tetap bisa di SQLite in-memory
@@ -639,10 +661,14 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     bersih / `heavy`; G3: semua baris nyata tanpa margin; tes cepat q100 ditolak). Web menyimpan tandanya di
     `pipelines.official` dan membacanya lewat `Pipeline::official()` (manifest lama tanpa kunci itu =
     `crnn_fonts`); tidak ada lagi nama pipeline resmi yang tertanam di halaman. Demo: `DEFAULT_CHECKPOINT` di
-    `src/serve.py` harus run yang sama (dijaga `tests/test_export_results.py`); bawaan Demo = greedy, karena
-    bobot LM beam disetel pada `fase5_fonts` dan belum diuji ulang. **Mengganti run resmi:**
+    `src/serve.py` harus run yang sama (dijaga `tests/test_export_results.py`); bawaan Demo = greedy (jalur
+    angka resmi). Bobot LM beam di `src/serve.py` (`ALPHA`, `BETA`) milik checkpoint bawaan itu (sejak 2026-10-12:
+    0,5 / 1,0 dari `out/beam/fase7_track_o5.json`; test mencocokkannya dengan laporan itu bila berkasnya ada), dan
+    layanan melaporkannya di kunci `beam` jawaban `/health` dan `/predict`: halaman Demo menampilkan bobot dan rumus
+    skor dari situ, tidak menuliskannya sendiri. **Mengganti run resmi:**
     `bash scripts/make_official.sh RUN` (evaluasi G1/G2 10.000 baris, ~30 menit per gerbang di CPU; menunggu
-    training selesai dulu), ubah `OFFICIAL_RUN` + `DEFAULT_CHECKPOINT`, lalu ekspor dan impor.
+    training selesai dulu), ubah `OFFICIAL_RUN` + `DEFAULT_CHECKPOINT`, jalankan `scripts/beam_eval.py` untuk run itu dan
+    salin bobot terpilihnya ke `ALPHA`/`BETA` di `src/serve.py`, lalu ekspor dan impor.
   - **Seluruh alur = scope proyek (keputusan user 2026-09-24):** OCR -> transliterasi -> arti (Indonesia)
     -> tingkat tutur (ngoko / madya / krama / campur). Transliterasi & arti **manusia** untuk 745 label
     tersedia dari NusaAksara (config `Image Transliteration` / `Image Translation`, cocok 745/745, lisensi
@@ -772,7 +798,7 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     `fase7_track` (21,46%) dan `fase7_track_rare` (21,18%, tidak berbeda nyata) berdasarkan efek samping sisipan
     aksara langka (aturan (b)), bukan G3 terendah; tetap satu run yang dibandingkan pada test set, jadi angkanya
     sedikit optimistis. Beam + LM (33,83%) dan terjemahan "dari keluaran OCR" (chrF 19,4) masih milik checkpoint
-    `fase5_fonts`: beam + LM belum dievaluasi di atas `fase7_track`.
+    `fase5_fonts` saat itu; beam + LM di atas `fase7_track` baru diukur 2026-10-12 (19,35%, lihat bagian beam search).
   - **Hasil fase 7 di 745 baris nyata (2026-10-04; `out/compare/crnn_fase7_track_vs_crnn_fase6_ctrl.md`,
     `crnn_fase7_track_rare_vs_crnn_fase7_track.md`).**
     `fase7_track`: G3 **21,46%** (pad 0,06: 19,99%; spasi dibuang 20,99%; baris persis 5,6%), q100 G1 0,29%,

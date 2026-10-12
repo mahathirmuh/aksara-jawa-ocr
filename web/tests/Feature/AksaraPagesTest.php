@@ -309,6 +309,58 @@ class AksaraPagesTest extends TestCase
         $this->assertSame(['crnn_x', 'crnn_x_beam'], Pipeline::beamPair());
         $this->actingAs(User::factory()->create());
         Livewire::test(Penjelajah::class)->assertSet('pipes', ['crnn_x', 'crnn_x_beam', 'crnn_fonts', 'vlm_zeroshot']);
+
+        // Urutan "perbaikan/kerusakan beam terbesar" memakai KEDUA sisi pasangan resmi. Pada pasangan resmi beam + LM
+        // memperbaiki $best 0,8 dan merusak $worst 0,8; baris $decoy dibaca sempurna oleh keduanya (selisih 0), padahal
+        // CER fase5_fonts-nya (greedy maupun beam) paling tinggi, jadi bila salah satu sisi masih milik fase5_fonts,
+        // $decoy yang naik ke urutan teratas.
+        $cer = fn (string $pipeline) => fn (Line $line) => Prediction::where(['line_id' => $line->id, 'pipeline' => $pipeline])->value('cer');
+        $lines = Line::orderBy('external_id')->get();
+        $decoy = $lines->sortByDesc($cer('crnn_fonts'))->first();
+        $best = $lines->where('id', '!=', $decoy->id)->sortBy($cer('crnn_fonts'))->first();
+        $worst = $lines->whereNotIn('id', [$decoy->id, $best->id])->sortBy($cer('crnn_fonts_beam'))->first();
+        $this->assertGreaterThan($cer('crnn_fonts')($best) - 0.1, $cer('crnn_fonts')($decoy));
+        $this->assertGreaterThan($cer('crnn_fonts_beam')($worst) - 0.1, $cer('crnn_fonts_beam')($decoy));
+        foreach ($lines as $line) {
+            [$greedy, $beamCer] = match ($line->id) { $best->id => [0.9, 0.1], $worst->id => [0.1, 0.9], $decoy->id => [0.0, 0.0], default => [0.5, 0.5] };
+            Prediction::create(['line_id' => $line->id, 'pipeline' => 'crnn_x', 'text' => 'x', 'cer' => $greedy, 'segments' => []]);
+            Prediction::create(['line_id' => $line->id, 'pipeline' => 'crnn_x_beam', 'text' => 'x', 'cer' => $beamCer, 'segments' => []]);
+        }
+        $top = fn (string $sort) => Livewire::test(Penjelajah::class)->set('sort', $sort)->viewData('page')->first()->external_id;
+        $this->assertSame($best->external_id, $top('gain'));
+        $this->assertSame($worst->external_id, $top('loss'));
+
+        // Tabel "Data sintetis" Perbandingan dan titik di Ringkasan ikut pasangan resmi.
+        foreach ([['nusaaksara_745', 'crnn_x', 10, 0.2111], ['nusaaksara_745', 'crnn_x_beam', 10, 0.1777],
+            ['synth_dev', 'crnn_x', 31, 0.0211], ['synth_dev', 'crnn_x_beam', 31, 0.0144],
+            ['synth_heldout', 'crnn_x', 17, 0.0033], ['synth_heldout', 'crnn_x_beam', 17, 0.0022]] as [$scope, $pipeline, $count, $cer]) {
+            Metric::create(['scope' => $scope, 'pipeline' => $pipeline, 'lines' => $count, 'cer' => $cer,
+                'better' => $pipeline === 'crnn_x_beam' && $scope === 'nusaaksara_745' ? 3 : null,
+                'worse' => $pipeline === 'crnn_x_beam' && $scope === 'nusaaksara_745' ? 1 : null]);
+        }
+        $fonts = fn (string $scope, string $pipeline) => pct(Metric::where(['scope' => $scope, 'pipeline' => $pipeline])->value('cer'), 2);
+        $this->assertNotSame('2,11%', $fonts('synth_dev', 'crnn_fonts'));
+        $this->get('/perbandingan')->assertOk()
+            ->assertSeeInOrder(['Data sintetis', 'Beam + LM juga membantu di luar data nyata (CRNN x).', 'Dev sintetis (aug fase5)', '(31 baris)',
+                '2,11%', '1,44%', 'Font held-out bersih', '(17 baris)', '0,33%', '0,22%'])
+            ->assertDontSee('Beam + LM membaca checkpoint fase5_fonts');
+        $this->get('/ringkasan')->assertOk()->assertSeeInOrder(['CER G3 per pipeline, terbaik dulu', 'Beam + LM x', '17,8%']);
+
+        // Kamus: tabel pasangan lama menyebut bahwa itu bukan pipeline resmi dan menunjuk ke tabel pipeline resmi; tautan
+        // "baris yang membaik/memburuk" hanya di tabel pasangan yang menentukan tag itu.
+        $html = $this->get('/kamus')->assertOk()
+            ->assertSee('bukan pipeline resmi CRNN x. Kamus di atas pipeline resmi ada di tabel Beam + LM x, dengan bobot yang disetel untuk checkpoint itu.')
+            ->assertDontSee('Kamus belum diukur di atas pipeline resmi')->getContent();
+        $blocks = [];
+        foreach (array_slice(explode('data-lm="', $html), 1) as $part) {
+            $blocks[strtok($part, '"')] = $part;
+        }
+        $this->assertSame(['crnn_fonts_beam', 'crnn_x_beam'], array_keys($blocks));
+        $this->assertStringNotContainsString('Lihat baris yang membaik', $blocks['crnn_fonts_beam']);
+        $this->assertStringContainsString('Lihat baris yang membaik', $blocks['crnn_x_beam']);
+        $this->assertStringContainsString('Lihat baris yang memburuk', $blocks['crnn_x_beam']);
+        $this->assertStringContainsString('3 baris membaik, 1 memburuk', $blocks['crnn_x_beam']);
+        $this->assertStringNotContainsString('bukan pipeline resmi', $blocks['crnn_x_beam']);
     }
 
     public function test_line_image_is_served_only_from_ocr_repo(): void
@@ -346,15 +398,18 @@ class AksaraPagesTest extends TestCase
                 pt($beam->cer - $greedy->cer), $beam->better.' baris membaik, '.$beam->worse.' memburuk'])
             ->assertSee('Dev sintetis (aug fase5)')->assertSee('Font held-out bersih')
             ->assertDontSee('aksara:import')
-            // Di fixture pipeline resmi = checkpoint yang sama dengan pembanding greedy: tidak ada peringatan.
-            ->assertDontSee('Kamus belum diukur di atas pipeline resmi');
+            // Di fixture pipeline resmi = checkpoint yang sama dengan pembanding greedy: tidak ada peringatan, dan
+            // tabelnya menautkan ke baris bertag beam.
+            ->assertDontSee('Kamus belum diukur di atas pipeline resmi')
+            ->assertSee('Lihat baris yang membaik')->assertSee('Lihat baris yang memburuk');
 
         // Pipeline resmi lain: angka kamus masih milik checkpoint lama, dan halaman mengatakannya. Hanya satu pipeline
         // yang boleh bertanda resmi (dengan dua, urutan baris PostgreSQL dan SQLite memilih yang berbeda).
         Pipeline::query()->update(['official' => false]);
         Pipeline::where('key', 'crnn_core')->update(['official' => true]);
         $this->get('/kamus')->assertOk()
-            ->assertSee('Kamus belum diukur di atas pipeline resmi CRNN fase5_core, dan bobotnya disetel pada CRNN fase5_fonts.');
+            ->assertSee('Kamus belum diukur di atas pipeline resmi CRNN fase5_core, dan bobotnya disetel pada CRNN fase5_fonts.')
+            ->assertDontSee('Kamus di atas pipeline resmi ada di tabel');
     }
 
     public function test_dictionary_search_filters_and_breaks_down_script(): void

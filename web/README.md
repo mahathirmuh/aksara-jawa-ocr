@@ -73,8 +73,9 @@ php artisan aksara:translate                        # sumber: transliterasi manu
   konsonan pembuka memakai ha, ng/r/h penutup suku kata menjadi cecak/layar/wignyan, konsonan mati diberi pangkon,
   rê/lê ditulis pa cerek/nga lelet, konsonan + rê memakai keret, n di depan c/j ditulis nya, angka diapit pada
   pangkat. Aksara murda dan swara untuk nama adalah pilihan (kotak centang di halaman Terjemahan, `?nama=1`; bawaannya
-  mati): nama yang ada di kamus memakai ejaan kamusnya, kata berhuruf besar lain yang bukan kata pertama kalimat
-  memakai kaidah umum (vokal pembuka menjadi aksara swara, selain itu satu murda pada konsonan pertama yang punya),
+  mati): nama yang ada di kamus memakai ejaan kamusnya (di awal kalimat hanya bila kamus tidak memuatnya juga sebagai
+  kata biasa: "Agung banget" bukan nama), kata berhuruf besar lain yang bukan kata pertama kalimat memakai kaidah umum
+  (vokal pembuka menjadi aksara swara, selain itu satu murda pada konsonan pertama yang punya dan membuka suku kata),
   dan halaman menyebut kata mana yang ditulis dengan kaidah itu, yang belum diperiksa pembaca aksara. Ejaannya sama dengan 2.173 dari 2.231 lema berejaan baku di kamus bahasa Jawa (97,4%;
   `tests/Unit/AksaraWriterTest.php` menjaga angka itu).
 - `App\Support\TalingRestorer` memulihkan é/è pada kata tanpa tanda memakai `database/dictionaries/jv-taling.json`
@@ -232,7 +233,8 @@ butir itu; keduanya boleh kosong. Penjelasan, pengaturan, bukti, dan catatan but
 angka dan pengaturannya dibaca dari checkpoint, kode, log, dan berkas hasil, sedangkan kalimat penjelasannya ditulis
 tangan di skrip. Aturan kutipnya: selisih antar-run selalu dihitung dari manifest; selang kepercayaannya hanya diambil
 dari berkas pembanding yang CER-nya sama dengan manifest; sebuah run hanya disebut "run kontrol" bila kedua
-checkpoint-nya ada dan memang berbeda di satu perlakuan itu saja (langkah, argumen pelatihan, dan resep data sama);
+checkpoint-nya ada dan memang berbeda di satu perlakuan itu saja (langkah, bobot awal, argumen pelatihan, dan resep
+data sama; "titik lanjut yang sama" hanya ditulis bila log kedua run mencatat awal proses di langkah yang sama);
 evaluasi sintetis hanya dikutip bila laporannya membaca checkpoint yang sekarang (langkahnya sama, dan sidik
 berkasnya sama bila laporan mencatatnya), dan bila tidak, catatan butirnya menyebut bahwa angkanya tidak dikutip.
 Bukti selalu membawa sumbernya: skrip menolak butir berbukti tanpa sumber, dan impor menolak kartu yang begitu.

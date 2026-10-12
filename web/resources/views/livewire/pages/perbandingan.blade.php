@@ -9,7 +9,7 @@
             <div class="card-body">
                 <div class="mb-3">
                     <h2 class="section-title">745 baris nyata (G3 penuh)</h2>
-                    <p class="card-subtitle max-w-4xl">Tiap baris = satu checkpoint dengan satu cara membaca (tertulis di bawah namanya), diukur pada baris yang sama. Beam + LM membaca checkpoint fase5_fonts yang sama dengan greedy; bobot LM-nya disetel di dev sintetis, bukan di NusaAksara.</p>
+                    <p class="card-subtitle max-w-4xl">Tiap baris = satu checkpoint dengan satu cara membaca (tertulis di bawah namanya), diukur pada baris yang sama. Tiap baris beam + LM membaca checkpoint yang tertulis di konfigurasinya, sama dengan baris greedy checkpoint itu; bobot LM-nya disetel per checkpoint di dev sintetis, bukan di NusaAksara.</p>
                 </div>
                 {{-- Kolom pipeline dan catatan diberi lebar tetap; di ponsel kolom pipeline dipersempit supaya CER
                      ikut terlihat tanpa menggeser tabel. Baris pipeline resmi disorot (.is-highlight). --}}
@@ -142,7 +142,7 @@
                                     @foreach (['synth_dev' => 'Dev sintetis (aug fase5)', 'synth_heldout' => 'Font held-out bersih'] as $scope => $name)
                                         @if ($synth->has($scope))
                                             <tr>
-                                                <td>{{ $name }} <span class="text-muted">({{ $synth[$scope]->first()->lines }} baris)</span></td>
+                                                <td>{{ $name }} <span class="text-muted">({{ ($synth[$scope][$beamPair[1]] ?? $synth[$scope]->first())->lines }} baris)</span></td>
                                                 <td class="r num">{{ pct($synth[$scope][$beamPair[0]]->cer ?? null, 2) }}</td>
                                                 <td class="r num">{{ pct($synth[$scope][$beamPair[1]]->cer ?? null, 2) }}</td>
                                             </tr>

@@ -22,7 +22,7 @@
             @php($beam = $pipeline === 'crnn_beam_lm')
             <ol class="demo-steps">
                 @foreach ([['Praproses', 'polaritas · margin 0', false], ['Pembaca', $reader.($beam ? ' · beam 16' : ' · greedy'), true],
-                    ['Penggabung', $beam ? 'LM karakter o5 · α 0,25 · β 1,0' : 'tidak ada', $beam], ['Pascaproses', 'NFC · urutan logis', false]] as [$name, $opt, $active])
+                    ['Penggabung', $beam ? 'LM karakter o5'.($weights ? ' · α '.\App\Services\OcrService::weight($weights['alpha']).' · β '.\App\Services\OcrService::weight($weights['beta']) : '') : 'tidak ada', $beam], ['Pascaproses', 'NFC · urutan logis', false]] as [$name, $opt, $active])
                     <li @class(['demo-step card-inset', 'card-active' => $active])>
                         {{-- Ikon Tabler (MIT) per tahap: hiasan saja, urutannya mengikuti daftar di atas. --}}
                         <span class="demo-step-icon" aria-hidden="true">
@@ -148,7 +148,7 @@
                             </tbody>
                         </table>
                     </div>
-                    <p class="text-xs text-muted">Skor = log P CTC + 0,25 × log P LM + 1,0 × panjang. CTC mengukur seberapa didukung piksel; kandidat dari sumber mana pun (VLM, LLM) kelak dinilai dengan skor yang sama. {{ number_format($result['elapsed_ms'], 0, ',', '.') }} ms.</p>
+                    <p class="text-xs text-muted" data-part="score-formula">@if ($weights)Skor = log P CTC + {{ \App\Services\OcrService::weight($weights['alpha']) }} × log P LM + {{ \App\Services\OcrService::weight($weights['beta']) }} × panjang.@else Skor = log P CTC + α × log P LM + β × panjang; bobot α dan β tertulis di konfigurasi layanan.@endif CTC mengukur seberapa didukung piksel; kandidat dari sumber mana pun (VLM, LLM) kelak dinilai dengan skor yang sama. {{ number_format($result['elapsed_ms'], 0, ',', '.') }} ms.</p>
                 @elseif (! $photo)
                     <div class="flex flex-1 flex-col items-center justify-center gap-3 py-6 text-center">
                         <span class="stat-icon" aria-hidden="true"><flux:icon.ti-scan /></span>

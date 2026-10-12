@@ -28,7 +28,7 @@ class Penjelajah extends Component
 
     /**
      * Kunci = nilai di URL (?urut=). "fonts_*" bertahan dari saat pipeline resmi masih fase5_fonts; urutannya kini
-     * memakai CER pipeline resmi, dan ":resmi" diganti labelnya. Beam selalu dibandingkan dengan greedy fase5_fonts.
+     * memakai CER pipeline resmi, dan ":resmi" diganti labelnya. Beam dibandingkan dengan greedy pasangannya (Pipeline::beamPair).
      */
     public const SORTS = [
         'fonts_desc' => 'CER :resmi, terburuk dulu',

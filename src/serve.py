@@ -6,8 +6,8 @@ Model dan LM dimuat sekali saat permintaan pertama. Jalan di CPU; hanya mendenga
 Konfigurasi lewat environment variable:
   OCR_CHECKPOINT  default DEFAULT_CHECKPOINT = checkpoint run resmi (OFFICIAL_RUN di scripts/export_results.py)
   OCR_LM          default data/charlm/o5_n300000_ds0.5.pkl
-Setelan beam (alpha 0,25, beta 1,0, lebar 16) dipilih di dev dengan checkpoint fase5_fonts (`scripts/beam_eval.py`)
-dan belum disetel ulang untuk checkpoint lain; jalur resmi adalah greedy.
+Setelan beam (ALPHA, BETA, WIDTH) dipilih di dev sintetis dengan checkpoint bawaan (`scripts/beam_eval.py`) dan tidak
+berlaku untuk checkpoint lain; jalur resmi adalah greedy. Web membaca bobotnya dari kunci "beam" di /health dan /predict.
 """
 
 import io
@@ -32,6 +32,8 @@ ALPHA, BETA, WIDTH = 0.5, 1.0, 16
 DEFAULT_CHECKPOINT = "out/checkpoints/fase7_track/last_snapshot.pt"
 DEFAULT_LM = "data/charlm/o5_n300000_ds0.5.pkl"
 PIPELINES = ("crnn_greedy", "crnn_beam_lm")
+# Bobot yang dipakai beam dan rumus skor kandidat, untuk ditampilkan web apa adanya.
+BEAM = {"alpha": ALPHA, "beta": BETA, "width": WIDTH}
 MAX_BYTES = 8 * 1024 * 1024
 
 app = FastAPI(title="Aksara OCR", description="Citra satu baris -> Unicode aksara Jawa")
@@ -80,6 +82,7 @@ def predict_image(img: Image.Image, pipeline: str = "crnn_beam_lm", pad_ratio: f
     return {
         "pipeline": pipeline,
         "config": config_label(pipeline, checkpoint, lm_path),
+        "beam": BEAM,
         "text": text,
         "candidates": candidates,
         "syllables": syllables,
@@ -92,7 +95,7 @@ def predict_image(img: Image.Image, pipeline: str = "crnn_beam_lm", pad_ratio: f
 def health() -> dict:
     model, tokenizer, lm, checkpoint, lm_path = resources()
     return {"status": "ok", "checkpoint": checkpoint.relative_to(ROOT).as_posix(), "lm": lm_path.relative_to(ROOT).as_posix(),
-            "pipelines": list(PIPELINES)}
+            "pipelines": list(PIPELINES), "beam": BEAM}
 
 
 @app.post("/predict")

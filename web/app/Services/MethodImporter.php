@@ -80,7 +80,7 @@ class MethodImporter extends CardImporter
                 }
                 $seen[$method['key']] = true;
                 // Kotak "Terukur" selalu menyebut sumbernya: bukti tanpa sumber bukan bukti yang bisa diperiksa.
-                if (($method['evidence'] ?? null) && ! ($method['evidence_source'] ?? null)) {
+                if (($method['evidence'] ?? null) && ! trim((string) ($method['evidence_source'] ?? ''))) {
                     throw new RuntimeException("Kartu metode tidak sah: butir {$method['key']} punya bukti tanpa sumbernya (evidence_source).");
                 }
                 foreach ($method['settings'] as $pair) {

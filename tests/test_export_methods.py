@@ -875,12 +875,73 @@ def test_gates_and_beam_evidence_follow_what_the_results_contain(tmp_path):
     assert evaluation()["control"]["settings"] == both[:1]
     sibling(root, "fase7_ctrl", track_prob=0.0)
     assert evaluation()["control"]["settings"] == both
+    # R4-01: kontrol yang berangkat dari bobot lain atau dilatih dengan cara lain (packing, pemotongan gradien, ukuran
+    # model, pemecahan batch lebar, pengaturan data nyata) bukan kontrol, walau langkah dan datanya sama.
+    assert em.control_run(root, "tracking", "fase7_track") == "fase7_ctrl"
+    official_args = torch.load(root / "out/checkpoints" / RUN / "last_snapshot.pt", weights_only=False)["args"]
+    for key, other in (("init", ""), ("init", "out/checkpoints/lain/last_snapshot.pt"), ("packed", False), ("clip", 1.0),
+                       ("channels", "8,16"), ("hidden", 8), ("overfit", 32), ("max_batch_columns", 1000),
+                       ("real_augment", "blur"), ("real_pad_ratio", 0.06), ("real_repeat", 3)):
+        assert official_args.get(key) != other, key
+        sibling(root, "fase7_ctrl", track_prob=0.0, **{key: other})
+        assert em.control_run(root, "tracking", "fase7_track") is None, key
+        assert evaluation()["control"]["settings"] == both[:1], key
+    # Jalur bobot awal yang hanya beda pemisah folder tetap bobot yang sama.
+    sibling(root, "fase7_ctrl", track_prob=0.0, init=str(official_args["init"]).replace("/", "\\"))
+    assert "\\" in torch.load(root / "out/checkpoints/fase7_ctrl/last_snapshot.pt", weights_only=False)["args"]["init"]
+    assert em.control_run(root, "tracking", "fase7_track") == "fase7_ctrl"
+    sibling(root, "fase7_ctrl", track_prob=0.0)
+    # "Titik lanjut yang sama" hanya ditulis bila log SEMUA pasangan mencatat awal proses di langkah yang sama; proses
+    # yang diulang dari langkah yang sama dihitung sekali, dan log yang tidak ada tidak bisa dipastikan.
+    same = ("dilatih model pembanding dengan bobot awal, jumlah langkah, data, dan titik lanjut yang sama, tanpa perlakuan "
+            "itu. Selisihnya")
+    unknown = "dilatih model pembanding dengan bobot awal, jumlah langkah, dan data yang sama, tanpa perlakuan itu. Selisihnya"
+    assert em.resume_points(root, RUN) == [0] and em.resume_points(root, "fase7_ctrl") is None
+    assert em.same_resume_points(root, [("fase5_fonts", "fase5_core")]) is False  # dua log yang tidak ada bukan "sama"
+    assert unknown in evaluation()["control"]["summary"] and "titik lanjut" not in evaluation()["control"]["summary"]
+    logs = {run: root / "out/checkpoints" / run / "log.jsonl" for run in (RUN, "fase7_ctrl", "fase5_fonts", "fase5_core")}
+    official_log = logs[RUN].read_text(encoding="utf-8")
+    for run in ("fase7_ctrl", "fase5_fonts", "fase5_core"):
+        write_log(logs[run], [start(0), {"step": 10, "event": "end"}])
+    assert same in evaluation()["control"]["summary"]
+    write_log(logs[RUN], [start(0), start(4), start(4), {"step": 10, "event": "end"}])
+    assert em.resume_points(root, RUN) == [0, 4]
+    assert unknown in evaluation()["control"]["summary"]
+    write_log(logs["fase7_ctrl"], [start(0), start(0), start(4), {"step": 10, "event": "end"}])
+    assert same in evaluation()["control"]["summary"]
+    write_log(logs["fase5_core"], [{"step": 10, "event": "end"}])  # log tanpa satu pun awal proses
+    assert em.resume_points(root, "fase5_core") is None and unknown in evaluation()["control"]["summary"]
+    assert em.same_resume_points(root, []) is False
+    logs[RUN].write_text(official_log, encoding="utf-8")
+    for run in ("fase7_ctrl", "fase5_fonts", "fase5_core"):
+        logs[run].unlink()
 
     # Beam + LM sudah diukur pada checkpoint resmi: angka itu yang dikutip, bukan angka fase5_fonts.
     extra = [{"scope": "nusaaksara_745", "pipeline": "crnn_fase7_track_beam", "lines": 3, "cer": 0.18, "better": 2, "worse": 1}]
     write_manifest(root, {**manifest, "metrics": manifest["metrics"] + extra})
     beam = em.decoding_group("crnn_fase7_track", em.Evidence(root), root)["methods"][0]
     assert beam["evidence"] == "Pada checkpoint resmi: G3 20,00% → 18,00% (2 baris membaik, 1 memburuk)."
+    # R4-02: bobot LM disetel per checkpoint. Tanpa pipeline beam + LM milik run resmi di manifest, yang ditampilkan
+    # bobot fase5_fonts; dengan pipeline itu, bobot dari konfigurasinya (juga yang ditulis dalam notasi ilmiah).
+    assert beam["settings"][:3] == [["Lebar beam", str(WIDTH)], ["Bobot model bahasa", em.dec(ALPHA)], ["Bonus panjang", em.dec(BETA)]]
+    assert em.beam_weights("crnn_fase7_track", manifest["pipelines"]) == (ALPHA, BETA)
+    assert em.beam_weights("", manifest["pipelines"]) == (ALPHA, BETA)
+
+    def with_beam(config):
+        own = {"key": "crnn_fase7_track_beam", "label": "B", "kind": "beam", "status": "done", "config": config}
+        return manifest["pipelines"] + [own]
+
+    tuned = with_beam(f"crnn:fase7_track@10 · beam {WIDTH} · LM karakter o5 · α 0.75 · β 2.5")
+    assert (0.75, 2.5) != (ALPHA, BETA) and em.beam_weights("crnn_fase7_track", tuned) == (0.75, 2.5)
+    assert em.beam_weights("crnn_fonts", tuned) == (ALPHA, BETA)  # pipeline beam run lain bukan milik run resmi ini
+    assert em.beam_weights("crnn_fase7_track", with_beam("beam · α 1e-05 · β 2")) == (1e-05, 2.0)
+    write_manifest(root, {**manifest, "pipelines": tuned, "metrics": manifest["metrics"] + extra})
+    beam = em.decoding_group("crnn_fase7_track", em.Evidence(root), root)["methods"][0]
+    assert beam["settings"][:3] == [["Lebar beam", str(WIDTH)], ["Bobot model bahasa", "0,75"], ["Bonus panjang", "2,5"]]
+    # Konfigurasi yang bobotnya tidak terbaca: ekspor berhenti, bukan menampilkan bobot checkpoint lain.
+    for broken in ("crnn:fase7_track@10 · beam 16", "α banyak · β sedikit", ""):
+        with pytest.raises(SystemExit, match="bobot beam \\+ LM pipeline crnn_fase7_track_beam tidak terbaca"):
+            em.beam_weights("crnn_fase7_track", with_beam(broken))
     # Pipeline resmi = fase5_fonts sendiri: hasilnya memang milik checkpoint resmi.
     write_manifest(root, manifest)
     own = em.decoding_group("crnn_fonts", em.Evidence(root), root)["methods"][0]

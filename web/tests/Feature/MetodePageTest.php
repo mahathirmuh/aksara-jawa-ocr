@@ -631,8 +631,8 @@ class MetodePageTest extends TestCase
         $rejects('kunci groups.*.methods.*.note harus teks', $changed(function (&$c) {
             $c['groups'][3]['methods'][0]['note'] = ['bukan', 'teks'];
         }));
-        // Kotak "Terukur" selalu menyebut sumbernya: bukti tanpa sumber (tidak ada, null, atau kosong) ditolak.
-        foreach ([null, ''] as $source) {
+        // Kotak "Terukur" selalu menyebut sumbernya: bukti tanpa sumber (tidak ada, null, kosong, atau hanya spasi) ditolak.
+        foreach ([null, '', '   '] as $source) {
             $rejects('Kartu metode tidak sah: butir visual_order punya bukti tanpa sumbernya (evidence_source).', $changed(function (&$c) use ($source) {
                 $c['groups'][0]['methods'][2]['evidence_source'] = $source;
             }));

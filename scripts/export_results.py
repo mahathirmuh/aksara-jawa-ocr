@@ -284,6 +284,57 @@ def official_beam(official_key: str, run: str, snapshot: Path, beam_dir: Path | 
                          "config": f"crnn:{run}@{step} · beam {WIDTH} · LM karakter o5 · α {alpha} · β {beta}"}}
 
 
+def beam_decoders(extra_beam: dict | None) -> dict[str, tuple[str, float, float]]:
+    """Pipeline greedy yang logit-nya juga dibaca dengan beam + LM -> (kunci pipeline beam, alpha, beta). Bobot LM milik
+    checkpoint masing-masing: fase5_fonts memakai ALPHA/BETA, checkpoint resmi memakai bobot laporannya sendiri."""
+    decoders = {"crnn_fonts": ("crnn_fonts_beam", ALPHA, BETA)}
+    if extra_beam:
+        decoders[extra_beam["base"]] = (extra_beam["key"], extra_beam["alpha"], extra_beam["beta"])
+    return decoders
+
+
+def beam_pairs(extra_beam: dict | None) -> list[tuple[str, str]]:
+    """Pasangan (beam + LM, greedy) yang dibandingkan per baris; pasangan milik run resmi, bila ada, paling akhir."""
+    return [(beam_key, base_key) for base_key, (beam_key, _, _) in beam_decoders(extra_beam).items()]
+
+
+def tag_pair(extra_beam: dict | None) -> tuple[str, str]:
+    """Pasangan yang menentukan tag "beam membaik/memburuk": milik run resmi bila beam + LM-nya ikut diekspor (kalau
+    tidak fase5_fonts). Web membaca pasangan yang sama lewat Pipeline::beamPair()."""
+    return beam_pairs(extra_beam)[-1]
+
+
+def beam_official(extra_beam: dict | None) -> dict[str, tuple[float, str]]:
+    """CER 745 baris beam + LM run resmi menurut laporannya, untuk dicocokkan dengan hasil ekspor (check_official)."""
+    if not extra_beam:
+        return {}
+    return {extra_beam["key"]: (extra_beam["report"]["real"]["beam_cer"], str(extra_beam["path"]))}
+
+
+def beam_delta(ref: str, hyps: dict[str, dict[str, str]], name: str, pair: tuple[str, str]) -> float:
+    """CER baris beam + LM dikurangi CER baris greedy untuk satu pasangan: negatif = beam membaik."""
+    beam_key, base_key = pair
+    return line_cer(ref, hyps[beam_key][name]) - line_cer(ref, hyps[base_key][name])
+
+
+def mark_beam_changes(metrics: list[dict], refs: dict, hyps: dict, names: list[str], pairs: list[tuple[str, str]]) -> None:
+    """Jumlah baris membaik dan memburuk tiap pasangan, ditulis ke metrik 745 baris pipeline beam-nya."""
+    for pair in pairs:
+        deltas = [beam_delta(refs[n], hyps, n, pair) for n in names]
+        for m in metrics:
+            if m["scope"] == "nusaaksara_745" and m["pipeline"] == pair[0]:
+                m["better"], m["worse"] = sum(d < 0 for d in deltas), sum(d > 0 for d in deltas)
+
+
+def synth_metrics(key: str, base: str, report: dict) -> list[dict]:
+    """Metrik sintetis (dev dan font di luar data latih) sebuah pasangan dari laporan scripts/beam_eval.py-nya."""
+    rows = []
+    for scope, block in [("synth_dev", report["dev"]), ("synth_heldout", report["clean_heldout_font"])]:
+        rows.append({"scope": scope, "pipeline": base, "lines": block["lines"], "cer": block["greedy_cer"]})
+        rows.append({"scope": scope, "pipeline": key, "lines": block["lines"], "cer": block["beam_cer"]})
+    return rows
+
+
 def official_pipeline(checkpoints: dict[str, Path], run: str = OFFICIAL_RUN) -> str:
     """Kunci pipeline yang membaca checkpoint run resmi; berhenti bila checkpoint itu tidak ikut diekspor."""
     keys = [key for key, path in checkpoints.items() if path.parent.name == run]
@@ -381,9 +432,7 @@ def main(argv=None) -> None:
         official = {"crnn_fonts": (read_json(fonts_json)["cer"], str(fonts_json)),
                     "crnn_core": (read_json(core_json)["cer"], str(core_json)),
                     "crnn_fonts_beam": (read_json(beam_json)["real"]["beam_cer"], str(beam_json)),
-                    **optional_official(included)}
-        if extra_beam:
-            official[extra_beam["key"]] = (extra_beam["report"]["real"]["beam_cer"], str(extra_beam["path"]))
+                    **optional_official(included), **beam_official(extra_beam)}
 
     with LABELS.open(encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f, delimiter="\t"))
@@ -401,6 +450,7 @@ def main(argv=None) -> None:
     blind = [n for n in vlm if n in refs]
 
     lm = CharLM.load(LM_PATH)
+    decoders = beam_decoders(extra_beam)
     hyps: dict[str, dict[str, str]] = {p["key"]: {} for p in pipelines if p["status"] == "done"}
     spans: dict[str, dict[str, list | None]] = {}
     sizes: dict[str, tuple[int, int]] = {}
@@ -414,12 +464,10 @@ def main(argv=None) -> None:
             lp = line_log_probs(img, model, "cpu", 0.0)
             hyps[key][n] = tok.to_logical(tok.decode(greedy_path(lp)[0]))
             spans[key][n] = syllable_spans(lp, tok, img.width, img.height)
-            if key == "crnn_fonts":
-                beam_ids = prefix_beam_search(lp, tok.charset, lm, ALPHA, BETA, WIDTH)
-                hyps["crnn_fonts_beam"][n] = tok.to_logical(tok.decode(beam_ids))
-            if extra_beam and key == extra_beam["base"]:
-                beam_ids = prefix_beam_search(lp, tok.charset, lm, extra_beam["alpha"], extra_beam["beta"], WIDTH)
-                hyps[extra_beam["key"]][n] = tok.to_logical(tok.decode(beam_ids))
+            if key in decoders:
+                beam_key, alpha, beta = decoders[key]
+                beam_ids = prefix_beam_search(lp, tok.charset, lm, alpha, beta, WIDTH)
+                hyps[beam_key][n] = tok.to_logical(tok.decode(beam_ids))
         print(f"{key}: {len(rows)} baris ({time.time() - started:.0f} dtk)", flush=True)
     hyps["vlm_zeroshot"] = {n: nfc(vlm[n]["transcription"]) for n in blind}
 
@@ -430,26 +478,15 @@ def main(argv=None) -> None:
             metrics.append({"scope": "nusaaksara_745", "pipeline": key, **aggregate(refs, hh, names)})
         if blind:
             metrics.append({"scope": "blind_50", "pipeline": key, **aggregate(refs, hh, blind)})
-    beam_pairs = [("crnn_fonts_beam", "crnn_fonts")] + ([(extra_beam["key"], extra_beam["base"])] if extra_beam else [])
-    for beam_key, base_key in beam_pairs:
-        beam_cmp = [line_cer(refs[n], hyps[beam_key][n]) - line_cer(refs[n], hyps[base_key][n]) for n in names]
-        for m in metrics:
-            if m["scope"] == "nusaaksara_745" and m["pipeline"] == beam_key:
-                m["better"], m["worse"] = sum(d < 0 for d in beam_cmp), sum(d > 0 for d in beam_cmp)
+    mark_beam_changes(metrics, refs, hyps, names, beam_pairs(extra_beam))
 
     if not args.limit:  # angka 745 baris harus sama dengan laporan resmi (termasuk run lanjutan yang ikut)
         check_official(metrics, official)
         print(f"cek angka resmi: sama ({', '.join(official)})", flush=True)
 
-    beam = read_json(ROOT / "out/beam/fonts_o5.json")
-    for scope, block in [("synth_dev", beam["dev"]), ("synth_heldout", beam["clean_heldout_font"])]:
-        metrics.append({"scope": scope, "pipeline": "crnn_fonts", "lines": block["lines"], "cer": block["greedy_cer"]})
-        metrics.append({"scope": scope, "pipeline": "crnn_fonts_beam", "lines": block["lines"], "cer": block["beam_cer"]})
+    metrics += synth_metrics("crnn_fonts_beam", "crnn_fonts", read_json(ROOT / "out/beam/fonts_o5.json"))
     if extra_beam:
-        report = extra_beam["report"]
-        for scope, block in [("synth_dev", report["dev"]), ("synth_heldout", report["clean_heldout_font"])]:
-            metrics.append({"scope": scope, "pipeline": extra_beam["base"], "lines": block["lines"], "cer": block["greedy_cer"]})
-            metrics.append({"scope": scope, "pipeline": extra_beam["key"], "lines": block["lines"], "cer": block["beam_cer"]})
+        metrics += synth_metrics(extra_beam["key"], extra_beam["base"], extra_beam["report"])
 
     confusion = Counter()
     for n in names:
@@ -484,9 +521,7 @@ def main(argv=None) -> None:
             tags.append("adeg-adeg")
         if any(ch in CLASSIC for ch in ref):
             tags.append("aksara klasik")
-        # Tag beam membandingkan pasangan milik run resmi bila beam + LM-nya ikut diekspor (kalau tidak fase5_fonts).
-        beam_key, base_key = beam_pairs[-1]
-        delta = line_cer(ref, hyps[beam_key][n]) - line_cer(ref, hyps[base_key][n])
+        delta = beam_delta(ref, hyps, n, tag_pair(extra_beam))
         if delta < 0:
             tags.append("beam membaik")
         elif delta > 0:

@@ -5,7 +5,7 @@ import io
 import pytest
 from PIL import Image
 
-from src.serve import DEFAULT_CHECKPOINT, DEFAULT_LM, ROOT, app, predict_image
+from src.serve import ALPHA, BEAM, BETA, DEFAULT_CHECKPOINT, DEFAULT_LM, ROOT, WIDTH, app, predict_image
 from src.render import render_line
 
 CHECKPOINT = ROOT / DEFAULT_CHECKPOINT  # checkpoint run resmi
@@ -45,6 +45,8 @@ def test_predict_endpoint(client):
     body = r.json()
     assert body["pipeline"] == "crnn_greedy" and body["text"] == TEXT
     assert body["config"].startswith(f"crnn:{CHECKPOINT.parent.name}")
+    # Bobot beam ikut di jawaban, supaya web tidak menuliskannya sendiri.
+    assert body["beam"] == BEAM == {"alpha": ALPHA, "beta": BETA, "width": WIDTH}
 
 
 def test_predict_rejects_non_image_and_unknown_pipeline(client):
@@ -58,3 +60,4 @@ def test_health(client):
     r = client.get("/health")
     assert r.status_code == 200 and r.json()["status"] == "ok"
     assert r.json()["checkpoint"] == DEFAULT_CHECKPOINT
+    assert r.json()["beam"] == BEAM
