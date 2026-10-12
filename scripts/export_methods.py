@@ -897,7 +897,14 @@ def decoding_group(official: str, evidence: Evidence, root: Path) -> dict:
         note = measured("crnn_fonts", "fase5_fonts")
         if note:
             note += " Belum diuji pada checkpoint resmi."
-    settings = [("Lebar beam", str(WIDTH)), ("Bobot model bahasa", dec(ALPHA)), ("Bonus panjang", dec(BETA))]
+    # Bobot LM disetel per checkpoint: bila beam + LM checkpoint resmi ada di manifest, bobotnya dibaca dari
+    # konfigurasi pipeline itu; kalau tidak, bobot fase5_fonts (ALPHA, BETA).
+    alpha, beta = ALPHA, BETA
+    config = next((p.get("config") or "" for p in evidence.manifest["pipelines"] if official and p["key"] == f"{official}_beam"), "")
+    weights = re.search(r"α ([\d.]+) · β ([\d.]+)", config)
+    if weights:
+        alpha, beta = float(weights[1]), float(weights[2])
+    settings = [("Lebar beam", str(WIDTH)), ("Bobot model bahasa", dec(alpha)), ("Bonus panjang", dec(beta))]
     if lm and (root / LM_PATH.relative_to(ROOT)).exists():
         settings.append(("Model bahasa", f"n-gram karakter order {lm[1]}, penghalusan Witten-Bell, {num(int(lm[2]))} baris latih"))
     return {

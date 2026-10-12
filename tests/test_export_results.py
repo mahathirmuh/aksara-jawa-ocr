@@ -467,3 +467,34 @@ def test_gate_problem_accepts_valid_reports_and_counts_rejected_lines():
     report = gate_report("G1", "fase7_track")
     report["results"]["NotoSansJavanese-Regular.ttf"] = dict(report["results"]["javatext.ttf"])
     assert "bukan javatext.ttf saja" in gate_problem("G1", report, "fase7_track", 745)
+
+
+def test_official_beam_reads_its_weights_from_the_report_of_that_checkpoint(tmp_path):
+    from export_results import LM_PATH, WIDTH, official_beam
+
+    snapshot = save_ckpt(tmp_path / "ckpt" / "fase7_track" / "last_snapshot.pt", 1500, fase7_args("fase7_track", track=0.5))
+    beam_dir = tmp_path / "beam"
+    beam_dir.mkdir()
+    # Tanpa laporan beam run itu, dan untuk run resmi fase5_fonts (sudah punya crnn_fonts_beam): tidak ada tambahan.
+    assert official_beam("crnn_fase7_track", "fase7_track", snapshot, beam_dir) is None
+    report = {"checkpoint": "out/checkpoints/fase7_track/last_snapshot.pt", "lm": f"data/charlm/{LM_PATH.name}", "beam_width": WIDTH,
+              "dev": {"chosen": {"alpha": 0.5, "beta": 1.0}}, "real": {"beam_cer": 0.19}}
+    path = beam_dir / "fase7_track_o5.json"
+    path.write_text(json.dumps(report), encoding="utf-8")
+    assert official_beam("crnn_fonts", "fase7_track", snapshot, beam_dir) is None
+    extra = official_beam("crnn_fase7_track", "fase7_track", snapshot, beam_dir)
+    assert (extra["key"], extra["base"], extra["alpha"], extra["beta"]) == ("crnn_fase7_track_beam", "crnn_fase7_track", 0.5, 1.0)
+    assert extra["pipeline"] == {"key": "crnn_fase7_track_beam", "label": "Beam + LM fase7_track", "kind": "beam", "status": "done",
+                                 "config": f"crnn:fase7_track@1500 · beam {WIDTH} · LM karakter o5 · α 0.5 · β 1.0"}
+    # Laporan milik checkpoint lain, model bahasa atau lebar beam lain, atau lebih tua dari checkpoint: ekspor berhenti.
+    for change, message in (({"checkpoint": "out/checkpoints/fase5_fonts/last_snapshot.pt"}, "bukan milik run fase7_track"),
+                            ({"lm": "data/charlm/lain.pkl"}, "bukan yang dipakai ekspor"),
+                            ({"beam_width": WIDTH + 1}, "bukan yang dipakai ekspor")):
+        path.write_text(json.dumps({**report, **change}), encoding="utf-8")
+        with pytest.raises(SystemExit, match=message):
+            official_beam("crnn_fase7_track", "fase7_track", snapshot, beam_dir)
+    path.write_text(json.dumps(report), encoding="utf-8")
+    old = snapshot.stat().st_mtime - 60
+    os.utime(path, (old, old))
+    with pytest.raises(SystemExit, match="lebih tua dari last_snapshot.pt"):
+        official_beam("crnn_fase7_track", "fase7_track", snapshot, beam_dir)

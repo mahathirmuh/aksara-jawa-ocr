@@ -12,12 +12,12 @@ class OcrService
 {
     /**
      * Cara membaca yang disediakan layanan (kunci = PIPELINES di src/serve.py). Greedy = jalur resmi; bobot LM untuk
-     * beam (alpha 0,25, beta 1,0) disetel di dev sintetis dengan checkpoint fase5_fonts dan belum diuji ulang untuk
-     * checkpoint lain. Nama checkpoint ditambahkan halaman Demo dari /health layanan.
+     * beam (alpha 0,5, beta 1,0) disetel di dev sintetis dengan checkpoint fase7_track (src/serve.py) dan tidak berlaku
+     * untuk checkpoint lain. Nama checkpoint ditambahkan halaman Demo dari /health layanan.
      */
     public const PIPELINES = [
         'crnn_greedy' => 'greedy (jalur resmi)',
-        'crnn_beam_lm' => 'beam + LM (bobot LM disetel pada fase5_fonts)',
+        'crnn_beam_lm' => 'beam + LM (bobot LM disetel pada fase7_track)',
     ];
 
     /** "out/checkpoints/fase7_track/last_snapshot.pt" -> "fase7_track"; null bila layanan tidak berjalan. */

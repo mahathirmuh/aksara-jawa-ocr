@@ -257,6 +257,33 @@ def check_official(metrics: list[dict], official: dict[str, tuple[float, str]], 
             raise SystemExit(f"{key}: CER {exported[key]:.6%} berbeda dari laporan {source} ({value:.6%})")
 
 
+def official_beam(official_key: str, run: str, snapshot: Path, beam_dir: Path | None = None) -> dict | None:
+    """Beam + LM atas checkpoint run resmi, bila laporan scripts/beam_eval.py-nya (out/beam/<run>_o5.json) ada.
+
+    Bobot LM (alpha, beta) dibaca dari laporan itu: disetel di dev sintetis untuk checkpoint INI, bukan bobot fase5_fonts
+    (ALPHA, BETA). Berhenti bila laporannya bukan milik checkpoint, model bahasa, atau lebar beam yang sekarang, atau
+    lebih tua dari last_snapshot.pt run itu. Run resmi fase5_fonts sudah punya crnn_fonts_beam: tidak ada yang ditambah.
+    """
+    path = (beam_dir or ROOT / "out/beam") / f"{run}_o5.json"
+    if official_key == "crnn_fonts" or not path.exists():
+        return None
+    report = read_json(path)
+    problem = ""
+    if Path(report.get("checkpoint", "")).parent.name != run:
+        problem = f"checkpoint {report.get('checkpoint')!r} bukan milik run {run}"
+    elif Path(report.get("lm", "")).name != LM_PATH.name or report.get("beam_width") != WIDTH:
+        problem = f"model bahasa {report.get('lm')!r} atau lebar beam {report.get('beam_width')} bukan yang dipakai ekspor"
+    elif path.stat().st_mtime < snapshot.stat().st_mtime:
+        problem = f"lebih tua dari {snapshot.name} run itu"
+    if problem:
+        raise SystemExit(f"run resmi {run}: laporan beam {path} tidak sah ({problem}); ekspor dihentikan")
+    alpha, beta = report["dev"]["chosen"]["alpha"], report["dev"]["chosen"]["beta"]
+    step = checkpoint_meta(snapshot)[0]
+    return {"key": f"{official_key}_beam", "base": official_key, "alpha": alpha, "beta": beta, "report": report, "path": path,
+            "pipeline": {"key": f"{official_key}_beam", "label": f"Beam + LM {run}", "kind": "beam", "status": "done",
+                         "config": f"crnn:{run}@{step} · beam {WIDTH} · LM karakter o5 · α {alpha} · β {beta}"}}
+
+
 def official_pipeline(checkpoints: dict[str, Path], run: str = OFFICIAL_RUN) -> str:
     """Kunci pipeline yang membaca checkpoint run resmi; berhenti bila checkpoint itu tidak ikut diekspor."""
     keys = [key for key, path in checkpoints.items() if path.parent.name == run]
@@ -343,6 +370,10 @@ def main(argv=None) -> None:
     official_key = official_pipeline(checkpoints, OFFICIAL_RUN)
     official_label = next(p["label"] for p in pipelines if p["key"] == official_key)
     print(f"angka resmi: {official_key} (run {OFFICIAL_RUN})", flush=True)
+    extra_beam = official_beam(official_key, OFFICIAL_RUN, checkpoints[official_key])
+    if extra_beam:
+        pipelines = insert_after(pipelines, [extra_beam["pipeline"]], official_key)
+        print(f"beam + LM run resmi ikut: {extra_beam['pipeline']['config']}", flush=True)
     official: dict[str, tuple[float, str]] = {}
     if not args.limit:  # laporan resmi dibaca SEBELUM inferensi panjang supaya laporan yang hilang langsung ketahuan
         fonts_json, core_json = EVAL_DIR / "fonts_G3_full.json", EVAL_DIR / "core_G3_full.json"
@@ -351,6 +382,8 @@ def main(argv=None) -> None:
                     "crnn_core": (read_json(core_json)["cer"], str(core_json)),
                     "crnn_fonts_beam": (read_json(beam_json)["real"]["beam_cer"], str(beam_json)),
                     **optional_official(included)}
+        if extra_beam:
+            official[extra_beam["key"]] = (extra_beam["report"]["real"]["beam_cer"], str(extra_beam["path"]))
 
     with LABELS.open(encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f, delimiter="\t"))
@@ -384,6 +417,9 @@ def main(argv=None) -> None:
             if key == "crnn_fonts":
                 beam_ids = prefix_beam_search(lp, tok.charset, lm, ALPHA, BETA, WIDTH)
                 hyps["crnn_fonts_beam"][n] = tok.to_logical(tok.decode(beam_ids))
+            if extra_beam and key == extra_beam["base"]:
+                beam_ids = prefix_beam_search(lp, tok.charset, lm, extra_beam["alpha"], extra_beam["beta"], WIDTH)
+                hyps[extra_beam["key"]][n] = tok.to_logical(tok.decode(beam_ids))
         print(f"{key}: {len(rows)} baris ({time.time() - started:.0f} dtk)", flush=True)
     hyps["vlm_zeroshot"] = {n: nfc(vlm[n]["transcription"]) for n in blind}
 
@@ -394,10 +430,12 @@ def main(argv=None) -> None:
             metrics.append({"scope": "nusaaksara_745", "pipeline": key, **aggregate(refs, hh, names)})
         if blind:
             metrics.append({"scope": "blind_50", "pipeline": key, **aggregate(refs, hh, blind)})
-    beam_cmp = [line_cer(refs[n], hyps["crnn_fonts_beam"][n]) - line_cer(refs[n], hyps["crnn_fonts"][n]) for n in names]
-    for m in metrics:
-        if m["scope"] == "nusaaksara_745" and m["pipeline"] == "crnn_fonts_beam":
-            m["better"], m["worse"] = sum(d < 0 for d in beam_cmp), sum(d > 0 for d in beam_cmp)
+    beam_pairs = [("crnn_fonts_beam", "crnn_fonts")] + ([(extra_beam["key"], extra_beam["base"])] if extra_beam else [])
+    for beam_key, base_key in beam_pairs:
+        beam_cmp = [line_cer(refs[n], hyps[beam_key][n]) - line_cer(refs[n], hyps[base_key][n]) for n in names]
+        for m in metrics:
+            if m["scope"] == "nusaaksara_745" and m["pipeline"] == beam_key:
+                m["better"], m["worse"] = sum(d < 0 for d in beam_cmp), sum(d > 0 for d in beam_cmp)
 
     if not args.limit:  # angka 745 baris harus sama dengan laporan resmi (termasuk run lanjutan yang ikut)
         check_official(metrics, official)
@@ -407,6 +445,11 @@ def main(argv=None) -> None:
     for scope, block in [("synth_dev", beam["dev"]), ("synth_heldout", beam["clean_heldout_font"])]:
         metrics.append({"scope": scope, "pipeline": "crnn_fonts", "lines": block["lines"], "cer": block["greedy_cer"]})
         metrics.append({"scope": scope, "pipeline": "crnn_fonts_beam", "lines": block["lines"], "cer": block["beam_cer"]})
+    if extra_beam:
+        report = extra_beam["report"]
+        for scope, block in [("synth_dev", report["dev"]), ("synth_heldout", report["clean_heldout_font"])]:
+            metrics.append({"scope": scope, "pipeline": extra_beam["base"], "lines": block["lines"], "cer": block["greedy_cer"]})
+            metrics.append({"scope": scope, "pipeline": extra_beam["key"], "lines": block["lines"], "cer": block["beam_cer"]})
 
     confusion = Counter()
     for n in names:

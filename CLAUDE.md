@@ -235,6 +235,17 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   greedy 37,25% → beam 33,83%** (tanpa spasi 25,22% → 22,40%); 413 baris membaik, **157 memburuk**
   (koreksi berlebih nyata, belum dianalisis). Greedy di skrip = angka resmi persis (cek kewajaran).
   Bukan angka gerbang resmi: jalur resmi `src/evaluate.py` tetap greedy sampai diputuskan.
+  **Diulang di atas model resmi 2026-10-12** (`out/beam/fase7_track_o5.json`, checkpoint `fase7_track`, LM dan beam yang
+  sama; ~10 menit CPU). Setelan terpilih di dev berubah: **alpha 0,5, beta 1,0** (bobot LM disetel PER checkpoint).
+  Dev 2,13% → 1,45% (beam tanpa LM 2,08%); render bersih javatext 0,24% → 0,18% (8 membaik, 2 memburuk);
+  **NusaAksara 745 baris: greedy 21,46% → beam 19,35%** (tanpa spasi 20,99% → 18,74%); 344 baris membaik, **176
+  memburuk** (koreksi berlebih tetap nyata). Selisih belum diberi selang kepercayaan; pembacaan ke-38 atas data uji
+  itu. Tetap bukan angka gerbang resmi. `scripts/export_results.py::official_beam` mengekspornya sebagai pipeline
+  `crnn_<run resmi>_beam` ("Beam + LM fase7_track") bila laporan `out/beam/<run>_o5.json` ada, dengan bobot dari
+  laporan itu, dan berhenti bila laporannya bukan milik checkpoint/LM/lebar beam sekarang atau lebih tua dari
+  checkpoint; kartu metode membaca bobotnya dari konfigurasi pipeline itu. `src/serve.py` (Demo) memakai alpha 0,5:
+  layanan model harus dinyalakan ulang. Tag "beam membaik/memburuk" di Penjelajah dan terjemahan "dari keluaran OCR"
+  masih milik beam `fase5_fonts`.
 - **OCR + VLM dan web UI (keputusan user 2026-09-24).**
   - **Dua pembaca, satu hakim:** CRNN tetap pembaca utama (offline, cepat) dan "hakim piksel"; VLM
     fine-tune = pembaca kedua yang menyumbang kandidat. Semua kandidat (greedy, N-best beam, VLM, LLM)
