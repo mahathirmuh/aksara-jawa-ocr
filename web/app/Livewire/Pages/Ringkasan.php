@@ -32,6 +32,7 @@ class Ringkasan extends Component
         // fase7) ikut bila sudah diekspor; daftarnya satu sumber dengan catatan di halaman Perbandingan.
         $points = collect(['crnn_4b', 'crnn_core', 'crnn_fonts', 'crnn_fonts_beam'])
             ->merge(array_keys(Perbandingan::FOLLOWUP_RUNS))
+            ->push($officialKey.'_beam')->unique()
             ->filter(fn ($k) => $g3->has($k))
             ->map(fn ($k) => ['key' => $k, 'label' => $labels[$k] ?? $k, 'value' => $g3[$k]->cer,
                 'x' => round(min(100, max(0, $g3[$k]->cer * 100)), 2), 'official' => $k === $officialKey])

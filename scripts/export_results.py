@@ -484,7 +484,9 @@ def main(argv=None) -> None:
             tags.append("adeg-adeg")
         if any(ch in CLASSIC for ch in ref):
             tags.append("aksara klasik")
-        delta = line_cer(ref, hyps["crnn_fonts_beam"][n]) - line_cer(ref, hyps["crnn_fonts"][n])
+        # Tag beam membandingkan pasangan milik run resmi bila beam + LM-nya ikut diekspor (kalau tidak fase5_fonts).
+        beam_key, base_key = beam_pairs[-1]
+        delta = line_cer(ref, hyps[beam_key][n]) - line_cer(ref, hyps[base_key][n])
         if delta < 0:
             tags.append("beam membaik")
         elif delta > 0:

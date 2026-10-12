@@ -239,13 +239,14 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   sama; ~10 menit CPU). Setelan terpilih di dev berubah: **alpha 0,5, beta 1,0** (bobot LM disetel PER checkpoint).
   Dev 2,13% → 1,45% (beam tanpa LM 2,08%); render bersih javatext 0,24% → 0,18% (8 membaik, 2 memburuk);
   **NusaAksara 745 baris: greedy 21,46% → beam 19,35%** (tanpa spasi 20,99% → 18,74%); 344 baris membaik, **176
-  memburuk** (koreksi berlebih tetap nyata). Selisih belum diberi selang kepercayaan; pembacaan ke-38 atas data uji
-  itu. Tetap bukan angka gerbang resmi. `scripts/export_results.py::official_beam` mengekspornya sebagai pipeline
+  memburuk** (koreksi berlebih tetap nyata). Selisih −2,11 poin, SK 95% per halaman [−2,74; −1,51], per baris
+  [−2,57; −1,65] (`out/compare/crnn_fase7_track_beam_vs_crnn_fase7_track.md`); pembacaan ke-38 atas data uji itu. Tetap bukan angka gerbang resmi. `scripts/export_results.py::official_beam` mengekspornya sebagai pipeline
   `crnn_<run resmi>_beam` ("Beam + LM fase7_track") bila laporan `out/beam/<run>_o5.json` ada, dengan bobot dari
   laporan itu, dan berhenti bila laporannya bukan milik checkpoint/LM/lebar beam sekarang atau lebih tua dari
   checkpoint; kartu metode membaca bobotnya dari konfigurasi pipeline itu. `src/serve.py` (Demo) memakai alpha 0,5:
-  layanan model harus dinyalakan ulang. Tag "beam membaik/memburuk" di Penjelajah dan terjemahan "dari keluaran OCR"
-  masih milik beam `fase5_fonts`.
+  layanan model harus dinyalakan ulang (sudah, 2026-10-12). Tag "beam membaik/memburuk", urutan beam di Penjelajah,
+  tabel sintetis Perbandingan, dan titik beam di Ringkasan memakai pasangan milik pipeline resmi
+  (`Pipeline::beamPair()`: `<resmi>` dan `<resmi>_beam` bila sudah diekspor, kalau tidak pasangan `fase5_fonts`).
 - **OCR + VLM dan web UI (keputusan user 2026-09-24).**
   - **Dua pembaca, satu hakim:** CRNN tetap pembaca utama (offline, cepat) dan "hakim piksel"; VLM
     fine-tune = pembaca kedua yang menyumbang kandidat. Semua kandidat (greedy, N-best beam, VLM, LLM)
@@ -617,7 +618,7 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     `phpunit.xml` memaksa SQLite in-memory (`force="true"`, jadi `DB_*` yang tertinggal di shell diabaikan) dan
     `tests/TestCase.php::createApplication` menolak database bernama `its_aksara` sebelum migrasi. Test memakai folder
     sementara untuk `storage/app/mt` (dulu `TranslationTest` menimpa hasil NLLB; dipulihkan dari DB lewat
-    `php artisan aksara:translate --dump`). 169 test lolos di SQLite (2026-10-12, sesudah nama bermurda/berswara; 167 di SQLite dan PostgreSQL uji pada 2026-10-06); 330 test Python.
+    `php artisan aksara:translate --dump`). 170 test lolos di SQLite (2026-10-12, sesudah nama bermurda/berswara dan beam model resmi; 167 di SQLite dan PostgreSQL uji pada 2026-10-06); 330 test Python.
     **Port:** Laravel 8010, layanan model 8011, layanan terjemahan 8012 — 8000/8001, 5173, dan 8020 dipakai proyek
     lain milik user di laptop yang sama (jangan dihentikan; cek dulu siapa yang mendengarkan sebelum memakai sebuah
     port, dan beri skrip sementara port 8030 ke atas). Test tetap bisa di SQLite in-memory

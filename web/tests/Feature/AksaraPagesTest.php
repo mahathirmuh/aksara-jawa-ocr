@@ -202,7 +202,8 @@ class AksaraPagesTest extends TestCase
         $this->get('/kesalahan')->assertOk()->assertSee('CRNN fase7_track · greedy · 745 baris');
         // Penjelajah: urutan dan angka di daftar dari pipeline resmi, yang juga ikut tampil sejak halaman dibuka.
         Livewire::test(Penjelajah::class)
-            ->assertSet('pipes', ['crnn_fase7_track', 'crnn_fonts', 'crnn_fonts_beam', 'vlm_zeroshot'])
+            // Beam + LM milik pipeline resmi belum ada di hasil ini, jadi pasangan pembandingnya masih fase5_fonts.
+            ->assertSet('pipes', ['crnn_fase7_track', 'crnn_fonts_beam', 'crnn_fonts', 'vlm_zeroshot'])
             ->assertSee('CER fase7_track, terburuk dulu')
             ->assertSee('CRNN 5%')
             ->assertSeeHtml('row-'.Line::orderBy('external_id')->first()->id.'-crnn_fase7_track');
@@ -293,6 +294,21 @@ class AksaraPagesTest extends TestCase
 
         TranslationRun::where('source', 'crnn_fonts_beam')->delete();
         $this->get('/ringkasan')->assertOk()->assertSee('dari keluaran OCR (CRNN fase5_core) chrF 12,3');
+    }
+
+    public function test_beam_comparisons_follow_the_official_pipeline_once_its_beam_is_exported(): void
+    {
+        $this->importFixture();
+        $this->assertSame(['crnn_fonts', 'crnn_fonts_beam'], Pipeline::beamPair());
+        Pipeline::where('official', true)->update(['official' => false]);
+        Pipeline::create(['key' => 'crnn_x', 'label' => 'CRNN x', 'config' => 'crnn:x@1 · greedy', 'kind' => 'crnn', 'status' => 'done', 'sort' => 90, 'official' => true]);
+        $beam = Pipeline::create(['key' => 'crnn_x_beam', 'label' => 'Beam + LM x', 'config' => 'crnn:x@1 · beam 16', 'kind' => 'beam', 'status' => 'planned', 'sort' => 91]);
+        // Beam + LM pipeline resmi yang baru direncanakan belum dipakai sebagai pembanding.
+        $this->assertSame(['crnn_fonts', 'crnn_fonts_beam'], Pipeline::beamPair());
+        $beam->update(['status' => 'done']);
+        $this->assertSame(['crnn_x', 'crnn_x_beam'], Pipeline::beamPair());
+        $this->actingAs(User::factory()->create());
+        Livewire::test(Penjelajah::class)->assertSet('pipes', ['crnn_x', 'crnn_x_beam', 'crnn_fonts', 'vlm_zeroshot']);
     }
 
     public function test_line_image_is_served_only_from_ocr_repo(): void

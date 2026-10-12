@@ -57,6 +57,7 @@ class Perbandingan extends Component
                 'configs' => $blind->map(fn ($m) => $pipelines[$m->pipeline]->config ?? '')->all(),
             ],
             'synth' => $metrics->only(['synth_dev', 'synth_heldout'])->map(fn ($rows) => $rows->keyBy('pipeline')),
+            'beamPair' => Pipeline::beamPair(),
             'translit' => Metric::where('scope', 'translit_draft')->first(),
             'mtRuns' => TranslationRun::latest('id')->get()->unique('source')->values(),
         ]);

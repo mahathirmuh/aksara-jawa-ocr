@@ -55,10 +55,12 @@ class Penjelajah extends Component
 
     public function mount(): void
     {
-        // Tanpa pilihan di URL, pipeline resmi ikut tampil (menggantikan crnn_core supaya tetap empat baris).
+        // Tanpa pilihan di URL: pipeline resmi, beam + LM yang dibandingkan dengannya (Pipeline::beamPair), model lama
+        // fase5_fonts sebagai pembanding, dan uji buta VLM.
         $official = Pipeline::official()?->key;
         if ($official !== null && ! request()->has('p') && ! in_array($official, $this->pipes, true)) {
-            $this->pipes = [$official, 'crnn_fonts', 'crnn_fonts_beam', 'vlm_zeroshot'];
+            [, $beam] = Pipeline::beamPair();
+            $this->pipes = array_values(array_unique([$official, $beam, 'crnn_fonts', 'vlm_zeroshot']));
         }
     }
 
@@ -110,8 +112,9 @@ class Penjelajah extends Component
     {
         $inner = Line::query()->select('lines.*')
             ->selectSub($this->cerOf(Pipeline::official()?->key ?? Pipeline::DEFAULT_OFFICIAL), 'official_cer')
-            ->selectSub($this->cerOf('crnn_fonts'), 'fonts_cer')
-            ->selectSub($this->cerOf('crnn_fonts_beam'), 'beam_cer')
+            // Urutan "perbaikan/kerusakan beam" membandingkan pasangan yang sama dengan tag "beam membaik/memburuk".
+            ->selectSub($this->cerOf(Pipeline::beamPair()[0]), 'fonts_cer')
+            ->selectSub($this->cerOf(Pipeline::beamPair()[1]), 'beam_cer')
             ->selectSub($this->cerOf('vlm_zeroshot'), 'vlm_cer');
         if (in_array($this->tag, self::TAGS, true)) {
             $inner->whereJsonContains('tags', $this->tag);

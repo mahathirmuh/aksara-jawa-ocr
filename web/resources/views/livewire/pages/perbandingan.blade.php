@@ -133,7 +133,7 @@
                     <div class="card-body">
                         <div class="mb-3">
                             <h2 class="section-title">Data sintetis</h2>
-                            <p class="card-subtitle">Beam + LM juga membantu di luar data nyata (checkpoint fase5_fonts).</p>
+                            <p class="card-subtitle">Beam + LM juga membantu di luar data nyata ({{ $pipelines[$beamPair[0]]->label ?? $beamPair[0] }}).</p>
                         </div>
                         <div class="table-wrap">
                             <table class="data-table">
@@ -143,8 +143,8 @@
                                         @if ($synth->has($scope))
                                             <tr>
                                                 <td>{{ $name }} <span class="text-muted">({{ $synth[$scope]->first()->lines }} baris)</span></td>
-                                                <td class="r num">{{ pct($synth[$scope]['crnn_fonts']->cer ?? null, 2) }}</td>
-                                                <td class="r num">{{ pct($synth[$scope]['crnn_fonts_beam']->cer ?? null, 2) }}</td>
+                                                <td class="r num">{{ pct($synth[$scope][$beamPair[0]]->cer ?? null, 2) }}</td>
+                                                <td class="r num">{{ pct($synth[$scope][$beamPair[1]]->cer ?? null, 2) }}</td>
                                             </tr>
                                         @endif
                                     @endforeach

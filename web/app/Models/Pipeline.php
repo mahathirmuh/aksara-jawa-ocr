@@ -27,4 +27,18 @@ class Pipeline extends Model
     {
         return static::where('official', true)->first() ?? static::where('key', self::DEFAULT_OFFICIAL)->first();
     }
+
+    /**
+     * Pasangan [kunci greedy, kunci beam + LM] yang dibandingkan halaman: milik pipeline resmi bila beam + LM-nya
+     * (kunci "<resmi>_beam") sudah diekspor, kalau tidak pasangan lama fase5_fonts.
+     *
+     * @return array{string, string}
+     */
+    public static function beamPair(): array
+    {
+        $official = static::official()?->key;
+        $done = $official !== null && static::where('key', $official.'_beam')->where('status', 'done')->exists();
+
+        return $done ? [$official, $official.'_beam'] : [self::DEFAULT_OFFICIAL, self::DEFAULT_OFFICIAL.'_beam'];
+    }
 }
