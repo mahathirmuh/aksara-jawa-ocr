@@ -304,6 +304,20 @@ def logged_fonts(rows: list[dict], step: int) -> list[str] | None:
     return None
 
 
+def dropped_fonts(rows: list[dict], step: int) -> list[str]:
+    """Nama font yang dicatat proses SEBELUMNYA sebuah run tetapi tidak oleh proses terakhirnya (`logged_fonts`): font
+    itu ikut merender sebagian data latih run tersebut, walau daftar font run mengikuti proses terakhir."""
+    final = logged_fonts(rows, step)
+    if final is None:
+        return []
+    dropped: list[str] = []
+    for row in rows:
+        if (row.get("event") == "start" and isinstance(row.get("step"), int) and row["step"] < step
+                and isinstance(row.get("fonts"), list)):
+            dropped += [str(name) for name in row["fonts"] if name not in final and str(name) not in dropped]
+    return dropped
+
+
 def run_usage(link: dict, schedule: Schedule, root: Path, warnings: list[str]) -> tuple[dict, set[int] | None]:
     """Data latih yang dipakai satu run di rantai: kumpulan baris, sampel, baris berbeda yang dijadwalkan."""
     args, step, run = link["args"], link["step"], link["run"]
@@ -356,6 +370,11 @@ def run_usage(link: dict, schedule: Schedule, root: Path, warnings: list[str]) -
     # Daftar font yang sebenarnya dipakai hanya ada di log run yang lebih baru (src.train mencatatnya di event start).
     # Tanpa itu jumlahnya dihitung dari folder font SEKARANG, yang bisa sudah berubah sejak run itu dilatih.
     logged = logged_fonts(rows, step)
+    dropped = dropped_fonts(rows, step)
+    if dropped:
+        warnings.append(f"Run {run}: proses sebelumnya run itu juga merender dengan font yang tidak dipakai proses "
+                        f"terakhirnya ({', '.join(dropped)}); jumlah dan daftar font run itu di kartu ini mengikuti proses "
+                        "terakhir.")
     if logged is not None:
         fonts, extra = len(logged), sum(1 for name in logged if name not in CORE_FONTS)
     else:

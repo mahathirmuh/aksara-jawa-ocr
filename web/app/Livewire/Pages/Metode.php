@@ -3,12 +3,12 @@
 namespace App\Livewire\Pages;
 
 use App\Models\LineAnnotation;
+use App\Models\MachineTranslation;
 use App\Models\MethodReport;
 use App\Models\Metric;
 use App\Models\Pipeline;
 use App\Models\ResultImport;
 use App\Models\TranslationRun;
-use App\Services\TranslationService;
 use App\Support\AksaraWriter;
 use App\Support\SpeechLevel;
 use App\Support\TalingRestorer;
@@ -209,6 +209,11 @@ class Metode extends Component
             $ocr ? 'Dari keluaran OCR ('.$ocrName.'): '.$score($ocr).'.' : null,
         ]);
 
+        // Batasan angka terjemahan dibaca dari masukan yang TERSIMPAN untuk run yang ditampilkan, bukan dari kode sekarang:
+        // run lama yang diimpor ulang (masukannya masih berpepet bertanda) tetap mendapat catatannya.
+        $marked = $translated && MachineTranslation::whereIn('source', array_filter([$human?->source, $ocr?->source]))
+            ->where('input', 'like', '%ê%')->exists();
+
         $methods = [
             self::entry('translit', 'Alih aksara ke Latin', 'rule',
                 'Tiap aksara, sandhangan, dan pasangan dipetakan ke huruf Latin dengan aturan tetap. Hasilnya draf bantu baca, '
@@ -222,8 +227,7 @@ class Metode extends Component
                 [['Model', $human?->model ?? $ocr?->model ?? self::NLLB], ['Lisensi', 'CC-BY-NC 4.0, hanya non-komersial']],
                 $translated ? implode(' ', $translated) : null,
                 'tabel terjemahan web', ['web/tools/nllb.py', 'web/tools/translate_batch.py'],
-                // Batasan angka di atas: masukan batch masih berejaan yang tidak dikenal model.
-                $translated && TranslationService::BATCH_KEEPS_PEPET_MARK
+                $marked
                     ? 'Angka ini dihitung batch yang masih mengirim pepet bertanda "ê", ejaan yang tidak dikenal model; alat Demo '
                         .'dan Terjemahan membuang tanda itu lebih dulu. Karena itu chrF dan BLEU di atas kemungkinan terlalu rendah '
                         .'sampai batchnya dijalankan ulang.'

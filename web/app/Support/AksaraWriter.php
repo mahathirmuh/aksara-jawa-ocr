@@ -192,11 +192,26 @@ final class AksaraWriter
         if (self::$names !== null) {
             return self::$names;
         }
-        self::$names = [];
-        $plain = [];
+        $entries = array_map(fn (string $line) => json_decode($line, true) ?? [], is_file(self::DICTIONARY) ? gzfile(self::DICTIONARY) : []);
+        [self::$names, self::$ordinary] = self::namesIn($entries);
+
+        return self::$names;
+    }
+
+    /**
+     * Aturan pemilihan nama dari entri kamus ({word, aksara}): nama = lema SATU kata berhuruf besar yang ejaan aksaranya
+     * memuat aksara murda atau swara; bila sebuah nama punya beberapa entri semacam itu, yang PERTAMA di kamus menang.
+     * Lema berhuruf kecil tidak pernah menjadi nama, walau ejaan aksaranya berswara; yang juga terdaftar sebagai nama
+     * dikembalikan sebagai "kata biasa" (lihat ordinaryNames()).
+     *
+     * @param  iterable<array{word?: string, aksara?: string}>  $entries
+     * @return array{array<string, string>, array<string, true>} [nama => ejaan aksara, nama yang juga kata biasa]
+     */
+    public static function namesIn(iterable $entries): array
+    {
+        [$names, $plain] = [[], []];
         $special = '/['.implode('', self::MURDA).implode('', array_unique(self::SWARA)).']/u';
-        foreach (is_file(self::DICTIONARY) ? gzfile(self::DICTIONARY) : [] as $line) {
-            $entry = json_decode($line, true);
+        foreach ($entries as $entry) {
             $word = Normalizer::normalize((string) ($entry['word'] ?? ''), Normalizer::FORM_C) ?: '';
             $aksara = (string) ($entry['aksara'] ?? '');
             if (preg_match('/^\p{Ll}[\p{L}\p{M}]*$/u', $word)) {
@@ -205,11 +220,10 @@ final class AksaraWriter
             if ($aksara === '' || ! preg_match('/^\p{Lu}[\p{L}\p{M}]*$/u', $word) || ! preg_match($special, $aksara)) {
                 continue;
             }
-            self::$names[strtr(mb_strtolower($word), self::LATIN_VARIANTS)] ??= $aksara;
+            $names[strtr(mb_strtolower($word), self::LATIN_VARIANTS)] ??= $aksara;
         }
-        self::$ordinary = array_intersect_key($plain, self::$names);
 
-        return self::$names;
+        return [$names, array_intersect_key($plain, $names)];
     }
 
     /**

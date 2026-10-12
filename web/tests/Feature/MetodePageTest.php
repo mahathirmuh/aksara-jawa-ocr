@@ -6,6 +6,7 @@ use App\Livewire\Pages\Metode;
 use App\Models\DatasetReport;
 use App\Models\Line;
 use App\Models\LineAnnotation;
+use App\Models\MachineTranslation;
 use App\Models\MethodReport;
 use App\Models\Metric;
 use App\Models\Pipeline;
@@ -416,10 +417,28 @@ class MetodePageTest extends TestCase
         // Run OCR-nya disebut dengan checkpoint yang dibacanya, supaya "Beam + LM" tidak terbaca sebagai bacaan model resmi.
         $this->assertSame([$human.' Dari keluaran OCR (Beam + LM atas checkpoint fase5_fonts): chrF 19,4 / BLEU 1,0 pada 740 baris.', 'tabel terjemahan web'],
             [$nllb['evidence'], $nllb['source']]);
-        // N01: selama batch masih mengirim pepet bertanda "ê" (ejaan yang tidak dikenal model), batasannya ditulis di
-        // kotak Catatan. Sejak 2026-10-12 batch membuang tanda itu, jadi catatannya tidak ada.
+        // N01: batasan "batch masih mengirim pepet bertanda ê" (ejaan yang tidak dikenal model) dibaca dari masukan yang
+        // TERSIMPAN untuk run yang ditampilkan, bukan dari kode sekarang. Tanpa masukan bertanda: tidak ada catatan, juga
+        // bila yang bertanda hanya masukan sumber lain yang tidak ditampilkan.
         $this->assertFalse(TranslationService::BATCH_KEEPS_PEPET_MARK);
         $this->assertNull($nllb['note']);
+        $stored = fn (string $source, string $id, string $input) => MachineTranslation::create(['dataset' => 'nusaaksara',
+            'external_id' => $id, 'source' => $source, 'input' => $input, 'output' => 'x', 'model' => 'm']);
+        $stored('label', 'a.png', 'peken sega saé');
+        $stored('crnn_core', 'a.png', 'pêkên');
+        $note = fn () => $this->shown($this->get('/metode')->assertOk()->getContent(), 'nllb')['note'];
+        $this->assertNull($note());
+        // Run lama yang diimpor ulang: masukannya masih bertanda, dan catatannya kembali, dari sumber mana pun yang tampil.
+        $marked = 'Angka ini dihitung batch yang masih mengirim pepet bertanda "ê", ejaan yang tidak dikenal model; alat Demo dan '
+            .'Terjemahan membuang tanda itu lebih dulu. Karena itu chrF dan BLEU di atas kemungkinan terlalu rendah sampai '
+            .'batchnya dijalankan ulang.';
+        $old = $stored('crnn_fonts_beam', 'b.png', 'pêkên sêga');
+        $this->assertSame($marked, $note());
+        $old->delete();
+        $this->assertNull($note());
+        $stored('label', 'b.png', 'sêga');
+        $this->assertSame($marked, $note());
+        MachineTranslation::query()->delete();
         $this->assertSame(['Model', 'facebook/nllb-200-distilled-1.3B'], $nllb['settings'][0]);
         $speech = $this->shown($html, 'speech');
         $this->assertSame(['Akurasi 50,0% pada 2 baris berlabel manusia.', 'label di Penjelajah baris',

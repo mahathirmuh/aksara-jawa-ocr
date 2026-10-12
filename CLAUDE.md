@@ -526,12 +526,18 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     di tabel pasangan yang menentukan tag itu (`Pipeline::beamPair()`). (5) Nama: lihat butir murda/swara. 40 mutan
     terhadap perbaikan ini semuanya mati. Jebakan baru: `Http::fake` yang dipanggil dua kali dalam satu test TIDAK
     mengganti tiruan pertama (yang pertama cocok menang), jadi kasus kedua dan seterusnya dalam sebuah loop tidak
-    pernah teruji. **Temuan ringan yang belum dikerjakan:** kalimat tetap "model tidak pernah dilatih pada foto" untuk
-    run `--real-train` (belum ada run semacam itu); font yang DITAMBAHKAN ke `fonts/extra` sesudah run dilatih
-    dilaporkan sebagai "font latih tidak ada lagi" untuk run tanpa nama font di log; font sebuah run = proses terakhir
-    saja; catatan pepet NLLB bergantung pada konstanta kode, bukan pada run terjemahan yang tersimpan (run lama yang
-    diimpor ulang tampil tanpa catatan); dua aturan pemilihan nama kamus (lema pertama menang, hanya lema berhuruf
-    besar) belum punya test.
+    pernah teruji. **Temuan ringannya dikerjakan hari yang sama (permintaan user), 29 mutan mati:**
+    (i) kartu metode hanya menulis "model tidak pernah dilatih pada foto" bila tidak satu pun run di rantai memakai
+    `--real-train`, dan run tanpa baris sintetis tidak lagi "mengundi dari 0 font"; (ii) `font_facts` mencatat ARAH
+    selisih folder font: `missing` (font run hilang) lawan `added` (font ditambahkan sesudah run dilatih, untuk run
+    tanpa nama font di log), dan catatan gerbang serta butir render memakai kalimat masing-masing; (iii) font yang hanya
+    dipakai proses SEBELUMNYA sebuah run (`export_datasets.dropped_fonts`) menjadi peringatan kartu data dan catatan
+    butir render, dan font run di rantai yang tidak bisa diperiksa lengkap disebut; daftar font run tetap milik proses
+    terakhirnya; (iv) catatan pepet butir NLLB dibaca dari masukan terjemahan yang TERSIMPAN untuk run yang ditampilkan
+    (ada "ê" atau tidak), bukan dari konstanta kode; (v) aturan pemilihan nama kamus dipindah ke
+    `AksaraWriter::namesIn()` dan diuji pada entri buatan. Jebakan: test di `tests/Unit` berjalan tanpa aplikasi Laravel
+    bila dijalankan dalam suite penuh (`base_path()` gagal), walau lulus bila berkasnya dijalankan sendiri bersama test
+    Feature.
     **Menu Metode (permintaan user 2026-10-05: "pada sidebar tambahkan menu method/machine learning, jadi disana list
     method atau machine learning yang digunakan"; isi dan pengelompokannya keputusan Claude, belum dikonfirmasi):**
     `Pages/Metode.php`, kelompok Hasil di bawah Dataset, rute `/metode`. Isinya dari **kartu metode**

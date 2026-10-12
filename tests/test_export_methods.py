@@ -558,6 +558,45 @@ def test_data_sentences_follow_the_recipe_and_the_fonts(tmp_path):
     assert moved["fonts"]["settings"] == [["Font latih", "10 (menurut ekspor hasil; folder font sekarang berisi 9)"]]
     assert moved["render"]["note"].startswith("1 dari 9 font latih yang ada di folder sekarang (run ini dilatih dengan 10 "
                                               "font) punya cacat yang diketahui (Carakan): ")
+    # R4-04: folder berisi LEBIH banyak font daripada yang dipakai run (ditambahkan sesudahnya): bukan "tidak ada lagi".
+    grown = data_methods(root, RUN, {"augment": "none"}, {"train": 10, "extra": 8, "measured": 11, "current": False,
+                                                           "source": "results", "added": True})
+    assert grown["render"]["note"] == (
+        "Folder font sekarang berisi 11 font, lebih banyak dari 10 font yang dipakai run ini; log run tidak mencatat nama "
+        "fontnya, jadi font yang ditambahkan sesudahnya tidak bisa dibedakan. Tidak satu pun dari font di folder itu punya "
+        "cacat yang diketahui.")
+    shrunk = data_methods(root, RUN, {"augment": "none"}, {"train": 10, "extra": 8, "measured": 9, "current": False,
+                                                            "source": "results", "missing": True})
+    assert shrunk["render"]["note"] == ("Cacat font hanya bisa diperiksa pada 9 dari 10 font latih: sisanya tidak ada lagi di "
+                                        "folder font.")
+    # R4-05: font yang hanya dipakai proses sebelumnya run resmi, dan font run di rantai yang tidak bisa diperiksa
+    # lengkap, disebut di butir render.
+    partial = [{"run": "runA", "defects": [], "narrow": 0, "missing": True}, {"run": "runB", "defects": [], "narrow": 0},
+               {"run": "runC", "defects": [], "narrow": 0, "dropped": ["Lama"]}]
+    assert data_methods(root, RUN, {"augment": "none"}, {"dropped": ["Lama", "Tua"], "chain": partial})["render"]["note"] == (
+        "Proses sebelumnya run ini juga merender dengan font yang tidak dipakai proses terakhirnya (Lama dan Tua); font itu "
+        "tidak ikut diperiksa di sini. Font run runA dan runC di rantai tidak semuanya ada lagi di folder font atau hanya "
+        "dipakai sebagian prosesnya, jadi cacatnya tidak bisa diperiksa lengkap.")
+    # R4-03: run tanpa baris sintetis (daftar font kosong di log) tidak "mengundi dari 0 font", dan "tidak pernah
+    # dilatih pada foto" hanya ditulis bila tidak satu pun run di rantai memakai --real-train.
+    unrendered = data_methods(root, RUN, {"augment": "none", "real_train": "data/real/x.tsv"}, {"train": 0, "core": 0, "source": "log", "measured": 0})
+    assert unrendered["fonts"]["summary"].startswith("Run resmi tidak merender baris sintetis (hanya data nyata), jadi tidak ada font")
+    assert "diundi dari" not in unrendered["fonts"]["summary"]
+    assert unrendered["fonts"]["settings"] == [["Font latih", "0 (run ini tidak merender baris sintetis)"]]
+    plain = {"run": RUN, "train": 2, "core": 2, "extra": 0, "source": "folder", "measured": 2, "current": True, "defects": [],
+             "narrow": 0, "recorded": {}, "chain": []}
+    real_card = em.nusaaksara_card(root / "data/real/nusaaksara/labels.tsv")
+    intro = lambda args, chain=(): em.data_group(RUN, args, {**plain, "chain": list(chain)}, real_card, em.Evidence(root), root)["intro"]  # noqa: E731
+    never = ("Model tidak pernah dilatih pada foto. Semua citra latih dibuat dari teks korpus saat dibutuhkan dan tidak "
+             "disimpan; labelnya teks yang dirender itu sendiri, bukan anotasi manusia.")
+    seen = ("Citra latih sintetis dibuat dari teks korpus saat dibutuhkan dan tidak disimpan; labelnya teks yang dirender itu "
+            "sendiri. Run {} juga dilatih pada baris cetak nyata beranotasi manusia, jadi model ini pernah melihat foto.")
+    quiet = [{"run": "runA", "defects": [], "narrow": 0, "real": False}]
+    assert intro({"augment": "none"}) == never and intro({"augment": "none", "real_train": ""}, quiet) == never
+    assert intro({"augment": "none", "real_train": "data/real/x.tsv"}) == seen.format(RUN)
+    loud = [{"run": "runA", "defects": [], "narrow": 0, "real": True}, {"run": "runB", "defects": [], "narrow": 0}]
+    assert intro({"augment": "none"}, loud) == seen.format("runA")
+    assert intro({"augment": "none", "real_train": "x"}, loud) == seen.format(f"runA dan {RUN}")
     # N10: porsi baris tanpa spasi tidak dihitung dari berkas yang bukan lagi font run itu.
     assert moved["drop_space"]["settings"] == [
         ["Peluang", "0,5"], ["Selalu, pada font berspasi sempit", "3 dari 9 font yang ada di folder sekarang (run ini "
@@ -712,10 +751,19 @@ def test_fonts_are_counted_from_the_log_then_the_results_then_the_folder(tmp_pat
     assert facts(links[0], recorded={"runA": 2})[1] == (2, 2, 0, "results", 2, True)
     assert facts(recorded={RUN: 5})[1] == (5, 2, 3, "results", 3, False)
     assert facts(recorded={RUN: 2})[1] == (2, 2, 0, "results", 3, False)
+    # R4-04: arah selisihnya dicatat. Folder lebih sedikit = ada font run yang hilang; folder lebih banyak = font
+    # ditambahkan sesudah run dilatih (bukan "font latih tidak ada lagi").
+    flags = lambda got: (got["missing"], got["added"], got["dropped"], got["real"])  # noqa: E731
+    assert flags(full) == (False, False, [], False)
+    assert flags(facts(recorded={RUN: 5})[0]) == (True, False, [], False)
+    assert flags(facts(recorded={RUN: 2})[0]) == (False, True, [], False)
+    assert flags(facts(links[0])[0]) == (False, False, [], False)
+    with_real = {**links[-1], "args": {**links[-1]["args"], "real_train": "data/real/x.tsv"}}
+    assert flags(facts(with_real)[0]) == (False, False, [], True)  # run yang juga dilatih pada baris nyata
 
     # Log run yang mencatat NAMA fontnya didahulukan dari keduanya, dan hanya berkas bernama itu yang diukur.
     write_log(log, [{**start(0), "fonts": core + ["Salinan.ttf", "SudahDihapus.ttf"]}, {"step": 10, "event": "end"}])
-    assert facts()[1] == (4, 2, 2, "log", 3, False)
+    assert facts()[1] == (4, 2, 2, "log", 3, False) and flags(facts()[0]) == (True, False, [], False)
     # N02: jumlahnya sama dengan folder tetapi namanya lain: folder itu BUKAN font run ini.
     write_log(log, [{**start(0), "fonts": core + ["Lain.ttf"]}, {"step": 10, "event": "end"}])
     renamed, numbers = facts()
@@ -724,11 +772,16 @@ def test_fonts_are_counted_from_the_log_then_the_results_then_the_folder(tmp_pat
     write_log(log, [{**start(0), "fonts": core}, {"step": 10, "event": "end"}])
     fewer, numbers = facts()
     assert numbers == (2, 2, 0, "log", 2, True) and [path.name for path in fewer["paths"]] == core
+    assert flags(fewer) == (False, False, [], False)  # log mencatat nama: font tambahan di folder memang bukan font run ini
     # Run yang dilanjutkan: daftar proses TERAKHIR sebelum langkah checkpoint yang dipakai. Proses yang mulai tepat di
     # langkah checkpoint (10) baru melanjutkannya, jadi daftarnya bukan milik checkpoint ini.
     write_log(log, [{**start(0), "fonts": core}, {**start(5), "fonts": core + ["Salinan.ttf"]},
                     {"step": 10, "event": "end"}, {**start(10), "fonts": core[:1]}])
-    assert facts()[1] == (3, 2, 1, "log", 3, True)
+    assert facts()[1] == (3, 2, 1, "log", 3, True) and facts()[0]["dropped"] == []
+    # R4-05: font yang hanya dipakai proses sebelumnya run itu dicatat (nama tanpa akhiran berkas).
+    write_log(log, [{**start(0), "fonts": core + ["Salinan.ttf", "Lama.ttf"]}, {**start(5), "fonts": core},
+                    {"step": 10, "event": "end"}, {**start(10), "fonts": ["Nanti.ttf"]}])
+    assert facts()[1] == (2, 2, 0, "log", 2, True) and facts()[0]["dropped"] == ["Salinan", "Lama"]
     write_log(log, [start(0), {"step": 10, "event": "end"}, {**start(10), "fonts": core[:1]}])
     assert facts()[1] == (3, 2, 1, "results", 3, True)
     # Proses tanpa baris sintetis mencatat daftar kosong: itu bukan "tidak tercatat".
@@ -761,6 +814,10 @@ def test_fonts_are_counted_from_the_log_then_the_results_then_the_folder(tmp_pat
     assert em.family_note([], "G1 dan G2", RUN, ["javatext"], False) == missing
     gone = "Sebagian font latih tidak ada lagi di folder font, jadi kemiripannya dengan font uji tidak ikut diperiksa."
     assert em.family_note([], "G1 dan G2", RUN, [], True) == gone
+    more = ("Folder font sekarang memuat lebih banyak font daripada yang dipakai saat run dilatih, dan log run tidak mencatat "
+            "nama fontnya, jadi font yang ditambahkan sesudahnya ikut diperiksa di sini.")
+    assert em.family_note([], "G1 dan G2", RUN, [], False, True) == more
+    assert em.family_note([], "G1 dan G2", RUN, [], True, True) == gone + " " + more
     assert em.family_note(twins, "G1 dan G2", RUN, ["lain"], True) == " ".join([
         FAMILY_NOTE.format("G1 dan G2"), missing.replace("javatext", "lain"), gone])
     assert em.probe_note([], ["javatext"]) == ("Kemiripan font perender javatext dengan font latih tidak bisa dihitung di "
@@ -810,6 +867,24 @@ def test_fonts_are_counted_from_the_log_then_the_results_then_the_folder(tmp_pat
     # Font latih yang dicatat log tetapi berkasnya sudah dihapus: kemiripannya tidak ikut diperiksa, dan itu disebut.
     write_log(log, [{**start(0), "fonts": core + ["SudahDihapus.ttf"]}, {"step": 10, "event": "end"}])
     assert by_key(em.build(root, RUN, root / "ujifont"))["gates"]["note"].endswith(" " + gone)
+    # R4-04 dari ujung ke ujung: ekspor hasil mencatat lebih sedikit font daripada isi folder sekarang (font ditambahkan
+    # sesudah run dilatih): catatannya TIDAK berkata "tidak ada lagi".
+    write_log(log, [start(0), {"step": 10, "event": "end"}])
+    saved = torch.load(links[-1]["path"], weights_only=False)
+    torch.save({**saved, "args": {**saved["args"], "extra_fonts": "fonts/extra"}}, links[-1]["path"])
+    for pipeline in manifest["pipelines"]:
+        if pipeline["key"] == "crnn_fase7_track":
+            pipeline["config"] += " · 2 font"
+    write_manifest(root, manifest)
+    card = by_key(em.build(root, RUN, root / "ujifont"))
+    assert card["gates"]["note"].endswith(" " + more) and gone not in card["gates"]["note"]
+    assert card["fonts"]["settings"] == [["Font latih", "2 (menurut ekspor hasil; folder font sekarang berisi 3)"]]
+    # R4-05 dari ujung ke ujung: font yang hanya dipakai proses sebelumnya run resmi membuat pemeriksaan tidak lengkap.
+    write_log(log, [{**start(0), "fonts": core + ["Lama.ttf"]}, {**start(5), "fonts": core}, {"step": 10, "event": "end"}])
+    card = by_key(em.build(root, RUN, root / "ujifont"))
+    assert card["gates"]["note"].endswith(" " + gone) and more not in card["gates"]["note"]
+    assert card["render"]["note"].startswith("Proses sebelumnya run ini juga merender dengan font yang tidak dipakai proses "
+                                             "terakhirnya (Lama); font itu tidak ikut diperiksa di sini.")
 
 
 def test_gates_and_beam_evidence_follow_what_the_results_contain(tmp_path):

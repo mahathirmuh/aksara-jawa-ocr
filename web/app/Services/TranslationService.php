@@ -23,7 +23,8 @@ class TranslationService
 {
     /**
      * true = batch `aksara:translate` mengirim pepet bertanda "ê" ke model (lihat forModel()), ejaan yang tidak dikenal
-     * model, sehingga chrF dan BLEU yang tersimpan terlalu rendah; halaman Metode menyebutnya selama nilai ini true.
+     * model, sehingga chrF dan BLEU yang tersimpan terlalu rendah. Halaman Metode menyebutnya bila masukan yang TERSIMPAN
+     * untuk run yang ditampilkan memuat "ê" (bukan dari nilai ini, supaya run lama yang diimpor ulang tetap bercatatan).
      * false sejak 2026-10-12 (keputusan user): batch membuang tanda itu seperti panggilan langsung, dan batchnya
      * dijalankan ulang, jadi angka sebelum tanggal itu (chrF 36,2 / 19,4) tidak sebanding dengan yang sekarang.
      */

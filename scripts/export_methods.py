@@ -49,6 +49,7 @@ from export_datasets import (  # noqa: E402
     missing_glyphs,
     nusaaksara_card,
     pipeline_key,
+    dropped_fonts,
     read_log,
     recorded_fonts,
     relative,
@@ -394,25 +395,33 @@ def font_facts(root: Path, link: dict, charset: list[str], recorded: dict[str, i
     """Font latih sebuah run. Sumbernya, berurutan: daftar NAMA di log run (bila src.train sudah mencatatnya), jumlah di
     ekspor hasil (teks konfigurasi pipeline; hanya dipakai bila tidak bertentangan dengan argumen checkpoint), lalu
     folder font sekarang. Cacat dan lebar spasi hanya bisa diukur pada berkas yang ada di folder sekarang (`paths`);
-    `current` False berarti berkas-berkas itu bukan persis font yang dipakai run."""
+    `current` False berarti berkas-berkas itu bukan persis font yang dipakai run: `missing` = ada font run yang
+    berkasnya tidak ada lagi, `added` = folder memuat lebih banyak font daripada yang dipakai run (font ditambahkan
+    sesudahnya dan tidak bisa dibedakan, karena log run tidak mencatat nama). `dropped` = font yang hanya dipakai proses
+    sebelumnya run itu (`dropped_fonts`), `real` = run juga dilatih pada baris nyata."""
     args = link["args"]
     core = font_files(root / "fonts")
     folder = core + (font_files(root / args["extra_fonts"]) if args.get("extra_fonts") else [])
-    logged = logged_fonts(read_log(link["path"].parent / "log.jsonl"), link["step"])
+    rows = read_log(link["path"].parent / "log.jsonl")
+    logged = logged_fonts(rows, link["step"])
     then = recorded.get(link["run"])
     core_count = len(core)
+    missing = added = False
     if logged is not None:
         # Hanya berkas yang namanya dicatat log yang diukur: font yang ditambahkan ke folder sesudahnya bukan font run ini.
         paths = [path for path in folder if path.name in logged]
         train_count, source, current = len(logged), "log", len(paths) == len(set(logged))
         core_count = sum(1 for path in core if path.name in logged)
+        missing = not current
     elif then is not None and (args.get("extra_fonts") or then == len(core)):
         paths, train_count, source, current = folder, then, "results", len(folder) == then
+        missing, added = len(folder) < then, len(folder) > then
     else:
         paths, train_count, source, current = folder, len(folder), "folder", True
     return {
         "run": link["run"], "train": train_count, "core": core_count, "extra": train_count - core_count, "source": source,
-        "measured": len(paths), "current": current, "paths": paths,
+        "measured": len(paths), "current": current, "paths": paths, "missing": missing, "added": added,
+        "dropped": [Path(name).stem for name in dropped_fonts(rows, link["step"])], "real": bool(args.get("real_train")),
         "defects": sorted(p.stem for p in paths if p.name in FONT_DEFECTS or missing_glyphs(p, charset)),
         "narrow": sum(1 for p in paths if space_ratio(str(p)) < MIN_SPACE_RATIO),
     }
@@ -446,11 +455,13 @@ def family_twins(owners: dict[str, dict], fonts: list[str], test_font_dir: Path)
     return twins, unknown
 
 
-def family_note(twins: list[dict], subject: str, official: str, unknown: list[str], incomplete: bool) -> str | None:
+def family_note(twins: list[dict], subject: str, official: str, unknown: list[str], incomplete: bool,
+                added: bool = False) -> str | None:
     """Batasan G1/G2: font ujinya sekeluarga dengan font latih di rantai. `official` = run resmi (font yang hanya dipakai
     run sebelumnya di rantai disebut begitu); `unknown` = font uji yang berkasnya tidak ada di mesin ini; `incomplete`
-    = ada font latih yang berkasnya tidak ada lagi, jadi tidak ikut diperiksa. Yang tidak bisa dihitung DISEBUT, bukan
-    didiamkan."""
+    = ada font latih yang berkasnya tidak ada lagi (atau hanya dipakai proses sebelumnya sebuah run), jadi tidak ikut
+    diperiksa; `added` = folder font memuat font yang ditambahkan sesudah sebuah run dilatih dan tidak bisa dibedakan
+    dari font run itu. Yang tidak bisa dihitung DISEBUT, bukan didiamkan."""
     sentences = []
     if twins:
         parts = []
@@ -471,6 +482,9 @@ def family_note(twins: list[dict], subject: str, official: str, unknown: list[st
     if incomplete:
         sentences.append("Sebagian font latih tidak ada lagi di folder font, jadi kemiripannya dengan font uji tidak ikut "
                          "diperiksa.")
+    if added:
+        sentences.append("Folder font sekarang memuat lebih banyak font daripada yang dipakai saat run dilatih, dan log run "
+                         "tidak mencatat nama fontnya, jadi font yang ditambahkan sesudahnya ikut diperiksa di sini.")
     return " ".join(sentences) or None
 
 
@@ -652,9 +666,20 @@ def data_group(run: str, args: dict, fonts: dict, real: dict, evidence: Evidence
                      f"({listing(fonts['defects'])}): pada font itu sebagian citra tidak sepadan dengan labelnya, atau "
                      "pasangannya tidak menumpuk di lingkungan training. Rinciannya di halaman Dataset, bagian Font per "
                      "peran.")
+    elif fonts.get("added"):
+        notes.append(f"Folder font sekarang berisi {fonts['measured']} font, lebih banyak dari {fonts['train']} font yang "
+                     "dipakai run ini; log run tidak mencatat nama fontnya, jadi font yang ditambahkan sesudahnya tidak bisa "
+                     "dibedakan. Tidak satu pun dari font di folder itu punya cacat yang diketahui.")
     elif not fonts["current"]:
         notes.append(f"Cacat font hanya bisa diperiksa pada {fonts['measured']} dari {fonts['train']} font latih: sisanya "
                      "tidak ada lagi di folder font.")
+    if fonts.get("dropped"):
+        notes.append(f"Proses sebelumnya run ini juga merender dengan font yang tidak dipakai proses terakhirnya "
+                     f"({listing(fonts['dropped'])}); font itu tidak ikut diperiksa di sini.")
+    unchecked = [fact["run"] for fact in earlier if fact.get("missing") or fact.get("dropped")]
+    if unchecked:
+        notes.append(f"Font run {listing(unchecked)} di rantai tidak semuanya ada lagi di folder font atau hanya dipakai "
+                     "sebagian prosesnya, jadi cacatnya tidak bisa diperiksa lengkap.")
     inherited = sorted({stem for fact in earlier for stem in fact["defects"] if stem not in fonts["defects"]})
     if inherited:
         runs = [fact["run"] for fact in earlier if any(stem in inherited for stem in fact["defects"])]
@@ -690,11 +715,15 @@ def data_group(run: str, args: dict, fonts: dict, real: dict, evidence: Evidence
         font_setting = f"{fonts['train']} (tercatat di log run; {fonts['measured']} di antaranya masih ada di folder font)"
     else:
         font_setting = f"{fonts['train']} (menurut ekspor hasil; folder font sekarang berisi {fonts['measured']})"
+    # Daftar font kosong di log = run tanpa baris sintetis (--train-lines 0 dengan --real-train): tidak ada yang diundi.
+    unrendered = fonts["train"] == 0
     methods.append(entry(
         "fonts", "Variasi font", "data", "official",
-        f"Tiap baris dirender dengan satu font yang diundi dari {fonts['train']} font. Bentuk huruf cetakan nyata "
-        "berbeda dari font mana pun, jadi model perlu melihat banyak ragam bentuk huruf.",
-        [("Font latih", font_setting)],
+        ("Run resmi tidak merender baris sintetis (hanya data nyata), jadi tidak ada font yang diundi; font run "
+         "sebelumnya di rantai ada di halaman Dataset. " if unrendered
+         else f"Tiap baris dirender dengan satu font yang diundi dari {fonts['train']} font. ")
+        + "Bentuk huruf cetakan nyata berbeda dari font mana pun, jadi model perlu melihat banyak ragam bentuk huruf.",
+        [("Font latih", "0 (run ini tidak merender baris sintetis)" if unrendered else font_setting)],
         font_evidence[0] if font_evidence else None, font_evidence[1] if font_evidence else None,
         files=["src/dataset.py", "fonts/extra/SOURCES.md"]))
     if augment:
@@ -789,13 +818,16 @@ def data_group(run: str, args: dict, fonts: dict, real: dict, evidence: Evidence
             [("Peluang sisip", dec(args.get("rare_insert_prob") or 0)), ("Peluang pembuka", dec(args.get("rare_opener_prob") or 0))]
             if rare_used else [],
             measured_rare, source, files=["src/text_augment.py"]))
-    return {
-        "key": "data",
-        "title": "Data latih sintetis",
-        "intro": "Model tidak pernah dilatih pada foto. Semua citra latih dibuat dari teks korpus saat dibutuhkan dan "
-                 "tidak disimpan; labelnya teks yang dirender itu sendiri, bukan anotasi manusia.",
-        "methods": methods,
-    }
+    # "Tidak pernah dilatih pada foto" hanya benar bila tidak satu pun run di rantai memakai --real-train.
+    real_runs = [fact["run"] for fact in earlier if fact.get("real")] + ([run] if args.get("real_train") else [])
+    if real_runs:
+        intro = ("Citra latih sintetis dibuat dari teks korpus saat dibutuhkan dan tidak disimpan; labelnya teks yang "
+                 f"dirender itu sendiri. Run {listing(real_runs)} juga dilatih pada baris cetak nyata beranotasi manusia, "
+                 "jadi model ini pernah melihat foto.")
+    else:
+        intro = ("Model tidak pernah dilatih pada foto. Semua citra latih dibuat dari teks korpus saat dibutuhkan dan "
+                 "tidak disimpan; labelnya teks yang dirender itu sendiri, bukan anotasi manusia.")
+    return {"key": "data", "title": "Data latih sintetis", "intro": intro, "methods": methods}
 
 
 def recipe_changes(links: list[dict], counts: list[int]) -> str:
@@ -1007,7 +1039,8 @@ def evaluation_group(run: str, args: dict, real: dict, evidence: Evidence, root:
                ("G3, cetakan nyata", f"CER < {pct(TARGETS['G3'], 0)} pada {num(real['lines'])} baris"),
                ("G4, tokenizer", "bolak-balik 100%")],
               status + "." if order else None, "out/results/manifest.json", files=["src/evaluate.py"],
-              note=family_note(family["twins"], "G1 dan G2", run, family["unknown"], family["incomplete"])),
+              note=family_note(family["twins"], "G1 dan G2", run, family["unknown"], family["incomplete"],
+                               family.get("added", False))),
         entry("bootstrap", "Selang kepercayaan bootstrap berpasangan", "statistic", "used",
               f"Selisih dua model diberi selang kepercayaan 95% dengan mengambil ulang baris secara acak {num(resamples)} "
               "kali. Baris dari halaman yang sama saling mirip, jadi pengambilan ulang juga dilakukan per halaman, dan "
@@ -1094,7 +1127,8 @@ def build(root: Path = ROOT, run: str = OFFICIAL_RUN, test_font_dir: Path = TEST
     twins, unknown = family_twins(owners, [name for gate in gates if gate["code"] != "G3" for name in gate["fonts"]],
                                   test_font_dir)
     family = {"owners": owners, "dir": test_font_dir, "twins": twins, "unknown": unknown,
-              "incomplete": any(not fact["current"] for fact in fonts)}
+              "incomplete": any(fact["missing"] or fact["dropped"] for fact in fonts),
+              "added": any(fact["added"] for fact in fonts)}
     device = None
     for row in read_log(official["path"].parent / "log.jsonl"):
         if row.get("event") == "start":

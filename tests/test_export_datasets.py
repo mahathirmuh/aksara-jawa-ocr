@@ -714,7 +714,16 @@ def test_other_readers_of_the_test_split_and_font_counts_from_logs(tmp_path):
                                    *ending, {**start(10), "fonts": core[:1]}])
     card = ed.build(root, "runB", root / "ujifont")
     train = card["usage"]["train"]
-    assert (train["fonts"], train["extra_fonts"], train["fonts_source"]) == (3, 1, "log") and card["warnings"] == []
+    assert (train["fonts"], train["extra_fonts"], train["fonts_source"]) == (3, 1, "log")
+    # R4-05: font yang hanya dipakai proses SEBELUMNYA run itu disebut, bukan didiamkan (proses di langkah checkpoint
+    # dan sesudahnya tidak ikut).
+    assert card["warnings"] == [f"Run runB: proses sebelumnya run itu juga merender dengan font yang tidak dipakai proses "
+                                f"terakhirnya ({', '.join(names[3:])}); jumlah dan daftar font run itu di kartu ini mengikuti "
+                                "proses terakhir."]
+    rows = [{**start(0), "fonts": ["a", "b"]}, {**start(3), "fonts": ["b", "c"]}, start(4), {**start(5), "fonts": ["b"]},
+            {**start(10), "fonts": ["d"]}, {"event": "end", "step": 10, "fonts": ["e"]}]
+    assert ed.dropped_fonts(rows, 10) == ["a", "c"] and ed.dropped_fonts(rows, 5) == ["a"] and ed.dropped_fonts(rows, 3) == []
+    assert ed.dropped_fonts([start(0), start(5)], 10) == [] and ed.dropped_fonts(rows, 11) == ["a", "b", "c"]
     assert ed.logged_fonts([{**start(10), "fonts": core}], 10) is None and ed.logged_fonts([start(0)], 10) is None
     assert ed.logged_fonts([{**start(9), "fonts": core}, {**start(10), "fonts": []}], 10) == core
     # Proses tanpa baris sintetis mencatat daftar kosong: tidak ada yang dibandingkan dengan folder.

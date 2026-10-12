@@ -92,6 +92,24 @@ class AksaraWriterTest extends TestCase
         $this->assertSame(['aksara' => AksaraWriter::fromLatin('omahe').' '.$names['agung'], 'dictionary' => ['agung'], 'rule' => []], AksaraWriter::write('omahe Agung'));
         $this->assertNotSame($names['agung'], AksaraWriter::fromLatin('agung'));
         $this->assertSame([], AksaraWriter::write('Teka. Agung banget')['dictionary']);
+        $this->assertSame([$names, $ordinary], AksaraWriter::namesIn(array_map(fn ($line) => json_decode($line, true),
+            gzfile(__DIR__.'/../../database/dictionaries/jv.jsonl.gz'))));
+        // Aturan pemilihan nama pada entri buatan: hanya lema satu kata berhuruf besar yang ejaannya bermurda/berswara;
+        // entri PERTAMA sebuah nama menang; lema berhuruf kecil tidak menjadi nama walau ejaannya berswara, dan hanya
+        // dicatat sebagai kata biasa bila namanya memang terdaftar; pepet bertanda disamakan.
+        $this->assertSame([['bima' => 'ꦨꦶꦩ', 'indra' => 'ꦆꦤ꧀ꦢꦿ', 'peken' => 'ꦦꦼꦏꦼꦤ꧀'], ['bima' => true, 'peken' => true]], AksaraWriter::namesIn([
+            ['word' => 'Bima', 'aksara' => 'ꦧꦶꦩ'],            // berhuruf besar tetapi ejaannya biasa: bukan penentu
+            ['word' => 'Bima', 'aksara' => 'ꦨꦶꦩ'],            // entri bermurda pertama: menang
+            ['word' => 'Bima', 'aksara' => 'ꦨꦶꦩꦴ'],           // entri bermurda kedua: diabaikan
+            ['word' => 'bima', 'aksara' => 'ꦧꦶꦩ'],            // juga kata biasa
+            ['word' => 'Indra', 'aksara' => 'ꦆꦤ꧀ꦢꦿ'],
+            ['word' => 'iku', 'aksara' => 'ꦆꦏꦸ'],             // huruf kecil berswara: bukan nama, dan bukan "kata biasa" sebuah nama
+            ['word' => 'Sri Sultan', 'aksara' => 'ꦯꦿꦶ ꦱꦸꦭ꧀ꦠꦤ꧀'],  // dua kata: tidak diambil
+            ['word' => 'Kartini'],                              // tanpa ejaan aksara
+            ['word' => 'Pêkên', 'aksara' => 'ꦦꦼꦏꦼꦤ꧀'],
+            ['word' => 'peken', 'aksara' => 'ꦥꦼꦏꦼꦤ꧀'],
+            [],
+        ]));
 
         // Kaidah: vokal pembuka -> swara dan sesudah itu tanpa murda (Ésti, Anto); pepet tidak punya swara, jadi
         // murdanya tetap dicari (Eko); n di depan j = nya murda (Njoto); hanya SATU murda per nama (Kartini);
