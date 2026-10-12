@@ -327,6 +327,13 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     `TranslationService::forModel()` membuang tanda itu di semua panggilan langsung (Terjemahan, Demo). Batch
     `aksara:translate` BELUM (inputs() masih mengirim ê, juga dari transliterasi manusia), jadi chrF 36,2 / 19,4 yang
     dilaporkan kemungkinan terlalu rendah; menjalankannya ulang ~1 jam CPU dan mengubah angka tahap 3: keputusan user.
+    **Batch dijalankan ulang tanpa "ê" 2026-10-12 (keputusan user; `BATCH_KEEPS_PEPET_MARK = false`, 51 menit CPU):**
+    dari alih aksara manusia **chrF 38,6 / BLEU 11,6** (dulu 36,2 / 10,5: naik 2,4 poin chrF); dari bacaan greedy
+    model resmi `fase7_track` chrF 18,5 / BLEU 0,4. Angka OCR lama (19,4 / 1,0) dibuat dari beam + LM `fase5_fonts`
+    DAN masih ber-"ê", jadi tidak sebanding; walau G3 turun dari 33,8% ke 21,5%, chrF dari keluaran OCR tidak naik
+    (teks 1 dari 5 karakter salah masih terlalu rusak untuk diterjemahkan). Hasil lama dicadangkan di
+    `web/storage/app/mt/*_sebelum_20261012.*` (tidak ikut git). Catatan pepet di butir NLLB-200 halaman Metode tidak
+    lagi tampil.
     Mutu terjemahan Indonesia -> Jawa belum diukur (tidak ada data uji arah itu); contoh salah yang terlihat: "murah" ->
     "larang regane", "nenek" hilang. Halaman menyebut hasilnya draf.
     **Kamus kata (permintaan user 2026-10-05: "ditambahkan juga kamus bahasa jawa dan kamus bahasa indonesia"):** dua

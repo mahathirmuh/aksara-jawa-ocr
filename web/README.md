@@ -240,9 +240,9 @@ Web menampilkannya apa adanya dan hanya menambah kelompok "Tahap lanjutan alur" 
 (`Metode::webGroup()`); kunci butir kelompok itu (`Metode::WEB_KEYS`) tidak boleh dipakai butir kartu, dan impor
 menolak kartu yang memakainya. Kartu memuat `results_generated` (waktu ekspor hasil yang dikutip buktinya): bila
 berbeda dari hasil yang diimpor, atau kartu dibuat untuk run lain, halaman menampilkan peringatan "Kartu metode dan
-hasil tidak sejalan". Angka terjemahan di butir NLLB-200 disertai catatan selama batch terjemahan masih mengirim
-pepet bertanda "ê" ke model (`TranslationService::BATCH_KEEPS_PEPET_MARK`): ejaan itu tidak dikenal model, jadi chrF
-dan BLEU-nya kemungkinan terlalu rendah sampai batchnya dijalankan ulang. Angka tingkat tutur dihitung pada label
+hasil tidak sejalan". Batch terjemahan membuang pepet bertanda "ê" sebelum mengirim teks ke model (ejaan itu tidak
+dikenal NLLB) sejak 2026-10-12; `TranslationService::BATCH_KEEPS_PEPET_MARK` mencatatnya, dan bila nilainya true butir
+NLLB-200 memberi catatan bahwa chrF dan BLEU-nya terlalu rendah. Angka tingkat tutur dihitung pada label
 yang sama dengan Ringkasan (`LineAnnotation::scorableSpeechLabels()`), dan label yang belum bisa dinilai disebut
 jumlahnya.
 

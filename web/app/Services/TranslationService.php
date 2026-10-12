@@ -22,11 +22,12 @@ use RuntimeException;
 class TranslationService
 {
     /**
-     * Batch `aksara:translate` masih mengirim pepet bertanda "ê" ke model (lihat forModel()), jadi chrF dan BLEU yang
-     * tersimpan kemungkinan terlalu rendah. Halaman Metode menyebutnya selama nilai ini true. Ubah menjadi false HANYA
-     * bersamaan dengan menjalankan ulang batchnya: inputs() mengikuti nilai ini, dan angka lama tidak lagi sebanding.
+     * true = batch `aksara:translate` mengirim pepet bertanda "ê" ke model (lihat forModel()), ejaan yang tidak dikenal
+     * model, sehingga chrF dan BLEU yang tersimpan terlalu rendah; halaman Metode menyebutnya selama nilai ini true.
+     * false sejak 2026-10-12 (keputusan user): batch membuang tanda itu seperti panggilan langsung, dan batchnya
+     * dijalankan ulang, jadi angka sebelum tanggal itu (chrF 36,2 / 19,4) tidak sebanding dengan yang sekarang.
      */
-    public const BATCH_KEEPS_PEPET_MARK = true;
+    public const BATCH_KEEPS_PEPET_MARK = false;
 
     /**
      * Teks Latin yang diterjemahkan per sumber:

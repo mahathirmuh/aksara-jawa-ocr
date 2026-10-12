@@ -416,11 +416,10 @@ class MetodePageTest extends TestCase
         // Run OCR-nya disebut dengan checkpoint yang dibacanya, supaya "Beam + LM" tidak terbaca sebagai bacaan model resmi.
         $this->assertSame([$human.' Dari keluaran OCR (Beam + LM atas checkpoint fase5_fonts): chrF 19,4 / BLEU 1,0 pada 740 baris.', 'tabel terjemahan web'],
             [$nllb['evidence'], $nllb['source']]);
-        // N01: angka itu dihitung dari masukan berejaan yang tidak dikenal model; batasannya ditulis di kotak Catatan.
-        $this->assertTrue(TranslationService::BATCH_KEEPS_PEPET_MARK);
-        $this->assertSame('Angka ini dihitung batch yang masih mengirim pepet bertanda "ê", ejaan yang tidak dikenal model; alat Demo dan '
-            .'Terjemahan membuang tanda itu lebih dulu. Karena itu chrF dan BLEU di atas kemungkinan terlalu rendah sampai batchnya '
-            .'dijalankan ulang.', $nllb['note']);
+        // N01: selama batch masih mengirim pepet bertanda "ê" (ejaan yang tidak dikenal model), batasannya ditulis di
+        // kotak Catatan. Sejak 2026-10-12 batch membuang tanda itu, jadi catatannya tidak ada.
+        $this->assertFalse(TranslationService::BATCH_KEEPS_PEPET_MARK);
+        $this->assertNull($nllb['note']);
         $this->assertSame(['Model', 'facebook/nllb-200-distilled-1.3B'], $nllb['settings'][0]);
         $speech = $this->shown($html, 'speech');
         $this->assertSame(['Akurasi 50,0% pada 2 baris berlabel manusia.', 'label di Penjelajah baris',
