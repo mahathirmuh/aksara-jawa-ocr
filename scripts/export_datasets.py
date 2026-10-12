@@ -604,8 +604,8 @@ def missing_glyphs(path: Path, charset: list[str]) -> list[str]:
 def font_cards(root: Path, official_args: dict, test_fonts: list[str], charset: list[str], test_font_dir: Path,
                warnings: list[str], logged: list[str] | None = None) -> list[dict]:
     """Font per peran untuk run resmi: latih + validasi (inti), latih (tambahan), uji, dan yang tidak dipakai.
-    `logged` = nama font yang dicatat log run resmi (None bila log-nya belum mencatat): bila ada, peran latih hanya
-    diberikan ke nama-nama itu, bukan ke semua isi folder font sekarang."""
+    `logged` = nama font yang dicatat log run resmi (None bila log-nya belum mencatat): bila ada, peran latih (dan
+    untuk font inti juga peran validasi) hanya diberikan ke nama-nama itu, bukan ke semua isi folder font sekarang."""
     sources = font_sources(root / "fonts/extra/SOURCES.md")
     extra_dir = (root / official_args["extra_fonts"]).resolve() if official_args.get("extra_fonts") else None
     reference = {}
@@ -629,7 +629,10 @@ def font_cards(root: Path, official_args: dict, test_fonts: list[str], charset: 
                 info = CORE_FONTS.get(name)
                 if info is None:
                     raise SystemExit(f"font inti {name} belum punya catatan lisensi di CORE_FONTS (scripts/export_datasets.py)")
-                roles = ["train", "val"] if logged is None or name in logged else ["val"]
+                # Font inti merender data latih DAN validasi. Tercatat di log tetapi font ini tidak ada di sana = berkasnya
+                # masuk folder sesudah run dilatih: tidak dipakai run itu sama sekali. Daftar kosong = run tanpa baris
+                # sintetis, yang validasinya tetap dirender dengan font inti.
+                roles = ["train", "val"] if logged is None or name in logged else [] if logged else ["val"]
             else:
                 info = sources.get(name)
                 if info is None:
@@ -801,7 +804,7 @@ def build(root: Path = ROOT, run: str = OFFICIAL_RUN, test_font_dir: Path = TEST
                             f"lagi di folder font ({', '.join(gone)}); font itu tidak ada di tabel font kartu ini.")
         if added:
             warnings.append(f"Run {run}: folder font sekarang memuat {len(added)} font yang tidak tercatat di log run itu "
-                            f"({', '.join(added)}); font itu tidak diberi peran latih.")
+                            f"({', '.join(added)}); font itu dicatat tidak dipakai run itu.")
 
     real = nusaaksara_card(root / "data/real/nusaaksara/labels.tsv")
     gates = gate_reports(run, root, real["lines"])
@@ -819,8 +822,9 @@ def build(root: Path = ROOT, run: str = OFFICIAL_RUN, test_font_dir: Path = TEST
         "splits": splits,
         "usage": {
             "train": train,
+            # Validasi dirender dengan font inti: yang tercatat di log run bila ada, kalau tidak isi folder sekarang.
             "val": {"lines": min(train["val_lines"], splits[1]["lines"]), "steps": train["val_steps"],
-                    "fonts": len(font_files(root / "fonts"))},
+                    "fonts": train["fonts"] - train["extra_fonts"] if logged else len(font_files(root / "fonts"))},
             # G1 dan G2 membaca baris yang sama: N baris pertama bagian uji (src.evaluate).
             "test": {"lines": max((g["lines"] for g in synthetic), default=0), "gates": synthetic,
                      "quick": others["quick"], "quick_max_lines": others["quick_max_lines"], "full": others["full"],

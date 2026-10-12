@@ -692,10 +692,21 @@ def test_other_readers_of_the_test_split_and_font_counts_from_logs(tmp_path):
     card = ed.build(root, "runB", root / "ujifont")
     assert (card["usage"]["train"]["fonts"], card["usage"]["train"]["extra_fonts"]) == (2, 0)
     assert card["warnings"] == ["Run runB: folder font sekarang memuat 1 font yang tidak tercatat di log run itu (Salinan.ttf); "
-                                "font itu tidak diberi peran latih."]
+                                "font itu dicatat tidak dipakai run itu."]
     roles = {f["file"]: f["roles"] for f in card["fonts"]}
     assert roles["Salinan.ttf"] == [] and all(roles[name] == ["train", "val"] for name in core)
     assert "shared_with_test" not in next(f for f in card["fonts"] if f["file"] == "Salinan.ttf")
+    assert card["usage"]["val"]["fonts"] == 2
+    # Font INTI yang masuk folder sesudah run dilatih juga tidak dipakai run itu: bukan font latih, bukan font validasi
+    # (validasi dirender dengan font inti yang ada saat itu), dan jumlah font validasi mengikuti log.
+    write_log(ckpt / "log.jsonl", [{**start(0), "fonts": [core[0], "Salinan.ttf"]}, *ending])
+    card = ed.build(root, "runB", root / "ujifont")
+    roles = {f["file"]: f["roles"] for f in card["fonts"]}
+    assert (roles[core[0]], roles[core[1]], roles["Salinan.ttf"]) == (["train", "val"], [], ["train"])
+    assert (card["usage"]["train"]["fonts"], card["usage"]["train"]["extra_fonts"], card["usage"]["val"]["fonts"]) == (2, 1, 1)
+    assert card["warnings"] == [f"Run runB: folder font sekarang memuat 1 font yang tidak tercatat di log run itu ({core[1]}); "
+                                "font itu dicatat tidak dipakai run itu."]
+    assert "shared_with_test" not in next(f for f in card["fonts"] if f["file"] == core[1])
     # Run yang dilanjutkan: daftar proses TERAKHIR sebelum langkah checkpoint yang dipakai (proses itulah yang menulis
     # checkpoint-nya). Proses yang mulai tepat di langkah checkpoint baru melanjutkannya: daftarnya bukan milik
     # checkpoint ini.
@@ -710,7 +721,10 @@ def test_other_readers_of_the_test_split_and_font_counts_from_logs(tmp_path):
     write_log(ckpt / "log.jsonl", [{**start(0), "fonts": []}, *ending])
     card = ed.build(root, "runB", root / "ujifont")
     assert (card["usage"]["train"]["fonts"], card["usage"]["train"]["font_names"]) == (0, []) and card["warnings"] == []
-    assert not any("train" in f["roles"] for f in card["fonts"]) and {f["file"]: f["roles"] for f in card["fonts"]}[core[0]] == ["val"]
+    # Validasinya tetap dirender dengan font inti di folder: kedua font inti berperan validasi saja.
+    roles = {f["file"]: f["roles"] for f in card["fonts"]}
+    assert not any("train" in r for r in roles.values()) and [roles[name] for name in core] == [["val"], ["val"]]
+    assert card["usage"]["val"]["fonts"] == 2
 
     (root / "out/results").mkdir()
     manifest = {"pipelines": [{"key": "crnn_b", "config": "crnn:runB@10 (lanjutan runA@6) · 5 font · aug fase5 · greedy"},

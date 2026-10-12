@@ -400,8 +400,9 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     2026-10-06 tidak), kalau tidak dari folder font SEKARANG (`fonts_source`, `font_names`), dan ekspor memperingatkan
     bila ekspor hasil mencatat jumlah lain. Yang dibaca adalah event `start` proses terakhir yang mulai SEBELUM langkah
     checkpoint (proses itulah yang menulisnya; proses yang mulai tepat di langkah itu baru melanjutkannya). Bila log run
-    resmi mencatat nama font, peran "latih" di tabel font hanya untuk nama yang tercatat, dan kartu memperingatkan font
-    tercatat yang sudah tidak ada di folder serta font di folder yang tidak tercatat.
+    resmi mencatat nama font, peran "latih" di tabel font hanya untuk nama yang tercatat (font inti yang tidak tercatat
+    juga tidak diberi peran validasi: berkasnya masuk folder sesudah run dilatih; jumlah font validasi mengikuti log),
+    dan kartu memperingatkan font tercatat yang sudah tidak ada di folder serta font di folder yang tidak tercatat.
     Kalimat dan batasan di halaman dipilih dari isi kartu, supaya tetap benar untuk kartu run lain: font uji
     sekeluarga dengan font latih; data nyata tanpa bagian validasi; aksara langka HANYA bila run resmi tidak memakai
     sisipan aksara langka; jumlah run di rantai, seed, kelengkapan rantai. Nilai `null` (jadwal baris run `--overfit` /
@@ -461,6 +462,26 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     berkas daftar mutan yang di-`require` di lingkup berkas lain menimpa variabelnya (`$id`), sehingga semua run
     memakai mutan terakhir: bungkus dengan fungsi; dan run "dasar tanpa mutan" wajib ada untuk menangkap hal semacam
     itu.
+    **Putaran ketiga (2026-10-06, tinjauan verifikasi atas `9955ed2`):** 35 mutan baru peninjau terhadap kode yang
+    diubah putaran kedua SEMUANYA lolos (15 di dua skrip ekspor, 20 di sisi web): tiap putaran perbaikan menambah kode
+    yang test-nya belum pernah diuji mutasi. Penyebab yang berulang: (1) repo palsu test memakai checkpoint kontrol
+    tanpa argumen sebenarnya, jadi pasangan kontrol yang tidak sah tidak pernah terlihat (kini `sibling()` menyalin
+    argumen run resmi); (2) pembantu baca-halaman memeriksa lebih sedikit daripada yang tampil (kotak catatan kosong,
+    nama langkah alur, label pembaca layar); (3) `assertCardRejected` menerima pengecualian turunan, jadi galat
+    penyimpanan lolos sebagai "kartu ditolak" (kini kelasnya harus persis sama); (4) aturan yang dipakai dua halaman
+    hanya diuji di satu halaman (run terjemahan di Ringkasan); (5) uji tampil saat impor harus dibuktikan merender
+    kartu CALON (penyusun tampilan mencatat `generated` yang dirender), bukan sekadar "render gagal = ditolak".
+    Sesudah diperkuat, 692 kerusakan satu-hal semuanya menggagalkan test: 197 di `export_methods.py`, 87 di
+    `export_datasets.py`, 408 di sisi web (importir kartu 118, perintah impor 30, `Metode.php` 86, `Dataset.php` 67,
+    tampilan Metode 49 dan Dataset 46, `TranslationRun` 6, Ringkasan, `LineAnnotation`, `TranslationService`
+    masing-masing 2). Dua mutan web (kueri di luar transaksi; `try/catch` pengganti `Schema::hasTable`) hanya mati di
+    PostgreSQL: mutan yang lolos di SQLite WAJIB dijalankan dengan `-c phpunit.pgsql.xml` sebelum disebut lolos.
+    Jebakan baru: tipe kunci yang diperketat bisa menghidupkan mutan lama (test "angka dalam tanda kutip" untuk tipe
+    `count` ikut pindah ke `int`, jadi mutan `count` lolos sampai ada test pada kunci yang masih `count`); laptop yang
+    memakai baterai menjalankan run gabungan (2 pytest + 3 PHPUnit) hanya ~2 mutan web per menit, sedangkan penjalan
+    yang menjalankan dulu kelas test terdekat dengan berkas yang dirusak dan berhenti di kegagalan pertama ~12 per
+    menit (seluruh suite hanya untuk mutan yang lolos tahap itu); proses latar yang dilepas dengan `( ... &)` tidak
+    ikut mati saat tugasnya dihentikan: cari dan hentikan lewat baris perintahnya.
     **Menu Metode (permintaan user 2026-10-05: "pada sidebar tambahkan menu method/machine learning, jadi disana list
     method atau machine learning yang digunakan"; isi dan pengelompokannya keputusan Claude, belum dikonfirmasi):**
     `Pages/Metode.php`, kelompok Hasil di bawah Dataset, rute `/metode`. Isinya dari **kartu metode**
@@ -506,7 +527,8 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     poin, 4 operasi tiruan pindaian −28,63), dengan catatan satu seed, kumulatif, dan rotate yang menaikkan G3 12,79
     poin.
     (e) Rantai checkpoint yang terpotong (checkpoint leluhur sudah dihapus) tidak dilaporkan "dari bobot acak"
-    (`chain_complete`); kalimat OneCycle dihitung dari langkah yang DIRENCANAKAN (3 dari 4 run sebelum run resmi
+    (`chain_complete`), dan pengantar kelompok pembaca aksara serta ubin halaman hanya menulis "dilatih dari nol" bila
+    rantainya utuh; kalimat OneCycle dihitung dari langkah yang DIRENCANAKAN (3 dari 4 run sebelum run resmi
     dihentikan sebelum siklusnya selesai).
     (f) Font tiap run: nama di log -> jumlah di ekspor hasil (hanya bila tidak bertentangan dengan argumen
     checkpoint: run tanpa `--extra-fonts` tidak bisa punya lebih dari font inti) -> folder sekarang, dan bila folder

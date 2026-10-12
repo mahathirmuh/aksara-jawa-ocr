@@ -826,7 +826,7 @@ def test_gates_and_beam_evidence_follow_what_the_results_contain(tmp_path):
 
     # Hasil tanpa gerbang G4 (ekspor lama): tokenizer tidak diberi bukti, dan G4 tidak disebut di daftar gerbang.
     write_manifest(root, {**manifest, "gates": manifest["gates"][:3]})
-    order = {m["key"]: m for m in em.ocr_group(model, tokenizer, em.Evidence(root))["methods"]}["visual_order"]
+    order = {m["key"]: m for m in em.ocr_group(model, tokenizer, em.Evidence(root), True)["methods"]}["visual_order"]
     assert order["evidence"] is None and order["evidence_source"] is None
     gates = evaluation()["gates"]
     assert gates["evidence"] == "G1 0,27% · G2 1,20% · G3 20,00% (belum tercapai)."
@@ -836,17 +836,17 @@ def test_gates_and_beam_evidence_follow_what_the_results_contain(tmp_path):
     # Gerbang G4 tanpa sumber di manifest: manifest itu sendiri sumbernya.
     bare = dict(manifest["gates"][3], source=None)
     write_manifest(root, {**manifest, "gates": manifest["gates"][:3] + [bare]})
-    order = {m["key"]: m for m in em.ocr_group(model, tokenizer, em.Evidence(root))["methods"]}["visual_order"]
+    order = {m["key"]: m for m in em.ocr_group(model, tokenizer, em.Evidence(root), True)["methods"]}["visual_order"]
     assert order["evidence_source"] == "out/results/manifest.json"
 
     # Charset tanpa spasi, dan dengan dua karakter di luar blok Jawa: kalimat lapisan keluaran mengikutinya.
     def head(codes):
-        return {m["key"]: m for m in em.ocr_group(model, {**tokenizer, "charset": codes}, em.Evidence(root))["methods"]}["head"]
+        return {m["key"]: m for m in em.ocr_group(model, {**tokenizer, "charset": codes}, em.Evidence(root), True)["methods"]}["head"]
     assert "2 karakter aksara Jawa (aksara, sandhangan, angka, pada), dan satu kelas kosong." in head(["U+A98F", "U+A992"])["summary"]
     assert "1 karakter aksara Jawa (aksara, sandhangan, angka, pada), 2 karakter lain, dan satu kelas kosong." in head(
         ["U+0020", "U+002D", "U+A98F"])["summary"]
     # Model satu arah (bukan arsitektur proyek ini): butirnya tidak menyebut "dua arah".
-    one_way = {m["key"]: m for m in em.ocr_group({**model, "bidirectional": False}, tokenizer, em.Evidence(root))["methods"]}["bilstm"]
+    one_way = {m["key"]: m for m in em.ocr_group({**model, "bidirectional": False}, tokenizer, em.Evidence(root), True)["methods"]}["bilstm"]
     assert one_way["name"] == "LSTM" and "kanan ke kiri" not in one_way["summary"]
 
     # Tanpa berkas pembanding sama sekali: jumlah pengambilan ulang = bawaan scripts/compare_runs.py, selang tidak disebut.
@@ -893,7 +893,7 @@ def test_gates_and_beam_evidence_follow_what_the_results_contain(tmp_path):
     # c06: persen gerbang G4 dibaca dari manifest, bukan diketik.
     low = dict(manifest["gates"][3], value=0.95)
     write_manifest(root, {**manifest, "gates": manifest["gates"][:3] + [low]})
-    order = {m["key"]: m for m in em.ocr_group(model, tokenizer, em.Evidence(root))["methods"]}["visual_order"]
+    order = {m["key"]: m for m in em.ocr_group(model, tokenizer, em.Evidence(root), True)["methods"]}["visual_order"]
     assert order["evidence"].startswith("Gerbang G4, 95%: ")
     write_manifest(root, manifest)
 
@@ -1031,13 +1031,20 @@ def test_training_sentences_follow_the_chain_and_the_logged_device(tmp_path):
 
     # F07, dari ujung ke ujung: checkpoint awal rantai dihapus dari mesin. Kartu mencatat rantainya tidak lengkap, dan
     # butirnya tidak mengaku "dari bobot acak".
-    assert build(root)["chain_complete"] is True
+    whole = build(root)
+    assert whole["chain_complete"] is True
+    scratch = ("Satu model membaca seluruh baris sekaligus, tanpa memotong per karakter. Arsitekturnya baku (CRNN, Shi dkk. "
+               "2015; CTC, Graves dkk. 2006)")
+    assert whole["groups"][0]["intro"] == scratch + " dan dilatih dari nol, bukan dari model pralatih."
     (root / "out/checkpoints/runA/last_snapshot.pt").unlink()
     cut_card = build(root)
     assert cut_card["chain_complete"] is False
     staged = by_key(cut_card)["staged"]
     assert staged["summary"].startswith("Model resmi bukan hasil satu kali latih: ") and "bobot acak" not in staged["summary"]
     assert dict(staged["settings"])["Rantai run"] == f"… → {RUN}"
+    # Begitu juga pengantar kelompok pembaca aksara: "dilatih dari nol" hanya bila rantainya terbaca sampai bobot acak.
+    assert cut_card["groups"][0]["intro"] == scratch + "."
+    assert "dari nol" not in json.dumps(cut_card, ensure_ascii=False)
 
 
 def test_recipe_changes_name_what_was_added_removed_or_left_alone():

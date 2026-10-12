@@ -530,7 +530,9 @@ def ablation_evidence(rows: list[dict], seeds: list) -> tuple[str, str] | None:
     return text, note
 
 
-def ocr_group(model: dict, tokenizer: dict, evidence: Evidence) -> dict:
+def ocr_group(model: dict, tokenizer: dict, evidence: Evidence, complete: bool) -> dict:
+    """Butir pembaca aksara. `complete` = rantai checkpoint run resmi terbaca utuh sampai bobot acak: hanya saat itu
+    kartu boleh menulis "dilatih dari nol" (aturan yang sama dengan butir pelatihan bertahap dan ubin halaman)."""
     params = model["parameters"]
     stats = tokenizer["stats"]
     gate = evidence.gates.get("G4")
@@ -543,7 +545,8 @@ def ocr_group(model: dict, tokenizer: dict, evidence: Evidence) -> dict:
         "key": "ocr",
         "title": "Pembaca aksara",
         "intro": "Satu model membaca seluruh baris sekaligus, tanpa memotong per karakter. Arsitekturnya baku (CRNN, "
-                 "Shi dkk. 2015; CTC, Graves dkk. 2006) dan dilatih dari nol, bukan dari model pralatih.",
+                 "Shi dkk. 2015; CTC, Graves dkk. 2006)"
+                 + (" dan dilatih dari nol, bukan dari model pralatih." if complete else "."),
         "methods": [
             entry("cnn", "CNN (jaringan konvolusi)", "model", "official",
                   f"Mengubah piksel citra baris menjadi ciri visual. Tinggi citra {model['height']} piksel dipampatkan "
@@ -1057,7 +1060,7 @@ def build(root: Path = ROOT, run: str = OFFICIAL_RUN, test_font_dir: Path = TEST
             if row.get("params") not in (None, model["parameters"]["total"]):
                 raise SystemExit(f"log run {run} mencatat {row['params']} parameter, model {model['parameters']['total']}")
     groups = [
-        ocr_group(model, tokenizer, evidence),
+        ocr_group(model, tokenizer, evidence, complete),
         data_group(run, args, {**fonts[-1], "recorded": recorded, "chain": fonts[:-1]}, real, evidence, root),
         training_group(links, complete, code_facts(), device, [facts["train"] for facts in fonts]),
         decoding_group(key or "", evidence, root),
