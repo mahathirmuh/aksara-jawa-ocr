@@ -62,6 +62,45 @@ class AksaraWriterTest extends TestCase
         $this->assertSame('ꦊꦩꦃ ꦉꦒ ꦠꦽꦱ꧀ꦤ ꦥꦚ꧀ꦕꦶ ꧇꧒꧐꧒꧖꧇', AksaraWriter::fromLatin('lemah rega tresna panci 2026'));
     }
 
+    public function test_names_use_the_dictionary_spelling_first_then_the_murda_and_swara_rule(): void
+    {
+        // Bawaannya mati: huruf besar tidak mengubah apa pun, jadi hasil lama dan angka kecocokan kamus tetap.
+        $text = 'Aku lunga menyang Surabaya karo Bima.';
+        $this->assertSame('ꦲꦏꦸ ꦭꦸꦔ ꦩꦼꦚꦁ ꦱꦸꦫꦧꦪ ꦏꦫꦺꦴ ꦧꦶꦩ꧉', AksaraWriter::fromLatin($text));
+        $this->assertSame(AksaraWriter::fromLatin(mb_strtolower($text)), AksaraWriter::fromLatin($text));
+
+        // Lapis 1: nama yang ada di kamus memakai ejaan kamus (Bima: ba murda). Lapis 2: nama lain mendapat satu
+        // murda pada konsonan pertama yang punya (Surabaya: sa). Kata pertama kalimat bukan nama (Aku).
+        $this->assertSame(['aksara' => 'ꦲꦏꦸ ꦭꦸꦔ ꦩꦼꦚꦁ ꦯꦸꦫꦧꦪ ꦏꦫꦺꦴ ꦨꦶꦩ꧉', 'dictionary' => ['bima'], 'rule' => ['surabaya']],
+            AksaraWriter::write($text));
+        $this->assertSame(AksaraWriter::write($text)['aksara'], AksaraWriter::fromLatin($text, names: true));
+        // Ejaan kamus berlaku juga di awal kalimat, dan tidak diubah kaidah (Suwarnabhumi: murda di tengah, dua).
+        $this->assertSame(['aksara' => 'ꦄꦂꦗꦸꦤ ꦭꦤ꧀ ꦆꦤ꧀ꦢꦿ꧉ ꦱꦸꦮꦂꦟꦨꦹꦩꦶ', 'dictionary' => ['arjuna', 'indra', 'suwarnabhumi'], 'rule' => []],
+            AksaraWriter::write('Arjuna lan Indra. Suwarnabhumi'));
+        $names = AksaraWriter::dictionaryNames();
+        $this->assertSame('ꦨꦶꦩ', $names['bima']);
+        $this->assertGreaterThanOrEqual(10, count($names));
+
+        // Kaidah: vokal pembuka -> swara dan sesudah itu tanpa murda (Ésti, Anto); pepet tidak punya swara, jadi
+        // murdanya tetap dicari (Eko); n di depan j = nya murda (Njoto); hanya SATU murda per nama (Kartini);
+        // penutup suku kata tidak dijadikan murda (Rangga: ga, bukan cecak); nama tanpa keduanya tertulis biasa dan
+        // tidak dilaporkan (Rara); tiap bagian nama bertanda hubung dinilai sendiri.
+        $write = fn (string $name) => AksaraWriter::write('aku lan '.$name);
+        $this->assertSame('ꦲꦏꦸ ꦭꦤ꧀ ꦌꦱ꧀ꦠꦶ', $write('Ésti')['aksara']);
+        $this->assertSame('ꦲꦏꦸ ꦭꦤ꧀ ꦄꦤ꧀ꦠꦺꦴ', $write('Anto')['aksara']);
+        $this->assertSame('ꦲꦏꦸ ꦭꦤ꧀ ꦲꦼꦑꦺꦴ', $write('Eko')['aksara']);
+        $this->assertSame('ꦲꦏꦸ ꦭꦤ꧀ ꦘ꧀ꦗꦺꦴꦠꦺꦴ', $write('Njoto')['aksara']);
+        $this->assertSame('ꦲꦏꦸ ꦭꦤ꧀ ꦑꦂꦠꦶꦤꦶ', $write('Kartini')['aksara']);
+        $this->assertSame('ꦲꦏꦸ ꦭꦤ꧀ ꦫꦁꦓ', $write('Rangga')['aksara']);
+        $this->assertSame(['aksara' => 'ꦲꦏꦸ ꦭꦤ꧀ ꦫꦫꦯꦤ꧀ꦠꦁ', 'dictionary' => [], 'rule' => ['santang']], $write('Rara-Santang'));
+        $this->assertSame([], $write('Rara')['rule']);
+        // Kata pertama sesudah titik, tanda tanya, tanda seru, atau baris baru juga bukan nama; sesudah koma tetap nama.
+        $this->assertSame([], AksaraWriter::write("Kowe lunga? Sapa kuwi! Bapak\nSimbah")['rule']);
+        $this->assertSame(['budi'], AksaraWriter::write('pak, Budi teka')['rule']);
+        // Huruf kecil tidak pernah dianggap nama, juga bila katanya ada di daftar nama kamus.
+        $this->assertSame(['aksara' => 'ꦲꦏꦸ ꦧꦶꦩ', 'dictionary' => [], 'rule' => []], AksaraWriter::write('aku bima'));
+    }
+
     public function test_round_trips_through_the_latin_transliterator(): void
     {
         // Arah balik menandai pepet sebagai ê; selain itu kalimatnya kembali utuh.

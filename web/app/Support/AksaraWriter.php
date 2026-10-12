@@ -20,8 +20,18 @@ use Normalizer;
  *    aksara 2.134 lema kamus (Wiktionary): tanpa pengecualian untuk keret, cerek, dan nc/nj. Tanpa $standard hasilnya
  *    mengikuti konvensi korpus OCR (scripts/translit/translit.js), dipakai untuk mencocokkan aturan dengan alat lama.
  *
- * Yang sengaja tidak dilakukan: aksara murda dan swara untuk nama, pada lingsa yang dilebur dengan pangkon, dan
- * tanda tanya/seru (aksara Jawa tidak punya; dibiarkan apa adanya).
+ * Nama (pilihan, $names; bawaannya mati supaya hasil lama dan angka kecocokan kamus tidak berubah). Kata berhuruf
+ * besar ditulis berlapis:
+ *  1. nama yang ada di kamus dengan ejaan aksara bermurda/berswara memakai ejaan kamus itu apa adanya (Bima,
+ *     Suwarnabhumi, Arjuna), juga di awal kalimat;
+ *  2. kata berhuruf besar lain yang bukan kata pertama kalimat dianggap nama: berawalan vokal -> aksara swara (A, I,
+ *     U, É, O; pepet tidak punya), selain itu SATU aksara murda pada konsonan pertama yang punya bentuk murda (na,
+ *     ka, ta, sa, pa, nya, ga, ba). Lapis ini kaidah umum, BELUM diperiksa pembaca aksara: kamus hanya memuat belasan
+ *     nama bermurda/berswara, terlalu sedikit untuk menurunkan aturannya, dan di situ nama berswara tidak diberi murda.
+ * Huruf besar di awal kalimat bukan tanda nama, jadi kata pertama kalimat hanya kena lapis 1.
+ *
+ * Yang sengaja tidak dilakukan: pada lingsa yang dilebur dengan pangkon, dan tanda tanya/seru (aksara Jawa tidak
+ * punya; dibiarkan apa adanya).
  */
 final class AksaraWriter
 {
@@ -63,42 +73,135 @@ final class AksaraWriter
     ];
 
     private const PANGKON = '꧀';
+
     private const CAKRA = 'ꦿ';
+
     private const PENGKAL = 'ꦾ';
+
     private const KERET = 'ꦽ';
+
     private const PA_CEREK = 'ꦉ';
+
     private const NGA_LELET = 'ꦊ';
+
     private const PADA_PANGKAT = '꧇';
 
-    public static function fromLatin(string $text, bool $standard = true): string
+    /** Konsonan yang punya bentuk murda. */
+    private const MURDA = ['n' => 'ꦟ', 'k' => 'ꦑ', 't' => 'ꦡ', 's' => 'ꦯ', 'p' => 'ꦦ', 'ny' => 'ꦘ', 'g' => 'ꦓ', 'b' => 'ꦨ'];
+
+    /** Vokal pembuka nama: aksara swara. Pepet tidak punya aksara swara. */
+    private const SWARA = ['a' => 'ꦄ', 'i' => 'ꦆ', 'u' => 'ꦈ', 'é' => 'ꦌ', 'è' => 'ꦌ', 'o' => 'ꦎ'];
+
+    /** Penanda "kata ini berhuruf besar", disisipkan sebelum teks dijadikan huruf kecil. */
+    private const CAPITAL = "\x01";
+
+    private const DICTIONARY = __DIR__.'/../../database/dictionaries/jv.jsonl.gz';
+
+    /** @var array<string, string>|null nama di kamus (huruf kecil) => ejaan aksaranya */
+    private static ?array $names = null;
+
+    public static function fromLatin(string $text, bool $standard = true, bool $names = false): string
     {
-        $text = mb_strtolower(Normalizer::normalize($text, Normalizer::FORM_C) ?: $text);
-        $text = strtr($text, self::LATIN_VARIANTS);
+        return self::write($text, $standard, $names)['aksara'];
+    }
+
+    /**
+     * Seperti fromLatin() dengan nama, ditambah kata mana yang ditulis sebagai nama dan atas dasar apa:
+     * 'dictionary' = ejaan kamus, 'rule' = kaidah murda/swara (belum diperiksa pembaca aksara).
+     *
+     * @return array{aksara: string, dictionary: list<string>, rule: list<string>}
+     */
+    public static function write(string $text, bool $standard = true, bool $names = true): array
+    {
+        $text = Normalizer::normalize($text, Normalizer::FORM_C) ?: $text;
+        $text = str_replace(self::CAPITAL, '', $text);
+        if ($names) {
+            $text = preg_replace('/(?<![\p{L}\p{M}])(?=\p{Lu})/u', self::CAPITAL, $text) ?? $text;
+        }
+        $text = strtr(mb_strtolower($text), self::LATIN_VARIANTS);
+        $known = $names ? self::dictionaryNames() : [];
+        $found = ['dictionary' => [], 'rule' => []];
+        $first = true;   // kata berikutnya adalah kata pertama kalimat
 
         // Potongan: kata, bilangan (boleh berpemisah titik/koma/titik dua: 2,5 atau 10:30), atau satu karakter lain.
-        $aksara = preg_replace_callback('/[a-zéè]+|[0-9]+(?:[.,:][0-9]+)*|(?P<join>(?<=[a-zéè])[-‐‑–—](?=[a-zéè]))|./us', function (array $m) use ($standard) {
+        $pattern = '/\x01?[a-zéè]+|[0-9]+(?:[.,:][0-9]+)*|(?P<join>(?<=[a-zéè])[-‐‑–—](?=\x01?[a-zéè]))|./us';
+        $aksara = preg_replace_callback($pattern, function (array $m) use ($standard, $known, &$found, &$first) {
             $piece = $m[0];
             // Tanda hubung di antara dua kata (kata ulang, gabungan): aksara Jawa tidak memakainya; kedua kata ditulis berurutan.
             if (($m['join'] ?? '') !== '') {
                 return '';
             }
+            $capital = str_starts_with($piece, self::CAPITAL);
+            $piece = $capital ? substr($piece, 1) : $piece;
+            if ($piece === '') {
+                return '';
+            }
             if (preg_match('/^[a-zéè]/u', $piece)) {
-                return self::word($piece, $standard);
+                [$opens, $first] = [$first, false];
+                if ($capital && isset($known[$piece])) {
+                    $found['dictionary'][] = $piece;
+
+                    return $known[$piece];
+                }
+                $plain = self::word($piece, $standard);
+                if ($capital && ! $opens) {
+                    $named = self::word($piece, $standard, true);
+                    // Nama tanpa vokal pembuka berswara dan tanpa konsonan bermurda (Rara, Laila) tertulis sama.
+                    if ($named !== $plain) {
+                        $found['rule'][] = $piece;
+                    }
+
+                    return $named;
+                }
+
+                return $plain;
             }
             if (ctype_digit($piece[0])) {
+                $first = false;
                 $digits = preg_replace_callback('/[0-9]/', fn (array $d) => mb_chr(0xA9D0 + (int) $d[0]), $piece);
 
                 return $standard ? self::PADA_PANGKAT.$digits.self::PADA_PANGKAT : $digits;
+            }
+            if (in_array($piece, ['.', '!', '?', "\n"], true)) {
+                $first = true;
             }
 
             return self::PUNCTUATION[$piece] ?? $piece;
         }, $text) ?? $text;
 
         // Titik dua sesudah bilangan ("1945: ...") jatuh tepat di pada pangkat penutup bilangan itu: satu saja cukup.
-        return preg_replace('/'.self::PADA_PANGKAT.'{2,}/u', self::PADA_PANGKAT, $aksara) ?? $aksara;
+        $aksara = preg_replace('/'.self::PADA_PANGKAT.'{2,}/u', self::PADA_PANGKAT, $aksara) ?? $aksara;
+
+        return ['aksara' => $aksara, 'dictionary' => array_values(array_unique($found['dictionary'])),
+            'rule' => array_values(array_unique($found['rule']))];
     }
 
-    private static function word(string $word, bool $standard): string
+    /**
+     * Nama satu kata di kamus bahasa Jawa (lema berhuruf besar) yang ejaan aksaranya memakai aksara murda atau swara.
+     *
+     * @return array<string, string>
+     */
+    public static function dictionaryNames(): array
+    {
+        if (self::$names !== null) {
+            return self::$names;
+        }
+        self::$names = [];
+        $special = '/['.implode('', self::MURDA).implode('', array_unique(self::SWARA)).']/u';
+        foreach (is_file(self::DICTIONARY) ? gzfile(self::DICTIONARY) : [] as $line) {
+            $entry = json_decode($line, true);
+            $word = Normalizer::normalize((string) ($entry['word'] ?? ''), Normalizer::FORM_C) ?: '';
+            $aksara = (string) ($entry['aksara'] ?? '');
+            if ($aksara === '' || ! preg_match('/^\p{Lu}[\p{L}\p{M}]*$/u', $word) || ! preg_match($special, $aksara)) {
+                continue;
+            }
+            self::$names[strtr(mb_strtolower($word), self::LATIN_VARIANTS)] ??= $aksara;
+        }
+
+        return self::$names;
+    }
+
+    private static function word(string $word, bool $standard, bool $name = false): string
     {
         preg_match_all('/ng|ny|dh|th|[bcdfghjklmnpqrstvwxyz]|[aiueoéè]/u', $word, $found);
         $tokens = $found[0];
@@ -106,9 +209,18 @@ final class AksaraWriter
         $out = '';
         $afterVowel = false;      // token sebelumnya menutup dengan vokal: ng/r/h berikutnya bisa jadi penutup suku kata
         $afterPangkon = false;    // aksara berikutnya menjadi pasangan
+        // Nama: vokal pembuka -> aksara swara (lalu tanpa murda); selain itu satu murda pada konsonan pertama yang punya.
+        $murda = $name;
         for ($i = 0; $i < $count;) {
             $token = $tokens[$i];
             if (isset(self::VOWELS[$token])) {
+                if ($name && $i === 0 && isset(self::SWARA[$token])) {
+                    $out .= self::SWARA[$token];
+                    [$afterVowel, $afterPangkon, $murda] = [true, false, false];
+                    $i++;
+
+                    continue;
+                }
                 $out .= 'ꦲ'.self::VOWELS[$token];
                 [$afterVowel, $afterPangkon] = [true, false];
                 $i++;
@@ -118,12 +230,14 @@ final class AksaraWriter
             $next = $tokens[$i + 1] ?? null;
             $afterNext = $tokens[$i + 2] ?? null;
             $closes = $afterVowel && isset(self::FINALS[$token]);
+            $big = $murda && ! $closes && isset(self::MURDA[$token]);
+            $murda = $murda && ! $big;
             if ($next !== null && isset(self::VOWELS[$next])) {
-                $out .= self::syllable($token, '', $next, $standard, $afterPangkon);
+                $out .= self::syllable($token, '', $next, $standard, $afterPangkon, $big);
                 [$afterVowel, $afterPangkon] = [true, false];
                 $i += 2;
             } elseif (! $closes && ($next === 'r' || $next === 'y') && $afterNext !== null && isset(self::VOWELS[$afterNext])) {
-                $out .= self::syllable($token, $next, $afterNext, $standard, $afterPangkon);
+                $out .= self::syllable($token, $next, $afterNext, $standard, $afterPangkon, $big);
                 [$afterVowel, $afterPangkon] = [true, false];
                 $i += 3;
             } elseif ($closes) {
@@ -133,7 +247,7 @@ final class AksaraWriter
             } else {
                 // Sengau di depan c/j ditulis nya: panci = pa-nya-pangkon-ci.
                 $nasal = $standard && $token === 'n' && ($next === 'c' || $next === 'j') ? 'ny' : $token;
-                $out .= self::CONSONANTS[$nasal].self::PANGKON;
+                $out .= ($big ? self::MURDA[$nasal] : self::CONSONANTS[$nasal]).self::PANGKON;
                 [$afterVowel, $afterPangkon] = [false, true];
                 $i++;
             }
@@ -142,9 +256,9 @@ final class AksaraWriter
         return $out;
     }
 
-    private static function syllable(string $consonant, string $medial, string $vowel, bool $standard, bool $afterPangkon): string
+    private static function syllable(string $consonant, string $medial, string $vowel, bool $standard, bool $afterPangkon, bool $murda = false): string
     {
-        $base = self::CONSONANTS[$consonant];
+        $base = $murda ? self::MURDA[$consonant] : self::CONSONANTS[$consonant];
         $pepet = $vowel === 'e';
         if ($medial === 'r') {
             return $standard && $pepet ? $base.self::KERET : $base.self::CAKRA.self::VOWELS[$vowel];

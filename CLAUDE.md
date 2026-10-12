@@ -300,6 +300,15 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     (2) ejaan baku (pa cerek, nga lelet, keret, n di depan c/j ditulis nya, angka diapit pada pangkat) diturunkan dari
     ejaan aksara lema kamus, bukan dari ingatan: sama di 2.173 dari 2.231 lema berejaan baku (97,4%; mode korpus 93,1%; entri varian ejaan tidak dihitung). Angka itu
     konstanta `AksaraWriter::DICTIONARY_AGREEMENT`, dijaga test dan ikut berubah bila kamus dibangun ulang.
+    **Aksara murda dan swara untuk nama (permintaan user 2026-10-12: "sepertinya perlu di handling", lalu "sesuai
+    baiknya darimu"):** `AksaraWriter::write()` / `fromLatin(names: true)`, kotak centang di halaman Terjemahan,
+    bawaannya MATI supaya hasil lama dan `DICTIONARY_AGREEMENT` tidak berubah. Berlapis: (i) nama satu kata di kamus
+    yang ejaan aksaranya bermurda/berswara memakai ejaan kamus apa adanya (11 nama: Bima, Suwarnabhumi, Arjuna, Indra,
+    ...), juga di awal kalimat; (ii) kata berhuruf besar lain yang bukan kata pertama kalimat = nama: vokal pembuka ->
+    aksara swara (pepet tidak punya) dan sesudah itu tanpa murda, selain itu SATU murda pada konsonan pertama yang
+    punya bentuk murda. Lapis (ii) kaidah umum dari pengetahuan Claude, TIDAK diturunkan dari data (kamus hanya punya
+    4 entri bermurda dan 20 berswara, pemakaiannya tidak seragam) dan belum diperiksa pembaca aksara; halaman
+    menyebut kata mana yang ditulis dengan kaidah itu. Ganti lapis (ii) bila ada pedoman ejaan atau pembaca aksara.
     (3) e tanpa tanda: 53% kata ber-e benar bila semua dibaca pepet; leksikon `web/database/dictionaries/jv-taling.json`
     (8.714 kata, `web/tools/taling_lexicon.py`: 8.615 dari artikel Wikipedia Jawa yang bertanda kuat, 99 dari lema
     kamus Wiktionary bahasa Inggris) menaikkannya ke 90% pada artikel yang ditahan. Aturan "e akhir kata = é" tidak menambah apa-apa di atas leksikon.
@@ -590,7 +599,7 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     `phpunit.xml` memaksa SQLite in-memory (`force="true"`, jadi `DB_*` yang tertinggal di shell diabaikan) dan
     `tests/TestCase.php::createApplication` menolak database bernama `its_aksara` sebelum migrasi. Test memakai folder
     sementara untuk `storage/app/mt` (dulu `TranslationTest` menimpa hasil NLLB; dipulihkan dari DB lewat
-    `php artisan aksara:translate --dump`). 167 test lolos di SQLite dan di PostgreSQL uji (2026-10-06, sesudah perbaikan tinjauan ketiga menu Dataset dan Metode); 330 test Python.
+    `php artisan aksara:translate --dump`). 169 test lolos di SQLite (2026-10-12, sesudah nama bermurda/berswara; 167 di SQLite dan PostgreSQL uji pada 2026-10-06); 330 test Python.
     **Port:** Laravel 8010, layanan model 8011, layanan terjemahan 8012 — 8000/8001, 5173, dan 8020 dipakai proyek
     lain milik user di laptop yang sama (jangan dihentikan; cek dulu siapa yang mendengarkan sebelum memakai sebuah
     port, dan beri skrip sementara port 8030 ke atas). Test tetap bisa di SQLite in-memory

@@ -52,6 +52,10 @@ class Terjemahan extends Component
 
     public string $indonesian = '';
 
+    /** Tulis kata berhuruf besar sebagai nama (aksara murda dan swara); bawaannya mati. */
+    #[Url(as: 'nama', except: false)]
+    public bool $names = false;
+
     /** Kata yang tanda é/è-nya dipulihkan pada langkah terakhir (asal => hasil). */
     public array $restored = [];
 
@@ -85,7 +89,7 @@ class Terjemahan extends Component
     /** Tukar arah; hasil yang ada menjadi masukan arah sebaliknya. */
     public function swap(): void
     {
-        $output = $this->direction === 'id-jv' ? AksaraWriter::fromLatin($this->javanese) : $this->indonesian;
+        $output = $this->direction === 'id-jv' ? AksaraWriter::fromLatin($this->javanese, names: $this->names) : $this->indonesian;
         $this->direction = $this->direction === 'id-jv' ? 'jv-id' : 'id-jv';
         $this->text = trim($output) !== '' ? $output : $this->text;
         $this->reset('javanese', 'indonesian', 'restored', 'meta', 'error');
@@ -185,12 +189,15 @@ class Terjemahan extends Component
         $latin = $toJavanese ? $this->javanese : ($inputIsAksara ? Transliterator::toLatin($this->text) : $this->text);
         $hasLatin = trim($latin) !== '';
 
+        $written = $toJavanese && $hasLatin ? AksaraWriter::write($this->javanese, names: $this->names) : null;
+
         return view('livewire.pages.terjemahan', [
             'directions' => self::DIRECTIONS,
             'toJavanese' => $toJavanese,
             'inputIsAksara' => $inputIsAksara,
             'latinDraft' => $inputIsAksara ? $latin : null,
-            'aksara' => $toJavanese && $hasLatin ? AksaraWriter::fromLatin($this->javanese) : '',
+            'aksara' => $written['aksara'] ?? '',
+            'nameWords' => ['dictionary' => $written['dictionary'] ?? [], 'rule' => $written['rule'] ?? []],
             'speech' => $hasLatin ? SpeechLevel::classify($latin) : null,
             // Arti per kata di halaman Kamus: kata-kata pertama teks Jawa.
             'kamusQuery' => $hasLatin ? implode(' ', DictionarySearch::words($latin)) : '',

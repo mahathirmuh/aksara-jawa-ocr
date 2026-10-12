@@ -43,7 +43,7 @@ class TerjemahanTest extends TestCase
 
         $page = Livewire::test(Terjemahan::class)
             ->assertSee('Layanan terjemahan berjalan')
-            ->set('text', "Apakah kamu sudah makan? Rumahnya besar.")
+            ->set('text', 'Apakah kamu sudah makan? Rumahnya besar.')
             ->call('translate')
             ->assertHasNoErrors()
             // Tanda é dipulihkan pada teks Latin yang terlihat; aksara dihitung dari teks itu (taling, bukan pepet).
@@ -96,6 +96,28 @@ class TerjemahanTest extends TestCase
             // Pemisah baris teks asal dipertahankan di hasil.
             ->assertSet('indonesian', "Saya makan nasi.\nDia tidur.");
         Http::assertSent(fn (Request $request) => str_ends_with($request->url(), '/translate') && $request['texts'] === ['Aku mangan sega.', 'Dheweke turu.']);
+    }
+
+    public function test_names_are_written_with_murda_and_swara_only_when_asked(): void
+    {
+        Http::fake(['*' => Http::failedConnection()]);
+        $this->actingAs(User::factory()->create());
+
+        Livewire::test(Terjemahan::class)
+            ->set('javanese', 'Aku lunga menyang Surabaya karo Bima')
+            // Bawaannya mati: huruf besar tidak mengubah aksaranya.
+            ->assertSet('names', false)
+            ->assertSee('ꦲꦏꦸ ꦭꦸꦔ ꦩꦼꦚꦁ ꦱꦸꦫꦧꦪ ꦏꦫꦺꦴ ꦧꦶꦩ')
+            ->assertSee('Tulis nama dengan aksara murda dan swara')
+            ->assertDontSee('Menurut ejaan kamus')->assertDontSee('belum diperiksa pembaca aksara: surabaya')
+            // Dinyalakan: nama di kamus memakai ejaan kamus, nama lain memakai kaidah, dan keduanya disebut.
+            ->set('names', true)
+            ->assertSee('ꦲꦏꦸ ꦭꦸꦔ ꦩꦼꦚꦁ ꦯꦸꦫꦧꦪ ꦏꦫꦺꦴ ꦨꦶꦩ')
+            ->assertSee('Menurut ejaan kamus: bima.')
+            ->assertSee('Menurut kaidah umum, belum diperiksa pembaca aksara: surabaya.')
+            // Menukar arah membawa aksara yang sedang tampil.
+            ->call('swap')
+            ->assertSet('text', 'ꦲꦏꦸ ꦭꦸꦔ ꦩꦼꦚꦁ ꦯꦸꦫꦧꦪ ꦏꦫꦺꦴ ꦨꦶꦩ');
     }
 
     public function test_script_conversion_works_without_the_service_and_failures_are_explained(): void

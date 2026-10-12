@@ -72,7 +72,10 @@ php artisan aksara:translate                        # sumber: transliterasi manu
 - `App\Support\AksaraWriter::fromLatin()` menulis bahasa Jawa Latin dalam aksara Jawa menurut aturan: vokal tanpa
   konsonan pembuka memakai ha, ng/r/h penutup suku kata menjadi cecak/layar/wignyan, konsonan mati diberi pangkon,
   rê/lê ditulis pa cerek/nga lelet, konsonan + rê memakai keret, n di depan c/j ditulis nya, angka diapit pada
-  pangkat. Tidak memakai aksara murda/swara. Ejaannya sama dengan 2.173 dari 2.231 lema berejaan baku di kamus bahasa Jawa (97,4%;
+  pangkat. Aksara murda dan swara untuk nama adalah pilihan (kotak centang di halaman Terjemahan, `?nama=1`; bawaannya
+  mati): nama yang ada di kamus memakai ejaan kamusnya, kata berhuruf besar lain yang bukan kata pertama kalimat
+  memakai kaidah umum (vokal pembuka menjadi aksara swara, selain itu satu murda pada konsonan pertama yang punya),
+  dan halaman menyebut kata mana yang ditulis dengan kaidah itu, yang belum diperiksa pembaca aksara. Ejaannya sama dengan 2.173 dari 2.231 lema berejaan baku di kamus bahasa Jawa (97,4%;
   `tests/Unit/AksaraWriterTest.php` menjaga angka itu).
 - `App\Support\TalingRestorer` memulihkan é/è pada kata tanpa tanda memakai `database/dictionaries/jv-taling.json`
   (8.714 kata: 8.615 dari Wikipedia bahasa Jawa dan 99 dari lema kamus Wiktionary bahasa Inggris; pada artikel

@@ -96,6 +96,18 @@
                                 @endif
                             </div>
                             <div class="translate-output jv" x-ref="aksara" lang="jv-Java" wire:key="hasil-aksara">{{ $aksara !== '' ? $aksara : '–' }}</div>
+                            <div class="flex flex-col gap-1 text-xs text-muted" data-names>
+                                <label class="flex items-center gap-2" for="terjemahan-nama">
+                                    <input type="checkbox" id="terjemahan-nama" wire:model.live="names">
+                                    <span>Tulis nama dengan aksara murda dan swara (kata berhuruf besar, kecuali kata pertama kalimat)</span>
+                                </label>
+                                @if ($names && $nameWords['dictionary'])
+                                    <span data-names-dictionary>Menurut ejaan kamus: {{ implode(', ', $nameWords['dictionary']) }}.</span>
+                                @endif
+                                @if ($names && $nameWords['rule'])
+                                    <span data-names-rule>Menurut kaidah umum, belum diperiksa pembaca aksara: {{ implode(', ', $nameWords['rule']) }}.</span>
+                                @endif
+                            </div>
                         </div>
                     @else
                         <div class="flex flex-col gap-2" x-data="{ copied: false }">
