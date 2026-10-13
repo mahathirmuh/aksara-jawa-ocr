@@ -26,6 +26,8 @@ class Perbandingan extends Component
         'crnn_fase7_track' => 'fase6_ctrl + 1.500 langkah dengan jarak antar-aksara acak',
         'crnn_fase7_track_rare' => 'sama dengan fase7_track + sisipan aksara langka yang disaring',
         'crnn_fase7_ctrl' => 'pembanding: langkah sama tanpa jarak tambahan',
+        'crnn_fase8_std' => 'fase7_track + 1.500 langkah dengan ejaan baku di separuh baris',
+        'crnn_fase8_ctrl' => 'pembanding: langkah sama tanpa ejaan baku',
     ];
 
     public function render()

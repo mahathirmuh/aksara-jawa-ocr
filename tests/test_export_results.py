@@ -29,8 +29,9 @@ from export_results import (  # noqa: E402
     optional_pipeline,
 )
 
-RARE, CTRL, TRACK, TRACK_RARE, CTRL7 = OPTIONAL_CHECKPOINTS  # urutan deklarasi = urutan baris di web
-OPTIONAL_KEYS = ["crnn_fase6_rare", "crnn_fase6_ctrl", "crnn_fase7_track", "crnn_fase7_track_rare", "crnn_fase7_ctrl"]
+RARE, CTRL, TRACK, TRACK_RARE, CTRL7, STD8, CTRL8 = OPTIONAL_CHECKPOINTS
+OPTIONAL_KEYS = ["crnn_fase6_rare", "crnn_fase6_ctrl", "crnn_fase7_track", "crnn_fase7_track_rare", "crnn_fase7_ctrl",
+                 "crnn_fase8_std", "crnn_fase8_ctrl"]
 RARE_CONFIG = ("crnn:fase6_rare@1500 (lanjutan fase5_fonts@1298) · 10 font · aug fase5 · "
                "+ aksara langka (sisip 0,3 · adeg-adeg 0,15) · greedy")
 CTRL_CONFIG = ("crnn:fase6_ctrl@1500 (lanjutan fase5_fonts@1298) · 10 font · aug fase5 · "
@@ -154,14 +155,14 @@ def test_add_optional_all_runs_fase6_then_fase7_with_config_from_checkpoint(tmp_
     assert included == [RARE, CTRL, TRACK, TRACK_RARE, CTRL7]
     k = keys(pipelines)
     at = k.index("crnn_fonts_beam")
-    assert k[at + 1: at + 7] == [*OPTIONAL_KEYS, "vlm_zeroshot"]
+    assert k[at + 1: at + 7] == [*OPTIONAL_KEYS[:5], "vlm_zeroshot"]  # run fase8 belum punya snapshot di sini
     assert k[:at + 1] == keys(PIPELINES)[:at + 1] and len(pipelines) == len(PIPELINES) + 5
     assert [p["config"] for p in pipelines[at + 1: at + 6]] == [RARE_CONFIG, CTRL_CONFIG, TRACK_CONFIG,
                                                                 TRACK_RARE_CONFIG, CTRL7_CONFIG]
     assert pipelines[at + 3] == {"key": "crnn_fase7_track", "label": "CRNN fase7_track", "kind": "crnn",
                                  "status": "done", "config": TRACK_CONFIG}
     assert [p["label"] for p in pipelines[at + 4: at + 6]] == ["CRNN fase7_track_rare", "CRNN fase7_ctrl"]
-    assert list(checkpoints) == [*CHECKPOINTS, *OPTIONAL_KEYS]
+    assert list(checkpoints) == [*CHECKPOINTS, *OPTIONAL_KEYS[:5]]
     assert checkpoints["crnn_fase7_track_rare"] == tmp_path / "fase7_track_rare" / "last_snapshot.pt"
     assert not set(OPTIONAL_KEYS) & set(keys(PIPELINES)) and not set(OPTIONAL_KEYS) & set(CHECKPOINTS)
 
@@ -579,3 +580,47 @@ def test_demo_service_decodes_with_the_beam_weights_tuned_for_its_checkpoint():
         pytest.skip("laporan beam run resmi tidak ada di mesin ini")
     chosen = json.loads(report.read_text(encoding="utf-8"))["dev"]["chosen"]
     assert (serve.ALPHA, serve.BETA) == (chosen["alpha"], chosen["beta"])
+
+
+def fase8_args(run: str, standard: float = 0.0, **kwargs) -> dict:
+    """`fase7_args` + opsi ejaan baku (ada sejak fase8), dengan jarak antar-aksara resep fase7_track."""
+    return {**fase7_args(run, kwargs.pop("track", 0.5), **kwargs), "standard_prob": standard}
+
+
+def test_fase8_runs_are_told_apart_by_the_standard_spelling_option():
+    # scripts/run_fase8.sh: fase8_std = resep fase7_track + --standard-prob 0.5; fase8_ctrl = sama tanpa ejaan baku.
+    check_optional_run(STD8, 1500, fase8_args("fase8_std", 0.5))
+    check_optional_run(CTRL8, 1500, fase8_args("fase8_ctrl"))
+    assert optional_pipeline(STD8, 1500, fase8_args("fase8_std", 0.5), "fase7_track@1500")["config"] == (
+        "crnn:fase8_std@1500 (lanjutan fase7_track@1500) · 10 font · aug fase5 · jarak antar-aksara p 0,5 hingga 0,3 em · "
+        "ejaan baku p 0,5 · greedy")
+    assert optional_pipeline(CTRL8, 1500, fase8_args("fase8_ctrl"), "fase7_track@1500")["config"] == (
+        "crnn:fase8_ctrl@1500 (lanjutan fase7_track@1500) · 10 font · aug fase5 · jarak antar-aksara p 0,5 hingga 0,3 em · "
+        "tanpa ejaan baku (pembanding) · greedy")
+    for spec, args, message in (
+            (STD8, fase8_args("fase8_std"), "crnn_fase8_std: run ejaan baku, tetapi standard_prob = 0"),
+            (CTRL8, fase8_args("fase8_ctrl", 0.5), "crnn_fase8_ctrl: run tanpa ejaan baku, tetapi standard_prob = 0.5"),
+            (STD8, fase8_args("fase8_std", 0.5, track=0.0), "crnn_fase8_std: run jarak antar-aksara, tetapi track_prob = 0"),
+            # Run lama (spesifikasinya tanpa kunci "standard") yang ternyata dilatih dengan ejaan baku: config-nya
+            # tidak menyebutnya, jadi ekspor berhenti.
+            (TRACK, fase8_args("fase7_track", 0.5), "crnn_fase7_track: run tanpa ejaan baku, tetapi standard_prob = 0.5"),
+            (CTRL7, fase8_args("fase7_ctrl", 0.25, track=0.0), "crnn_fase7_ctrl: run tanpa ejaan baku")):
+        with pytest.raises(SystemExit, match=message):
+            check_optional_run(spec, 1500, args)
+    # Checkpoint sebelum fase8 tidak punya opsinya: dianggap mati.
+    check_optional_run(TRACK, 1500, fase7_args("fase7_track", 0.5))
+    check_optional_run(TRACK, 1500, {**fase7_args("fase7_track", 0.5), "standard_prob": None})
+
+
+def test_add_optional_adds_the_fase8_runs_after_fase7(tmp_path):
+    root = fase7_dir(tmp_path, ["fase7_ctrl", "fase7_track_rare", "fase7_track"])
+    for run, standard in (("fase8_std", 0.5), ("fase8_ctrl", 0.0)):
+        save_ckpt(root / run / "last_snapshot.pt", 1500,
+                  fase8_args(run, standard, init=str(root / "fase7_track" / "last_snapshot.pt")))
+    pipelines, checkpoints, included = add_optional(PIPELINES, CHECKPOINTS, root)
+    assert included == [RARE, CTRL, TRACK, TRACK_RARE, CTRL7, STD8, CTRL8]
+    k = keys(pipelines)
+    at = k.index("crnn_fonts_beam")
+    assert k[at + 1: at + 9] == [*OPTIONAL_KEYS, "vlm_zeroshot"] and list(checkpoints) == [*CHECKPOINTS, *OPTIONAL_KEYS]
+    assert [p["label"] for p in pipelines[at + 6: at + 8]] == ["CRNN fase8_std", "CRNN fase8_ctrl"]
+    assert all(len(p["config"]) <= MAX_CONFIG for p in pipelines)

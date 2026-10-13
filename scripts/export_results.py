@@ -103,6 +103,14 @@ OPTIONAL_CHECKPOINTS = [
     {"key": "crnn_fase7_ctrl", "run": "fase7_ctrl", "label": "CRNN fase7_ctrl",
      "track": False, "rare": False, "filtered": False,
      "detail": "10 font · aug {augment} · tanpa jarak tambahan (pembanding) · greedy"},
+    {"key": "crnn_fase8_std", "run": "fase8_std", "label": "CRNN fase8_std",
+     "track": True, "rare": False, "filtered": False, "standard": True,
+     "detail": "10 font · aug {augment} · jarak antar-aksara p {track} hingga {track_max} em · ejaan baku p {standard} "
+               "· greedy"},
+    {"key": "crnn_fase8_ctrl", "run": "fase8_ctrl", "label": "CRNN fase8_ctrl",
+     "track": True, "rare": False, "filtered": False, "standard": False,
+     "detail": "10 font · aug {augment} · jarak antar-aksara p {track} hingga {track_max} em · tanpa ejaan baku "
+               "(pembanding) · greedy"},
 ]
 CHECKPOINT_DIR = ROOT / "out/checkpoints"
 EVAL_DIR = ROOT / "out/eval"
@@ -151,9 +159,10 @@ def run_options(args: dict) -> dict:
     """Opsi training yang menentukan jenis run lanjutan, dari vars(args) src.train di checkpoint.
 
     Opsi yang belum ada saat checkpoint dibuat dianggap mati (0/False): checkpoint fase6 tidak punya track_prob,
-    track_max, rare_max_similarity, maupun rare_attach.
+    track_max, rare_max_similarity, maupun rare_attach, dan checkpoint sebelum fase8 tidak punya standard_prob.
     """
     return {"track": args.get("track_prob") or 0, "track_max": args.get("track_max") or 0,
+            "standard": args.get("standard_prob") or 0,
             "insert": args.get("rare_insert_prob") or 0, "opener": args.get("rare_opener_prob") or 0,
             "similarity": args.get("rare_max_similarity") or 0, "attach": bool(args.get("rare_attach"))}
 
@@ -171,6 +180,11 @@ def check_optional_run(spec: dict, step: int, args: dict) -> None:
                          f"track_max = {o['track_max']}")
     if not spec["track"] and o["track"] != 0:
         raise SystemExit(f"{key}: run tanpa jarak tambahan, tetapi track_prob = {o['track']}")
+    # Ejaan baku (src/spelling.py): spesifikasi run sebelum fase8 tidak punya kuncinya = run tanpa ejaan baku.
+    if spec.get("standard") and not o["standard"] > 0:
+        raise SystemExit(f"{key}: run ejaan baku, tetapi standard_prob = {o['standard']}")
+    if not spec.get("standard") and o["standard"] != 0:
+        raise SystemExit(f"{key}: run tanpa ejaan baku, tetapi standard_prob = {o['standard']}")
     if spec["rare"] and not o["insert"] > 0:
         raise SystemExit(f"{key}: run aksara langka, tetapi rare_insert_prob = {o['insert']}")
     if not spec["rare"] and (o["insert"] != 0 or o["opener"] != 0):
@@ -196,7 +210,8 @@ def optional_pipeline(spec: dict, step: int, args: dict, start: str) -> dict:
     o = run_options(args)
     detail = spec["detail"].format(augment=args.get("augment"), track=decimal(o["track"]),
                                    track_max=decimal(o["track_max"]), insert=decimal(o["insert"]),
-                                   opener=decimal(o["opener"]), similarity=decimal(o["similarity"]))
+                                   opener=decimal(o["opener"]), similarity=decimal(o["similarity"]),
+                                   standard=decimal(o["standard"]))
     head = f"crnn:{spec['run']}@{step}" + (f" (lanjutan {start})" if start else "")
     config = f"{head} · {detail}"
     if len(config) > MAX_CONFIG:
