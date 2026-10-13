@@ -247,6 +247,25 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   layanan model harus dinyalakan ulang (sudah, 2026-10-12). Tag "beam membaik/memburuk", urutan beam di Penjelajah,
   tabel sintetis Perbandingan, dan titik beam di Ringkasan memakai pasangan milik pipeline resmi
   (`Pipeline::beamPair()`: `<resmi>` dan `<resmi>_beam` bila sudah diekspor, kalau tidak pasangan `fase5_fonts`).
+  **Analisis 176 baris yang memburuk (2026-10-13, dari `out/results/predictions.jsonl`, tanpa menjalankan model):**
+  kerusakannya kecil dan tersebar, bukan runtuh: 114 dari 176 baris memburuk 1 karakter (total +272 suntingan lawan
+  −702 di 344 baris yang membaik). Per karakter label: 842 diperbaiki, 537 dirusak (3,2% dari yang tadinya benar);
+  baris persis benar 42 → 47, dan 9 dari 42 baris yang sudah benar diubah. Tiga pola: (1) beam merugikan baris yang
+  sudah nyaris benar (CER greedy < 5%: 94 baris, 6 membaik, 29 memburuk, 2,19% → 3,55%) dan membantu sisanya;
+  (2) di halaman 87 ke atas (bukan majalah halaman 0–86) nyaris tanpa manfaat (22,96% → 22,25%; 70 membaik, 67
+  memburuk) sedangkan di halaman 0–86 21,15% → 18,75%; (3) beam membuang angka palsu (187 → 77 keluaran; label 20)
+  tetapi menambah spasi (145 → 187; label 110).
+  **Temuan yang lebih penting: korpus latih tidak berejaan baku, dan itu mengenai model DAN model bahasa.** Korpus
+  (konvensi `scripts/translit/translit.js`) menulis n di depan c/j dengan na, rê/lê dengan ra/la berpepet, dan keret
+  dengan cakra + pepet; cetakan memakai ejaan baku. Di 300.000 baris latih pertama: nya + pangkon + ca/ja **0** kali
+  (na + pangkon + ja 14.741, + ca 10.919), pa cerek 33, nga lelet 26, keret 30 (hanya dari sisipan aksara langka),
+  sedangkan ra/la berpepet 60.657 dan cakra + pepet 10.378. Di 745 label: pa cerek 44, nga lelet 26, keret 20, semuanya
+  terbaca 0%; nya di depan ca/ja 59, greedy benar 31, beam tinggal 13 (LM menggantinya, 17 kali menjadi ba); pada
+  pangkat 63, greedy 31, beam 22. Jumlahnya 212 karakter (1,04% label), 150 salah di greedy dan 177 di beam, ditambah
+  galat ikutan di sekitarnya. Aturan ejaan bakunya sudah ada dan teruji di `web/app/Support/AksaraWriter.php` (sama
+  dengan ejaan kamus di 97,4% lema). Tuas berikutnya: bangun ulang korpus dengan ejaan baku (atau ubah baris korpus
+  saat render), lalu latih ulang dan bangun ulang LM; baru sesudah itu beam + LM dinilai lagi sebagai calon jalur resmi.
+  Angka-angka ini dibaca dari data uji, jadi dipakai untuk memilih arah, bukan untuk menyetel.
 - **OCR + VLM dan web UI (keputusan user 2026-09-24).**
   - **Dua pembaca, satu hakim:** CRNN tetap pembaca utama (offline, cepat) dan "hakim piksel"; VLM
     fine-tune = pembaca kedua yang menyumbang kandidat. Semua kandidat (greedy, N-best beam, VLM, LLM)
