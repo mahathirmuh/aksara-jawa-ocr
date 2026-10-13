@@ -16,7 +16,8 @@ from PIL import Image
 from torch.utils.data import Dataset, Sampler
 
 from src.render import EmptyRender, RenderClipped, load_font, render_line
-from src.tokenizer import Tokenizer
+from src.spelling import PROBES, standardize
+from src.tokenizer import Tokenizer, is_well_formed
 
 if TYPE_CHECKING:
     from src.text_augment import RareText
@@ -75,6 +76,18 @@ def space_ratio(font_path: str) -> float:
     return (font.getlength(f"{ka}{ka} {ka}{ka}") - font.getlength(ka * 4)) / font.getlength(ka)
 
 
+@lru_cache(maxsize=None)
+def spelling_twins(font_path: str) -> frozenset[str]:
+    """Aturan ejaan baku yang di font ini TIDAK mengubah citra: ejaan korpus dan ejaan baku dirender kembar (GumregahNew
+    meligaturkan cakra + pepet menjadi keret). Diperiksa dengan interpreter yang sedang berjalan, karena shaping berbeda
+    antar lingkungan."""
+    def same(a: str, b: str) -> bool:
+        x, y = (np.asarray(render_line(text, font_path, 64).convert("L")) < 128 for text in (a, b))
+        return x.shape == y.shape and not (x ^ y).any()
+
+    return frozenset(name for name, (before, after) in PROBES.items() if same(before, after))
+
+
 class SyntheticLines(Dataset):
     """Baris korpus dirender on-the-fly -> (citra (1, H, W), target urutan visual).
 
@@ -96,12 +109,14 @@ class SyntheticLines(Dataset):
         rare_text: "RareText | None" = None,
         track_prob: float = 0.0,
         track_max: float = 0.0,
+        standard_prob: float = 0.0,
     ):
         if not font_paths:
             raise ValueError("Butuh minimal satu font")
         self.rare_text = rare_text
         self.track_prob = track_prob
         self.track_max = track_max
+        self.standard_prob = standard_prob
         self.lines = list(lines)
         self.tokenizer = tokenizer
         self.font_paths = [str(p) for p in font_paths]
@@ -135,6 +150,20 @@ class SyntheticLines(Dataset):
         drop = bool(drop_space) and rng.random() < drop_space
         font = rng.choice(self.font_paths)
         size = rng.randint(*self.size_range)
+        # Ejaan baku (src/spelling.py) pada sebagian baris, sebelum sisipan dan sebelum spasi dibuang (aturan nya di
+        # depan ca/ja berlaku di dalam kata saja). Probabilitas 0 tidak mengonsumsi angka acak, jadi render val/test
+        # dan run lama tidak berubah. Aturan yang glyph-nya tidak ada di font terpilih dilewati.
+        # Font yang merender kedua ejaan KEMBAR untuk sebuah aturan selalu memakai ejaan baku aturan itu, supaya satu
+        # gambar tidak berlabel dua (seperti spasi pada font berspasi sempit).
+        standard_prob = getattr(self, "standard_prob", 0.0)
+        if standard_prob:
+            chosen = rng.random() < standard_prob
+            twins = spelling_twins(font)
+            if chosen or twins:
+                from src.text_augment import font_codepoints  # impor di sini: text_augment memuat uharfbuzz
+
+                text = standardize(text, font_codepoints(font), lambda new: is_well_formed(new) and self._round_trips(new),
+                                   None if chosen else twins)
         rare = getattr(self, "rare_text", None)
         if rare is not None and rare.active:
             # Sebelum spasi dibuang: angka & pada disisipkan di batas kata. Probabilitas 0 tidak

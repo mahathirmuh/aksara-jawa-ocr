@@ -16,7 +16,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Iterable
 
-from src.tokenizer import TOKENIZER_PATH, Tokenizer
+from src.spelling import standardize
+from src.tokenizer import TOKENIZER_PATH, Tokenizer, is_well_formed
 
 ROOT = Path(__file__).resolve().parents[1]
 SPLITS_DIR = ROOT / "data" / "splits"
@@ -93,6 +94,8 @@ def main(argv=None) -> None:
     parser.add_argument("--order", type=int, default=5)
     parser.add_argument("--lines", type=int, default=300_000, help="baris train acak (seed); 0 = semua")
     parser.add_argument("--drop-space-prob", type=float, default=0.5)
+    parser.add_argument("--standard-prob", type=float, default=0.0,
+                        help="peluang baris ditulis ulang dengan ejaan baku (src/spelling.py), meniru src.train")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out", default="")
     args = parser.parse_args(argv)
@@ -103,14 +106,26 @@ def main(argv=None) -> None:
     rng.shuffle(lines)
     if args.lines:
         lines = lines[: args.lines]
+    if args.standard_prob:
+        # Aliran acak sendiri, sebelum spasi dibuang (seperti src.dataset): tanpa pilihan ini model bahasanya sama persis.
+        spelling = random.Random(f"{args.seed}:standard")
+        charset = set(tokenizer.charset)
+
+        def valid(text: str) -> bool:
+            return (is_well_formed(text) and all(ch in charset for ch in text)
+                    and tokenizer.to_logical(tokenizer.to_visual(text)) == text)
+
+        lines = [standardize(line, None, valid) if spelling.random() < args.standard_prob else line for line in lines]
     visual = [
         tokenizer.to_visual(line.replace(" ", "") if rng.random() < args.drop_space_prob else line)
         for line in lines
     ]
     started = time.time()
-    meta = {"split": "train", "lines": len(lines), "drop_space_prob": args.drop_space_prob, "seed": args.seed}
+    meta = {"split": "train", "lines": len(lines), "drop_space_prob": args.drop_space_prob, "seed": args.seed,
+            "standard_prob": args.standard_prob}
     lm = CharLM.build(visual, args.order, tokenizer.charset, meta)
-    out = Path(args.out) if args.out else LM_DIR / f"o{args.order}_n{len(lines)}_ds{args.drop_space_prob}.pkl"
+    name = f"o{args.order}_n{len(lines)}_ds{args.drop_space_prob}" + (f"_std{args.standard_prob}" if args.standard_prob else "")
+    out = Path(args.out) if args.out else LM_DIR / f"{name}.pkl"
     lm.save(out)
     sizes = ", ".join(f"{k}-gram {len(lm.grams[k]):,}" for k in range(1, lm.order + 1))
     print(f"LM order {lm.order} dari {len(lines):,} baris train ({time.time() - started:.0f} dtk): {sizes} -> {out}")

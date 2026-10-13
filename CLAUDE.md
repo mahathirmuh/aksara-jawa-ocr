@@ -99,6 +99,7 @@ python -m src.real split data/real/labels.tsv                                   
 python -m src.infer CKPT baris.png
 python -m src.gpt check                          # wadah API GPT (ablasi koreksi pasca-OCR); kunci di .env (template .env.example)
 python -m src.charlm --order 5 --lines 300000 --drop-space-prob 0.5              # LM karakter dari split train (kondisi "kamus")
+python -m src.charlm --order 5 --lines 300000 --drop-space-prob 0.5 --standard-prob 0.5   # LM yang sama dengan ejaan baku di separuh baris
 python scripts/beam_eval.py CKPT --lm data/charlm/o5_n300000_ds0.5.pkl --name N  # beam+LM vs greedy: disetel di dev sintetis, NusaAksara sekali
 python scripts/export_results.py                 # kontrak data web -> out/results/ (~14 menit CPU dengan run fase6)
 python scripts/export_datasets.py                # kartu data halaman Dataset -> out/results/datasets.json (~20 dtk CPU, tanpa model)
@@ -266,6 +267,33 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   dengan ejaan kamus di 97,4% lema). Tuas berikutnya: bangun ulang korpus dengan ejaan baku (atau ubah baris korpus
   saat render), lalu latih ulang dan bangun ulang LM; baru sesudah itu beam + LM dinilai lagi sebagai calon jalur resmi.
   Angka-angka ini dibaca dari data uji, jadi dipakai untuk memilih arah, bukan untuk menyetel.
+  **Fase 8 (dijalankan 2026-10-13, `scripts/run_fase8.sh`, log `out/fase8_chain.log`; permintaan user):** korpus
+  TIDAK dibangun ulang (split, G1/G2, dan kartu data tetap sebanding); baris ditulis ulang dengan ejaan baku saat
+  dirender. `src/spelling.py::standardize` = lima aturan pada teks aksara (nya di depan ca/ja di dalam kata; pa cerek
+  dan nga lelet kecuali sesudah pangkon; keret; deret angka diapit pada pangkat), dicocokkan dengan ejaan baku
+  `AksaraWriter` pada 4.609 kata kamus (sama di semuanya; 291 kata memang berubah). `src.train --standard-prob P`
+  (bawaan 0: tidak mengonsumsi angka acak, run lama dan val/test tidak berubah) menerapkannya sebelum sisipan aksara
+  langka dan sebelum spasi dibuang; aturan yang glyph-nya tidak ada di font terpilih dilewati, dan hasil yang tidak
+  well-formed atau tidak lolos round-trip dibuang. Di 100.000 baris latih: 37,1% baris berubah (pangkat 15,7%, cerek
+  8,3%, lelet 8,2%, nya 8,0%, keret 3,4%), semuanya lolos round-trip; kesepuluh font latih punya glyph-nya (lembar
+  pembanding diperiksa Claude, belum mata manusia). **Font yang merender dua ejaan KEMBAR selalu memakai ejaan baku**
+  untuk aturan itu (`src.dataset.spelling_twins`, dibandingkan lewat render dengan interpreter yang berjalan):
+  GumregahNew meligaturkan cakra + pepet menjadi keret; di `.venv` BasaJan juga kembar untuk cerek, lelet, keret
+  (di lingkungan training tidak). `src.charlm --standard-prob` membangun model bahasa dengan aturan yang sama
+  (berkas berakhiran `_stdP`). Peluang 0,5 dipilih supaya model tetap melihat kedua ejaan (bagian uji korpus G1/G2
+  berejaan korpus); nilainya tidak disetel.
+  `fase8_std` = `fase7_track` + 1.500 langkah, resep `fase7_track` + `--standard-prob 0.5`; `fase8_ctrl` = sama tanpa
+  ejaan baku, titik lanjut ditiru.
+  **Aturan analisis fase 8, ditetapkan 2026-10-13 SEBELUM ada angka:** (a) titik akhir utama = recall lima bentuk
+  ejaan baku di 745 baris nyata (pa cerek 44, nga lelet 26, keret 20, nya di depan ca/ja 59, pada pangkat 63; n = 212;
+  dasar `fase7_track` greedy: 62 benar), `fase8_std` − `fase8_ctrl`, "membantu" hanya bila SK 95% bootstrap per
+  halaman tidak memuat 0; (b) efek samping = presisi keluaran kelima bentuk itu (keluaran palsu), CER baris yang tidak
+  memuat satu pun bentuk itu, q100 G1/G2 (tidak boleh memburuk di luar ketidakpastian ~1 poin), dan evaluasi
+  sintetis javatext pada baris val yang dirender dengan ejaan korpus DAN ejaan baku (skripnya dibuat sebelum membaca
+  hasil); (c) G3 keseluruhan dilaporkan dengan SK per halaman sebagai arah (satu run per lengan, derau antar-run
+  belum terukur; efek langsung paling banyak ~1 poin); (d) checkpoint dasar berikutnya dipilih dari (a)–(b), bukan
+  dari G3; beam + LM dinilai ulang dengan model bahasa berejaan baku, disetel di dev sintetis; mengganti angka resmi
+  tetap keputusan user.
 - **OCR + VLM dan web UI (keputusan user 2026-09-24).**
   - **Dua pembaca, satu hakim:** CRNN tetap pembaca utama (offline, cepat) dan "hakim piksel"; VLM
     fine-tune = pembaca kedua yang menyumbang kandidat. Semua kandidat (greedy, N-best beam, VLM, LLM)

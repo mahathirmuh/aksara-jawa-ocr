@@ -73,6 +73,9 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="peluang baris sintetis dirender dengan jarak tambahan antar suku kata")
     p.add_argument("--track-max", type=float, default=0.3,
                    help="jarak tambahan terbesar (em), diundi seragam dari 0 per baris")
+    p.add_argument("--standard-prob", type=float, default=0.0,
+                   help="peluang baris sintetis ditulis ulang dengan ejaan baku sebelum dirender (src/spelling.py): "
+                        "nya di depan ca/ja, pa cerek, nga lelet, keret, angka diapit pada pangkat")
     p.add_argument("--real-train", default="", help="labels_train.tsv citra nyata (Fase 6)")
     p.add_argument("--real-val", default="", help="labels_val.tsv untuk memilih checkpoint (Fase 6)")
     p.add_argument("--real-repeat", type=int, default=10, help="berapa kali data nyata diulang per epoch")
@@ -281,10 +284,13 @@ def build_datasets(args, tokenizer: Tokenizer):
                   + (", tanpa spasi tambahan" if args.rare_attach else ""))
         if args.track_prob:
             print(f"jarak antar suku kata: p={args.track_prob}, 0-{args.track_max} em")
+        if args.standard_prob:
+            print(f"ejaan baku: p={args.standard_prob}")
         synthetic = SyntheticLines(
             train_lines, tokenizer, train_fonts, augment=build_augment(args.augment),
             deterministic=bool(args.overfit), seed=args.seed, drop_space_prob=args.drop_space_prob,
             rare_text=rare_text, track_prob=args.track_prob, track_max=args.track_max,
+            standard_prob=args.standard_prob,
         )
         parts.append((synthetic, 1))
     if args.real_train:
