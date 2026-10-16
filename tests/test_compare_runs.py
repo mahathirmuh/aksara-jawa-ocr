@@ -439,6 +439,23 @@ def test_main_writes_report_and_stops_on_manifest_mismatch(tmp_path, monkeypatch
     assert "CER baris tanpa aksara langka (n=2)" in printed and "homoglif U+A9A6 ꦦ LETTER PA MURDA" in printed
     assert "PERINGATAN: 'p_b'" in printed and "PERINGATAN: 'p_a'" not in printed  # laporan resmi beda: tidak fatal
 
+    # --kind: hanya baris cetak atau tulisan tangan menurut halamannya (HANDWRITTEN_PAGES), ke berkas bernama lain;
+    # berkas tanpa --kind tidak tersentuh.
+    whole = (out / "p_a_vs_p_b.json").read_text(encoding="utf-8")
+    dump("lines.jsonl", [{**line, "source_id": "nusaaksara_hal_92"} if line["id"] == "L3" else line for line in lines])
+    compare_runs.main(argv + ["--kind", "cetak"])
+    printed = json.loads((out / "p_a_vs_p_b_cetak.json").read_text(encoding="utf-8"))
+    assert (printed["lines"], printed["kind"], printed["subset"]) == (3, "cetak", "hanya baris cetak: 3 dari 4 baris")
+    assert printed["checks"]["a"]["manifest"] is None  # subset: manifest tidak punya angka pembandingnya
+    compare_runs.main(argv + ["--kind", "tulisan tangan"])
+    hand = json.loads((out / "p_a_vs_p_b_tulisan_tangan.json").read_text(encoding="utf-8"))
+    assert (hand["lines"], hand["clusters"]) == (1, 1) and hand["cer"]["b"] == pytest.approx(1 / 2)
+    assert (out / "p_a_vs_p_b.json").read_text(encoding="utf-8") == whole
+    assert json.loads(whole)["kind"] is None
+    dump("lines.jsonl", lines)
+    with pytest.raises(SystemExit, match="galat: Tidak ada baris tulisan tangan"):
+        compare_runs.main(argv + ["--kind", "tulisan tangan"])
+
     with pytest.raises(SystemExit):  # A dan B harus berbeda
         compare_runs.main(["p_a", "p_a", "--results", str(results), "--out", str(out)])
     dump("predictions.jsonl", [p for p in preds if not (p["pipeline"] == "p_b" and p["line"] == "L3")])

@@ -49,6 +49,9 @@ from src.text_augment import RARE_MAX_LINE_FRACTION, RareText  # noqa: E402
 from src.tokenizer import TOKENIZER_PATH, Tokenizer, nfc  # noqa: E402
 from src.train import SPLITS_DIR, read_split  # noqa: E402
 
+sys.path.insert(0, str(ROOT / "scripts"))
+from eval_slant import KINDS, kind  # noqa: E402  (halaman tulisan tangan: satu daftar untuk semua skrip)
+
 SCHEMA = 1
 RESULTS_DIR = ROOT / "out" / "results"
 OUT_DIR = ROOT / "out" / "compare"
@@ -782,6 +785,9 @@ def main(argv=None) -> None:
     parser.add_argument("--out", default=str(OUT_DIR), help="direktori keluaran (default out/compare)")
     parser.add_argument("--common-only", action="store_true",
                         help="bandingkan hanya baris yang dimiliki kedua pipeline (mis. uji buta 50 baris)")
+    parser.add_argument("--kind", choices=KINDS,
+                        help="hanya baris jenis tulisan ini menurut halamannya (scripts/eval_slant.py HANDWRITTEN_PAGES); "
+                             "keluarannya <A>_vs_<B>_<jenis>.json, berkas tanpa --kind tidak berubah")
     parser.add_argument("--refresh-rare", action="store_true", help="hitung ulang himpunan aksara langka")
     args = parser.parse_args(argv)
     if args.a == args.b:
@@ -806,6 +812,10 @@ def main(argv=None) -> None:
                 raise CompareError(f"Pipeline '{key}' tidak ada di manifest.json (tersedia: {', '.join(pipelines)})")
         lines = read_jsonl(results_dir / "lines.jsonl")
         rows = paired_lines(lines, read_jsonl(results_dir / "predictions.jsonl"), args.a, args.b, args.common_only)
+        if args.kind:
+            rows = [row for row in rows if kind(row["source_id"]) == args.kind]
+            if not rows:
+                raise CompareError(f"Tidak ada baris {args.kind} di antara baris yang dibandingkan")
         rare = load_rare(out_dir / RARE_CACHE, args.refresh_rare)
         stats = compare(rows, [entry["char"] for entry in rare["codepoints"]], args.bootstrap, args.seed)
 
@@ -826,14 +836,16 @@ def main(argv=None) -> None:
                     "generated": manifest.get("generated"), "limited": bool(manifest.get("limited"))},
         "a": {k: pipelines[args.a].get(k) for k in ("key", "label", "config")},
         "b": {k: pipelines[args.b].get(k) for k in ("key", "label", "config")},
-        "subset": "semua baris" if len(rows) == len(lines) else f"hanya {len(rows)} dari {len(lines)} baris",
+        "subset": (f"hanya baris {args.kind}: {len(rows)} dari {len(lines)} baris" if args.kind
+                   else "semua baris" if len(rows) == len(lines) else f"hanya {len(rows)} dari {len(lines)} baris"),
+        "kind": args.kind,
         "datasets": dict(Counter(line.get("dataset", "?") for line in lines if line["id"] in compared)),
         "lines_without_source_id": sum(1 for line in lines if line["id"] in compared and not line.get("source_id")),
         "bootstrap": {"resamples": args.bootstrap, "seed": args.seed, "interval": "persentil 2,5-97,5"},
         "checks": checks,
         **stats,
     }
-    stem = f"{args.a}_vs_{args.b}"
+    stem = f"{args.a}_vs_{args.b}" + (f"_{args.kind.replace(' ', '_')}" if args.kind else "")
     write_json(out_dir / f"{stem}.json", report)
     (out_dir / f"{stem}.md").write_text(render_markdown(report), encoding="utf-8", newline="\n")
 
