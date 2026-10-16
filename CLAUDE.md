@@ -434,6 +434,31 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   taling 13), tanda bawah 7,2%, spasi 5,1%, pangkon 3,6%; persepuluh pertama baris 0,19 suntingan per karakter, sisanya
   0,11-0,14 (sebagian besar adeg-adeg pembuka). `fase7_track_rare` di baris cetak: aksara langka 190 → 108 suntingan, pada
   107 → 76, tetapi aksara umum 386 → 425 dan pangkon 46 → 56.
+  Rinci `compare_runs.py --kind cetak` (2026-10-16 23:20) untuk `fase7_track_rare` − `fase7_track` di baris cetak: recall 44
+  codepoint langka 58,2% (n = 268) dengan presisi 48,0% (325 keluaran); murda 44,6% (n = 121) presisi 83,1%; adeg-adeg
+  pembuka 91,3% (n = 69) presisi 64,3% (35 dari 98 palsu); CER 133 baris cetak TANPA aksara langka +0,87 [+0,12; +1,79]
+  (efek samping nyata, tetapi lebih kecil dari manfaatnya). Di baris tulisan tangan presisinya 32,0%.
+  **Margin saat membaca, dipisah (2026-10-17 01:00):** `fase8_std` dengan `--pad-ratio 0.06` = cetak 11,23% (tanpa margin
+  12,63%; −1,40) / tulisan tangan 26,35% (−1,40) / semua 18,95% (sama dengan laporan `fase8_std_G3_full_pad006`).
+  81% baris cetak (251 / 308) tintanya menyentuh tepi atas DAN bawah potongan; di baris itu 21% tanda atas salah baca lawan
+  12-14% di baris yang punya ruang (sebagian karena baris bertanda atas memang lebih sering menyentuh tepi atas). Augmentasi
+  `tight` hanya memotong rapat ~separuh citra latih dan memangkas paling banyak 2% tinggi. Calon: augmentasi potong rapat
+  yang lebih keras, ATAU margin saat membaca (mengubah cara baca resmi = keputusan user; nilainya disetel di dev sintetis,
+  bukan di data uji).
+  **Font Noto Sans Javanese Bold** (rilis resmi notofonts/javanese `NotoSansJavanese-v2.005`, OFL; berbeda versi dari Regular
+  di repo): lolos keempat cek otomatis Fase 0 dan lembar kontak 13 kasus tampak benar (diperiksa Claude, belum mata
+  manusia). Belum dipakai; calon perlakuan sesudah fase 10, karena huruf cetak majalah jauh lebih tebal dan lebar daripada
+  sebagian besar font latih (yang paling dekat: Noto, abmAksaJawa Bold, GumregahNew). Empat font `fonts/extra_review` justru
+  bergaya miring kaligrafis (lebih mirip tulisan tangan daripada cetak majalah).
+  **`fase9_slant` selesai 2026-10-17 00:06** (val bersih 0,197%): G3 **16,54%** (pad 0,06: 16,08%), q100 G1 0,32%, G2 0,81%.
+  Bacaan greedy di luar ekspor (sama dengan laporan G3): cetak **13,09%** / tulisan tangan **19,86%** (`fase8_std` 12,63% /
+  27,75%): penurunan G3 berasal dari tulisan tangan; baris cetak sedikit naik. Efek render miring dibaca dari `fase9_slant` −
+  `fase9_ctrl` (aturan dan adendum fase 9); `fase9_ctrl` mulai 00:09.
+  **Rencana sesudah fase 9 (keputusan user 2026-10-16: "kalau dah selesai lanjut terus ya, gak perlu nunggu perintahku"):**
+  pilih dasar dari aturan fase 9, lalu langsung `scripts/run_fase10.sh <dasar>` + `scripts/after_fase10.sh <dasar>`;
+  pergantian angka resmi ditunda sampai fase 10 selesai (evaluasi resmi G1/G2 dan beam + LM tidak boleh berjalan bersama
+  training). Pertanyaan terbuka untuk user: apakah target G3 < 8% dinilai pada baris cetak saja (`out/cek_tulisan_tangan/`
+  berisi lembar kontak untuk memeriksa pembagian halaman).
 - **OCR + VLM dan web UI (keputusan user 2026-09-24).**
   - **Dua pembaca, satu hakim:** CRNN tetap pembaca utama (offline, cepat) dan "hakim piksel"; VLM
     fine-tune = pembaca kedua yang menyumbang kandidat. Semua kandidat (greedy, N-best beam, VLM, LLM)
