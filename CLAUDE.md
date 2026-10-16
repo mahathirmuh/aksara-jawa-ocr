@@ -459,6 +459,28 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   pergantian angka resmi ditunda sampai fase 10 selesai (evaluasi resmi G1/G2 dan beam + LM tidak boleh berjalan bersama
   training). Pertanyaan terbuka untuk user: apakah target G3 < 8% dinilai pada baris cetak saja (`out/cek_tulisan_tangan/`
   berisi lembar kontak untuk memeriksa pembagian halaman).
+  **Hasil fase 9 (2026-10-17 04:22; `out/compare/slant_crnn_fase9_slant_vs_crnn_fase9_ctrl.json`,
+  `crnn_fase9_slant_vs_crnn_fase9_ctrl.md`).** `fase9_ctrl` selesai 04:00 (val bersih 0,169%): G3 **20,31%** (pad 0,06:
+  18,85%), q100 G1 0,38%, G2 0,72%. Selisih `fase9_slant` − `fase9_ctrl`, SK 95% per halaman: (a) 270 baris miring 28,60% →
+  19,76%, **−8,84 [−11,78; −6,02]** (membantu, tetapi semuanya tulisan tangan); (b) 424 baris tegak −0,94 [−2,49; +0,43];
+  q100 G1 0,32% / 0,38%, G2 0,81% / 0,72%; (e) **308 baris CETAK 12,34% → 13,09%, +0,75 [+0,15; +1,39]: render miring
+  memperburuk cetak secara nyata**; (f) 437 baris tulisan tangan 27,96% → 19,86%, −8,10 [−11,33; −5,21]; (c) G3 keseluruhan
+  −3,77 [−5,67; −1,73]. Menurut aturan dan adendumnya: **dasar berikutnya = `fase9_ctrl`** (cetak terbaik sejauh ini: 12,34%,
+  `fase8_std` 12,63%); render miring tidak dipakai untuk model cetak. Angka resmi tidak diganti sekarang (ditunda sampai
+  fase 10; keputusan user).
+  **Fase 10 (dimulai 2026-10-17 sesudah `after_fase9.sh`; `scripts/run_fase10.sh fase9_ctrl`, `scripts/after_fase10.sh
+  fase9_ctrl`, log `out/fase10_chain.log`):** `fase10_rare` = `fase9_ctrl` + 1.500 langkah, resep `fase9_ctrl` (jarak 0,5 /
+  0,3, ejaan baku 0,5, augmentasi `fase5`, drop-space 0,5, `--font-fixes`) + sisipan aksara langka versi perbaikan
+  (`--rare-insert-prob 0.3 --rare-opener-prob 0.15 --rare-max-similarity 0.9 --rare-attach`, sama persis dengan
+  `fase7_track_rare`, jadi nilainya tidak disetel ulang); `fase10_ctrl` = sama tanpa sisipan, titik lanjut ditiru.
+  **Aturan analisis fase 10, ditetapkan SEBELUM ada angka:** (a) titik akhir utama = CER **308 baris cetak** `fase10_rare`
+  − `fase10_ctrl` (`compare_runs.py --kind cetak` / `eval_slant.py real`), "membantu" hanya bila SK 95% bootstrap per halaman
+  di bawah 0 (replikasi temuan fase 7: −0,80 [−1,33; −0,28]); (b) efek samping di baris cetak: presisi keluaran aksara
+  langka dan adeg-adeg pembuka palsu (dilaporkan; fase 7: 48,0% dan 35 dari 98), CER baris cetak TANPA aksara langka
+  (dilaporkan dengan SK; fase 7 +0,87), q100 G1/G2 (di dalam ~1 poin), bentuk ejaan baku (`eval_spelling.py real`, tidak
+  boleh turun nyata), evaluasi sintetis aksara langka (`eval_rare.py`, javatext: teks biasa tidak boleh naik di luar ~0,1
+  poin); (c) tulisan tangan dilaporkan terpisah, G3 keseluruhan dengan SK per halaman sebagai arah; (d) dasar berikutnya dan
+  usulan angka resmi dipilih dari (a)-(b), bukan dari G3 atau tulisan tangan; mengganti angka resmi tetap keputusan user.
 - **OCR + VLM dan web UI (keputusan user 2026-09-24).**
   - **Dua pembaca, satu hakim:** CRNN tetap pembaca utama (offline, cepat) dan "hakim piksel"; VLM
     fine-tune = pembaca kedua yang menyumbang kandidat. Semua kandidat (greedy, N-best beam, VLM, LLM)
