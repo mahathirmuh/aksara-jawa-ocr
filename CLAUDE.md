@@ -354,7 +354,7 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   aksara 36% (galat 14,6% per karakter), tanda di atas aksara (cecak, wulu, pepet, layar, wignyan) **28,5% (galat 32% per
   tanda)**: cecak hilang 212, wulu hilang 154, wulu ↔ pepet ↔ cecak ↔ layar saling tertukar 260 kali; aksara langka 7,2%
   (galat 84%), taling 6,6%, adeg-adeg 2,7% (0/112 terbaca), spasi 4,5%. Galat di 10% awal baris 27,9% lawan ~19% di tengah;
-  baris yang tintanya menyentuh tepi KIRI potongan 26,5% lawan 16,4%. **Temuan utama: cetakan miring (italic).** Penaksir
+  baris yang tintanya menyentuh tepi KIRI potongan 26,5% lawan 16,4%. **Temuan utama (DIKOREKSI 2026-10-16 22:50: baris "miring" ini tulisan tangan, bukan cetak miring; lihat adendum fase 9 di bawah): cetakan miring (italic).** Penaksir
   kemiringan gaya Vinciarelli-Luettin (`scripts/eval_slant.py::slant`: tiap geser, jumlah kuadrat panjang kolom tinta yang
   bersambung tanpa celah; render Noto/Tuladha yang dimiringkan 0,2/0,4/0,6 ditaksir persis; penaksir pertama berbasis
   ketajaman profil kolom TIDAK andal: menggolongkan baris tegak tebal sebagai miring) memberi **270 baris miring (≥ 0,3; 20
@@ -404,6 +404,24 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   Pencarian web 2026-10-16: tidak ditemukan font aksara Jawa bergaya italic (Noto Sans Javanese, Tuladha Jejeg, dan font
   lain yang ditemukan hanya tegak), jadi huruf miring cetakan kemungkinan dibuat dengan memiringkan font biasa (dugaan,
   belum diverifikasi; menegakkan potongan miring tetap memperburuk, lihat analisis galat di atas).
+  **Temuan 2026-10-16 22:50 (sebelum ada angka G3 fase 9): separuh data uji nyata adalah TULISAN TANGAN, bukan cetak.**
+  Lembar kontak satu baris per halaman untuk 92 halaman, ditambah empat baris acak dari halaman yang meragukan (klasifikasi
+  visual Claude, belum diperiksa manusia): 20 halaman (1, 6, 8, 14, 29, 32, 43, 47, 52, 60, 62, 65, 71, 81, 86, 87, 88, 89,
+  90, 92) adalah reproduksi naskah tulisan tangan (aksara miring bersambung, banyak di latar raster abu-abu) atau contoh
+  aksara yang digambar tangan (87-89), **437 dari 745 baris (58,7%; 51,0% karakter)**; 72 halaman lain (308 baris) huruf cetak
+  (halaman 91: cetak dengan jenis huruf lain, berlatar abu-abu). Halaman cetak umumnya hanya 3-4 baris beranotasi, halaman
+  tulisan tangan 5-78 baris. Ke-270 baris "miring" analisis galat (20 halaman) SEMUANYA di halaman tulisan tangan, dan
+  potongan "bertekstur raster" juga tulisan tangan berlatar raster: cetak miring tidak ditemukan. Itu juga menjelaskan mengapa
+  menegakkan potongan miring memperburuk (tulisan tangan bukan huruf cetak yang dimiringkan). Tulisan tangan di luar scope repo
+  ini, tetapi G3 menghitungnya. CER cetak / tulisan tangan per pipeline: `fase8_std` **12,63%** / 27,75% (beam + LM 11,05% /
+  24,70%), `fase8_ctrl` 12,96% / 28,34%, `fase7_track` 13,80% / 28,81%, `fase7_ctrl` 27,68% / 33,70% (jarak antar suku kata
+  terutama menolong cetak), `fase6_ctrl` 27,55% / 36,60%, `fase5_fonts` 34,84% / 39,55%, `fase5_core` 54,98% / 77,74%.
+  **Adendum aturan analisis fase 9, ditetapkan SEBELUM ada angka G3 fase 9 (premisnya keliru: yang miring tulisan tangan):**
+  titik akhir utama (a) tetap dilaporkan apa adanya, dibaca sebagai "tulisan tangan miring" (di luar scope); (e) baru = CER
+  308 baris CETAK `fase9_slant` − `fase9_ctrl` dengan SK 95% per halaman, sebagai efek samping utama (tidak boleh memburuk
+  nyata); (f) CER 437 baris tulisan tangan dilaporkan terpisah, di luar scope. Checkpoint dasar berikutnya dipilih dari baris
+  cetak dan efek samping (b), bukan dari tulisan tangan. G3 resmi tetap dihitung atas 745 baris sampai user memutuskan lain;
+  pembagian cetak / tulisan tangan dilaporkan di sampingnya, bukan menggantikannya (target tidak dilonggarkan diam-diam).
 - **OCR + VLM dan web UI (keputusan user 2026-09-24).**
   - **Dua pembaca, satu hakim:** CRNN tetap pembaca utama (offline, cepat) dan "hakim piksel"; VLM
     fine-tune = pembaca kedua yang menyumbang kandidat. Semua kandidat (greedy, N-best beam, VLM, LLM)
