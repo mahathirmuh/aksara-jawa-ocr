@@ -1421,6 +1421,266 @@ def test_spelling_entry_quotes_the_spelling_control_only_when_the_pair_is_valid(
         data_methods(root, "fase8_std", args)
 
 
+def slant_report(root: Path, a: str, b: str, cer_a: float, cer_b: float, **groups) -> Path:
+    """Laporan scripts/eval_slant.py real (tanpa teks label), seperti yang ditulis skrip itu: selisih A - B."""
+    rows = {"tegak": {"lines": 424, "pages": 84, "chars": 1000, "cer_a": 0.155, "cer_b": 0.157},
+            "agak miring": {"lines": 51, "pages": 10, "chars": 100, "cer_a": 0.26, "cer_b": 0.26},
+            "miring": {"lines": 270, "pages": 20, "chars": 900, "cer_a": 0.20, "cer_b": 0.28},
+            "semua": {"lines": 745, "pages": 92, "chars": 2000, "cer_a": cer_a, "cer_b": cer_b}}
+    rows.update(groups)
+    path = root / "out/compare" / f"slant_{a}_vs_{b}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "a": a, "b": b, "lines": 745, "groups": rows,
+        "thresholds": {"tegak": [-9.0, 0.1], "agak miring": [0.1, 0.3], "miring": [0.3, 9.0]},
+        "ci95_pages": {"tegak": [-0.006, 0.002], "agak miring": None, "miring": [-0.10, -0.06], "semua": [-0.04, -0.01],
+                       "resamples": 10000, "seed": 0, "pages": 92}}), encoding="utf-8")
+    return path
+
+
+def fase9_repo(root: Path) -> Path:
+    """Repo palsu dengan rantai fase 8 dan pasangan fase 9: fase9_slant dan fase9_ctrl dilanjutkan dari fase8_std,
+    sama kecuali render miring (keduanya dengan perbaikan font)."""
+    method_repo(root)
+    manifest = manifest_of(root)
+    for key, cer in (("crnn_fase8_std", 0.20), ("crnn_fase8_ctrl", 0.21), ("crnn_fase9_slant", 0.17), ("crnn_fase9_ctrl", 0.20)):
+        manifest["pipelines"].append({"key": key, "label": key.upper(), "kind": "crnn", "status": "done", "config": "x"})
+        manifest["metrics"].append({"scope": "nusaaksara_745", "pipeline": key, "lines": 3, "cer": cer})
+    write_manifest(root, manifest)
+    sibling(root, "fase8_std", standard_prob=0.5)
+    sibling(root, "fase8_ctrl", standard_prob=0.0)
+    init = "out/checkpoints/fase8_std/last_snapshot.pt"
+    sibling(root, "fase9_slant", "fase8_std", slant_prob=0.5, slant_max=0.6, font_fixes=True, init=init)
+    sibling(root, "fase9_ctrl", "fase8_std", slant_prob=0.0, slant_max=0.6, font_fixes=True, init=init)
+    return root
+
+
+SLANT9 = {"augment": "none", "track_prob": 0.5, "track_max": 0.3, "standard_prob": 0.5, "slant_prob": 0.5,
+          "slant_max": 0.6, "font_fixes": True}
+CHAIN9 = ["runA", RUN, "fase8_std", "fase9_slant"]
+
+
+def test_slant_entry_quotes_the_italic_lines_only_for_a_valid_pair(tmp_path):
+    root = fase9_repo(tmp_path)
+    # Pasangan sah: langkah, data, dan pelatihan sama kecuali render miring; keduanya dilanjutkan dari fase8_std.
+    assert em.control_run(root, "slant", "fase9_slant") == "fase9_ctrl"
+    assert em.started_from(root, "fase9_slant", "fase8_std") and not em.started_from(root, "fase9_slant", RUN)
+    assert not em.started_from(root, "tidak_ada", "fase8_std")
+    assert em.chain_pair(root, "slant", "fase9_slant", CHAIN9) == ("fase9_slant", "fase9_ctrl")
+
+    # Tanpa laporan: butirnya ada dengan pengaturan dari argumen run resmi, tanpa bukti.
+    bare = data_methods(root, "fase9_slant", SLANT9)["slant"]
+    assert (bare["kind"], bare["status"], bare["evidence"], bare["evidence_source"]) == ("data", "official", None, None)
+    assert bare["settings"] == [["Peluang", "0,5"], ["Kemiringan", "0 sampai 0,6 (geser mendatar per tinggi baris), diundi per baris"]]
+    assert bare["files"] == ["src/dataset.py", "scripts/eval_slant.py"]
+    assert bare["note"].startswith("Kelompok baris nyata ditaksir dari citra") and "hanya meniru sebagian" in bare["note"]
+
+    report = slant_report(root, "crnn_fase9_slant", "crnn_fase9_ctrl", 0.17, 0.20)
+    measured = data_methods(root, "fase9_slant", SLANT9)["slant"]
+    assert measured["evidence"] == (
+        "Terhadap run kontrol fase9_ctrl (jumlah langkah sama, tanpa render miring): pada 270 baris nyata yang tertaksir "
+        "miring (20 halaman) CER 28,00% → 20,00% (−8,00 poin; selang kepercayaan 95% per halaman −10,00 sampai −6,00); pada "
+        "424 baris nyata yang tegak (84 halaman) CER 15,70% → 15,50% (−0,20 poin; selang kepercayaan 95% per halaman −0,60 "
+        "sampai +0,20).")
+    assert measured["evidence_source"] == "out/compare/slant_crnn_fase9_slant_vs_crnn_fase9_ctrl.json"
+    assert measured["settings"][-1] == ["Kelompok baris nyata", "ditaksir dari citra: tegak di bawah 0,1, miring 0,3 ke atas"]
+    # Kelompok tanpa selang kepercayaan: angkanya tetap, selangnya tidak dikarang.
+    data = json.loads(report.read_text(encoding="utf-8"))
+    data["ci95_pages"]["tegak"] = None
+    report.write_text(json.dumps(data), encoding="utf-8")
+    assert data_methods(root, "fase9_slant", SLANT9)["slant"]["evidence"].endswith("CER 15,70% → 15,50% (−0,20 poin).")
+
+    # Laporan dari ekspor hasil lain (CER semua baris bukan CER manifest), untuk pasangan lain, atau tanpa salah satu
+    # kelompok: tidak dikutip.
+    evidence = em.Evidence(root)
+    for cers in ((0.1701, 0.20), (0.17, 0.2001)):
+        slant_report(root, "crnn_fase9_slant", "crnn_fase9_ctrl", *cers)
+        assert evidence.slant("crnn_fase9_slant", "crnn_fase9_ctrl") is None
+        assert data_methods(root, "fase9_slant", SLANT9)["slant"]["evidence"] is None
+    wrong = slant_report(root, "crnn_fase9_slant", "crnn_fase9_ctrl", 0.17, 0.20)
+    wrong.write_text(wrong.read_text(encoding="utf-8").replace('"b": "crnn_fase9_ctrl"', '"b": "crnn_lain"'), encoding="utf-8")
+    assert evidence.slant("crnn_fase9_slant", "crnn_fase9_ctrl") is None
+    gone = json.loads(slant_report(root, "crnn_fase9_slant", "crnn_fase9_ctrl", 0.17, 0.20).read_text(encoding="utf-8"))
+    del gone["groups"]["semua"]["cer_b"]
+    (root / "out/compare/slant_crnn_fase9_slant_vs_crnn_fase9_ctrl.json").write_text(json.dumps(gone), encoding="utf-8")
+    assert evidence.slant("crnn_fase9_slant", "crnn_fase9_ctrl") is None
+    assert evidence.slant("crnn_tidak", "crnn_ada") is None
+    for empty in ("miring", "tegak"):
+        slant_report(root, "crnn_fase9_slant", "crnn_fase9_ctrl", 0.17, 0.20, **{empty: {"lines": 0, "pages": 0, "chars": 0,
+                                                                                         "cer_a": None, "cer_b": None}})
+        assert evidence.slant("crnn_fase9_slant", "crnn_fase9_ctrl") is not None
+        assert data_methods(root, "fase9_slant", SLANT9)["slant"]["evidence"] is None, empty
+    slant_report(root, "crnn_fase9_slant", "crnn_fase9_ctrl", 0.17, 0.20)
+
+    # Run resmi yang mewarisi render miring dari run di rantainya: buktinya milik pasangan itu, dan itu disebut.
+    sibling(root, "fase10_x", "fase9_slant", init="out/checkpoints/fase9_slant/last_snapshot.pt")
+    later = data_methods(root, "fase10_x", SLANT9, {"chain": []})["slant"]
+    assert later["evidence"] is None  # tanpa rantai yang memuat fase9_slant: tidak ada bukti
+    later = em.slant_entry("fase10_x", SLANT9, em.Evidence(root), root, CHAIN9 + ["fase10_x"])
+    assert later["status"] == "official" and later["evidence"].startswith(
+        "Pada run fase9_slant di rantai model resmi, terhadap run kontrol fase9_ctrl (jumlah langkah sama, tanpa render "
+        "miring): pada 270 baris nyata yang tertaksir miring")
+
+    # Run resmi TANPA render miring yang menjadi titik awal kedua lengan (fase8_std): butir "tested".
+    std = {key: value for key, value in SLANT9.items() if key not in ("slant_prob", "slant_max", "font_fixes")}
+    tested = data_methods(root, "fase8_std", std)["slant"]
+    assert tested["status"] == "tested"
+    assert tested["settings"] == [["Kelompok baris nyata", "ditaksir dari citra: tegak di bawah 0,1, miring 0,3 ke atas"]]
+    assert tested["evidence"].startswith("Pada run fase9_slant lawan fase9_ctrl (keduanya lanjutan model resmi, bukan model "
+                                         "resmi): pada 270 baris nyata yang tertaksir miring (20 halaman) CER 28,00% → 20,00%")
+    assert tested["evidence"].endswith(". Run resmi tidak memakainya.")
+    # Run resmi lain (bukan titik awal kedua lengan) tanpa render miring: tidak ada butirnya.
+    assert "slant" not in data_methods(root, RUN, {"augment": "none", "track_prob": 0.5, "track_max": 0.3})
+
+    # Pasangan yang bukan perlakuan-kontrol sungguhan: kontrol yang ikut dimiringkan, tanpa perbaikan font, atau
+    # berangkat dari bobot lain. Kemiringan terbesar kontrol tidak berarti apa-apa selama render miringnya mati.
+    for changes in ({"slant_prob": 0.5}, {"font_fixes": False}, {"init": "out/checkpoints/fase8_ctrl/last_snapshot.pt"}):
+        sibling(root, "fase9_ctrl", "fase9_slant", **{"slant_prob": 0.0, **changes})
+        assert em.control_run(root, "slant", "fase9_slant") is None, changes
+        assert data_methods(root, "fase9_slant", SLANT9)["slant"]["evidence"] is None
+        assert "slant" not in data_methods(root, "fase8_std", std)
+    sibling(root, "fase9_ctrl", "fase9_slant", slant_prob=0.0, slant_max=0.9)
+    assert em.control_run(root, "slant", "fase9_slant") == "fase9_ctrl"
+
+    # Pasangan render miring ikut disebut di butir run kontrol.
+    family = {"owners": {}, "dir": root / "ujifont", "twins": [], "unknown": [], "incomplete": False}
+    real = em.nusaaksara_card(root / "data/real/nusaaksara/labels.tsv")
+    group = em.evaluation_group(RUN, {"track_max": 0.3}, real, evidence, root, family, [])
+    control = {m["key"]: m for m in group["methods"]}["control"]
+    assert ["Kontrol render miring", "fase9_ctrl (untuk fase9_slant)"] in control["settings"]
+    assert "ejaan baku, dan render miring)" in control["summary"]
+
+
+def test_slant_probe_quotes_the_synthetic_dose_response_of_the_checkpoints_it_read(tmp_path):
+    root = fase9_repo(tmp_path)
+    family = {"owners": {}, "dir": root / "ujifont", "twins": [], "unknown": [], "incomplete": False}
+    real = em.nusaaksara_card(root / "data/real/nusaaksara/labels.tsv")
+
+    def probe(run, args, chain_runs):
+        group = em.evaluation_group(run, args, real, em.Evidence(root), root, family, [], chain_runs)
+        return {m["key"]: m for m in group["methods"]}.get("slant_probe")
+
+    assert probe("fase9_slant", SLANT9, CHAIN9) is None  # tanpa laporan: tidak ada butirnya
+    shears = [0.0, 0.2, 0.35, 0.5, 0.7]
+    rates = {"fase9_slant": [0.002, 0.003, 0.005, 0.008, 0.02], "fase9_ctrl": [0.0016, 0.0124, 0.0452, 0.1543, 0.30],
+             "fase8_std": [0.0016, 0.0125, 0.0450, 0.1540, 0.31]}
+    steps = {run: em.run_meta(root, run)[0] for run in rates}
+    report = {"settings": {"split": "val", "lines": 300, "font": "javatext.ttf", "size": 64, "seed": 0, "shears": shears},
+              "checkpoints": {run: {"step": steps[run]} for run in rates},
+              "results": {run: {str(s): {"cer": r, "chars": 9000} for s, r in zip(shears, values)} for run, values in rates.items()}}
+    path = root / "out/compare/slant_synthetic.json"
+    path.write_text(json.dumps(report), encoding="utf-8")
+
+    own = probe("fase9_slant", SLANT9, CHAIN9)
+    assert (own["kind"], own["status"], own["evidence_source"]) == ("evaluation", "used", "out/compare/slant_synthetic.json")
+    assert own["settings"] == [["Kemiringan yang diuji", "0; 0,2; 0,35; 0,5; 0,7"], ["Baris", "300"]]
+    assert own["evidence"] == (
+        "Render bersih javatext (300 baris val) yang dimiringkan 0 / 0,2 / 0,35 / 0,5 / 0,7: CER model resmi 0,20% / "
+        "0,30% / 0,50% / 0,80% / 2,00%; run kontrol fase9_ctrl (tanpa render miring) 0,16% / 1,24% / 4,52% / 15,43% / "
+        "30,00%. Kemiringan di atas 0,6 di luar rentang yang dilatihkan.")
+    assert own["note"] is None and own["files"] == ["scripts/eval_slant.py"]
+    # Model resmi tanpa render miring yang menjadi titik awal pasangan uji: pembandingnya run perlakuan.
+    std = {key: value for key, value in SLANT9.items() if key not in ("slant_prob", "slant_max", "font_fixes")}
+    assert probe("fase8_std", std, ["runA", RUN, "fase8_std"])["evidence"] == (
+        "Render bersih javatext (300 baris val) yang dimiringkan 0 / 0,2 / 0,35 / 0,5 / 0,7: CER model resmi 0,16% / "
+        "1,25% / 4,50% / 15,40% / 31,00%; run fase9_slant (dengan render miring, bukan model resmi) 0,20% / 0,30% / "
+        "0,50% / 0,80% / 2,00%.")
+    # Run resmi yang tidak dibaca laporan itu, atau checkpoint yang sudah berubah: angkanya tidak dikutip.
+    stale = probe(RUN, {"track_max": 0.3}, ["runA", RUN])
+    assert stale["evidence"] is None and stale["note"].startswith("Laporan evaluasi yang ada di mesin ini tidak bisa dicocokkan")
+    report["checkpoints"]["fase9_ctrl"]["step"] += 1
+    path.write_text(json.dumps(report), encoding="utf-8")
+    assert probe("fase9_slant", SLANT9, CHAIN9)["evidence"] is None
+    report["checkpoints"]["fase9_ctrl"]["step"] -= 1
+    report["checkpoints"]["fase9_ctrl"]["sha1"] = "000000000000"
+    path.write_text(json.dumps(report), encoding="utf-8")
+    assert probe("fase9_slant", SLANT9, CHAIN9)["evidence"] is None
+    del report["checkpoints"]["fase9_ctrl"]["sha1"]
+    # Kemiringan yang belum dibaca untuk salah satu model: bukan angka nol.
+    del report["results"]["fase9_slant"]["0.7"]
+    path.write_text(json.dumps(report), encoding="utf-8")
+    assert probe("fase9_slant", SLANT9, CHAIN9)["evidence"] is None
+    # Font perender yang berkasnya tidak ada di mesin ini: disebut.
+    report["results"]["fase9_slant"]["0.7"] = {"cer": 0.02, "chars": 9000}
+    report["settings"]["font"] = "tidakada.ttf"
+    path.write_text(json.dumps(report), encoding="utf-8")
+    assert probe("fase9_slant", SLANT9, CHAIN9)["note"] == ("Kemiripan font perender tidakada dengan font latih tidak bisa "
+                                                            "dihitung di mesin ini: berkas fontnya tidak ada.")
+
+
+def test_font_fixes_are_named_and_retire_the_defects_they_handle(tmp_path, monkeypatch):
+    root = fase9_repo(tmp_path)
+    plain = data_methods(root, "fase8_std", {"augment": "none"})["render"]
+    assert [pair[0] for pair in plain["settings"]] == ["Ukuran huruf", "Tinggi citra akhir"]
+    fixed = data_methods(root, "fase9_slant", {"augment": "none", "font_fixes": True})["render"]
+    assert fixed["settings"][-1] == ["Perbaikan font", "font yang pasangannya tidak menumpuk di lingkungan training "
+                                     "dikeluarkan; baris berpangkon + lungsi tidak dirender dengan font yang menggambarnya "
+                                     "seperti pangkon + lingsa"]
+    # Font bercacat run sebelumnya: yang tidak dipakai run resmi, dan yang cacatnya dihindari perbaikan font.
+    chain = [{"run": "fase8_std", "defects": ["BasaJan", "NewKramawirya"], "narrow": 0}]
+    paths = [Path("fonts/extra/NewKramawirya.ttf"), Path("fonts/NotoSansJavanese-Regular.ttf")]
+    both = data_methods(root, "fase9_slant", {"augment": "none", "font_fixes": True}, {"chain": chain, "paths": paths})
+    assert both["render"]["note"] == (
+        "Run sebelumnya di rantai (fase8_std) dilatih dengan font bercacat (BasaJan dan NewKramawirya): BasaJan tidak dipakai "
+        "run resmi, dan cacat NewKramawirya dihindari run resmi lewat perbaikan font; model resmi mewarisi bobotnya.")
+    only = data_methods(root, "fase9_slant", {"augment": "none", "font_fixes": True},
+                        {"chain": [{"run": "fase8_std", "defects": ["NewKramawirya"], "narrow": 0}], "paths": paths})
+    assert only["render"]["note"] == ("Run sebelumnya di rantai (fase8_std) dilatih dengan font bercacat (NewKramawirya): "
+                                      "cacat NewKramawirya dihindari run resmi lewat perbaikan font; model resmi mewarisi "
+                                      "bobotnya.")
+
+    # Cacat yang ditangani perbaikan font tidak dihitung untuk run yang memakainya; glyph yang tidak ada tetap cacat.
+    links, _ = em.chain(RUN, root)
+    link = links[-1]
+    monkeypatch.setattr(em, "FONT_DEFECTS", ("Salinan.ttf",))
+    monkeypatch.setattr(em, "FONT_FIXES_HANDLE", ("Salinan.ttf",))
+    recorded = em.recorded_fonts(root)
+    assert em.font_facts(root, link, [" ", KA, GA], recorded)["defects"] == ["Salinan"]
+    with_fixes = {**link, "args": {**link["args"], "font_fixes": True}}
+    assert em.font_facts(root, with_fixes, [" ", KA, GA], recorded)["defects"] == []
+    missing = em.font_facts(root, with_fixes, [" ", KA, GA, "꧎"], recorded)  # U+A9CE: tidak ada di font mana pun
+    assert missing["defects"] == sorted(path.stem for path in missing["paths"])
+    # Perbaikan font hanya menangani cacat yang memang ditanganinya.
+    monkeypatch.setattr(em, "FONT_FIXES_HANDLE", ("Lain.ttf",))
+    assert em.font_facts(root, with_fixes, [" ", KA, GA], recorded)["defects"] == ["Salinan"]
+
+
+def test_recipe_changes_name_the_slant_and_the_font_fixes():
+    def link(run, **args):
+        return {"run": run, "args": {"augment": "fase5", "standard_prob": 0.5, **args}}
+
+    std, slant = link("fase8_std"), link("fase9_slant", slant_prob=0.5, slant_max=0.6, font_fixes=True)
+    assert em.recipe_changes([std, slant], [10, 9]) == "fase9_slant: 9 font (dari 10), render miring, perbaikan font"
+    assert em.recipe_changes([slant, std], [9, 9]) == "fase8_std: tanpa render miring, tanpa perbaikan font"
+    assert em.recipe_changes([slant, link("b", slant_prob=0.25, slant_max=0.4, font_fixes=True)], [9, 9]) == (
+        "b: render miring p 0,25 hingga 0,4 (dari p 0,5 hingga 0,6)")
+    assert em.recipe_changes([slant, link("c", **slant["args"])], [9, 9]) == "c: argumen data sama, langkah tambahan"
+    # Kemiringan terbesar tanpa render miring tidak berarti apa-apa; perbaikan font tanpa render miring tetap disebut.
+    assert em.recipe_changes([std, link("d", slant_max=0.9)], [10, 10]) == "d: argumen data sama, langkah tambahan"
+    assert em.recipe_changes([std, link("e", font_fixes=True)], [10, 9]) == "e: 9 font (dari 10), perbaikan font"
+    assert em.data_recipe({})["slant_prob"] == 0 == em.data_recipe({"slant_max": 0.6})["slant_max"]
+    assert em.data_recipe({"slant_prob": 0.5, "slant_max": 0.6})["slant_max"] == 0.6
+    assert em.data_recipe({})["font_fixes"] is False and em.data_recipe({"font_fixes": True})["font_fixes"] is True
+    assert em.is_treated("slant", em.data_recipe({"slant_prob": 0.5})) and not em.is_treated("slant", em.data_recipe({}))
+
+
+def test_spelling_evidence_is_inherited_by_a_later_official_run(tmp_path):
+    root = fase9_repo(tmp_path)
+    spelling_report(root, "crnn_fase8_std", "crnn_fase8_ctrl", 0.20, 0.21, 0.75, 0.292)
+    later = em.spelling_entry("fase9_slant", SLANT9, em.Evidence(root), root, CHAIN9)
+    assert later["evidence"] == (
+        "Pada run fase8_std di rantai model resmi, terhadap run kontrol fase8_ctrl (jumlah langkah sama, tanpa ejaan baku): "
+        "dari 212 bentuk ejaan baku di 3 baris nyata, yang terbaca benar naik dari 29,2% ke 75,0% (+45,8 poin; selang "
+        "kepercayaan 95% per halaman +37,0 sampai +54,0), dan 80,0% dari keluarannya benar.")
+    assert later["evidence_source"] == "out/compare/spelling_crnn_fase8_std_vs_crnn_fase8_ctrl.json"
+    # Tanpa rantai yang memuat fase8_std: tidak ada bukti (bukan bukti milik run yang tidak diwarisi).
+    assert em.spelling_entry("fase9_slant", SLANT9, em.Evidence(root), root)["evidence"] is None
+    spelling_report(root, "crnn_fase8_std", "crnn_fase8_ctrl", 0.20, 0.21, 0.29, 0.30)
+    assert em.spelling_entry("fase9_slant", SLANT9, em.Evidence(root), root, CHAIN9)["evidence"] == (
+        "Pada run fase8_std di rantai model resmi, terhadap run kontrol fase8_ctrl (jumlah langkah sama, tanpa ejaan baku): "
+        "bentuk ejaan baku di baris nyata yang terbaca benar 30,0% lawan 29,0%.")
+
+
 def test_main_writes_the_card(tmp_path, monkeypatch, capsys):
     card = build(method_repo(tmp_path / "repo"))
     monkeypatch.setattr(em, "build", lambda: card)

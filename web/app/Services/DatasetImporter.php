@@ -59,6 +59,11 @@ class DatasetImporter extends CardImporter
                 'usage.train.rare_insert_prob' => 'share?', 'usage.train.rare_opener_prob' => 'share?',
                 // Ejaan baku saat render ada sejak fase 8: kartu sebelumnya tidak memuatnya.
                 'usage.train.standard_prob' => 'share?', 'lineage.runs.*.standard_prob' => 'share?',
+                // Render miring dan perbaikan font ada sejak fase 9; kemiringan terbesar = geser mendatar per tinggi
+                // baris, bisa lebih dari 1.
+                'usage.train.slant_prob' => 'share?', 'lineage.runs.*.slant_prob' => 'share?',
+                'usage.train.slant_max' => 'count?', 'lineage.runs.*.slant_max' => 'count?',
+                'usage.train.font_fixes' => 'bool?', 'lineage.runs.*.font_fixes' => 'bool?',
                 'usage.val.lines' => 'int', 'usage.val.steps' => 'list', 'usage.val.steps.*' => 'int', 'usage.val.fonts' => 'int',
                 'usage.test.lines' => 'int', 'usage.test.gates' => 'list', 'usage.test.gates.*.code' => 'text',
                 'usage.test.quick' => 'int?', 'usage.test.quick_max_lines' => 'int?', 'usage.test.full' => 'int?',

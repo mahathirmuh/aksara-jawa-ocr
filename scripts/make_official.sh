@@ -31,6 +31,7 @@ pairs() {  # pembanding (scripts/compare_runs.py) yang buktinya dikutip kartu un
     case "$1" in
         fase7_track) echo "crnn_fase7_track:crnn_fase7_ctrl crnn_fase7_ctrl:crnn_fase6_ctrl" ;;
         fase8_std) echo "crnn_fase8_std:crnn_fase8_ctrl crnn_fase8_std:crnn_fase7_track crnn_fase8_ctrl:crnn_fase7_track" ;;
+        fase9_slant) echo "crnn_fase9_slant:crnn_fase9_ctrl crnn_fase9_slant:crnn_fase8_std crnn_fase9_ctrl:crnn_fase8_std" ;;
     esac
 }
 
@@ -76,16 +77,21 @@ say "ekspor kartu data exit=${PIPESTATUS[0]}"
 (cd web && php artisan aksara:import --no-ansi) >> "$LOG" 2>&1
 say "impor exit=$?"
 
-# Berkas pembanding (dan, untuk run berejaan baku, laporan bentuk ejaan baku) dihitung ulang dari ekspor ini: kartu
-# metode hanya mengutip berkas yang CER-nya sama dengan manifest yang baru.
+# Berkas pembanding (dan, untuk run berejaan baku, laporan bentuk ejaan baku; untuk run fase 9, CER per kelompok
+# kemiringan baris) dihitung ulang dari ekspor ini: kartu metode hanya mengutip berkas yang CER-nya sama dengan manifest
+# yang baru.
 for pair in $(pairs "$RUN"); do
     a=${pair%%:*}
     b=${pair#*:}
     $PY scripts/compare_runs.py "$a" "$b" >> "$LOG" 2>&1
     say "compare_runs $a $b exit=$?"
-    case "$RUN" in fase8_*)
-        $PY scripts/eval_spelling.py real "$a" "$b" >> "$LOG" 2>&1
-        say "eval_spelling real $a $b exit=$?" ;;
+    case "$RUN" in
+        fase8_*)
+            $PY scripts/eval_spelling.py real "$a" "$b" >> "$LOG" 2>&1
+            say "eval_spelling real $a $b exit=$?" ;;
+        fase9_*)
+            $PY scripts/eval_slant.py real "$a" "$b" >> "$LOG" 2>&1
+            say "eval_slant real $a $b exit=$?" ;;
     esac
 done
 # Run resmi ikut dibaca evaluasi jarak (kartu hanya mengutip laporan yang membaca checkpoint resmi sekarang); bacaan

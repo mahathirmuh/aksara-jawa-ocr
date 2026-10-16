@@ -535,7 +535,8 @@ def test_official_beam_picks_the_language_model_that_wins_on_dev(tmp_path):
     write("fase8_std_o5.json", report(LM_PATH, 0.0182, 0.170, alpha=0.5))  # seri: urutan BEAM_REPORTS (model bahasa lama)
     assert official_beam("crnn_fase8_std", "fase8_std", snapshot, beam_dir)["lm"] == LM_PATH
     # Dev yang berbeda tidak bisa dibandingkan; laporan berejaan baku dengan model bahasa lain: ekspor berhenti.
-    for key, value in (("standard_prob", 0.0), ("lines", 200), ("augment", "none"), ("drop_space_prob", 0.0)):
+    for key, value in (("standard_prob", 0.0), ("lines", 200), ("augment", "none"), ("drop_space_prob", 0.0),
+                       ("slant_prob", 0.5), ("slant_max", 0.6), ("font_fixes", True)):
         write("fase8_std_o5.json", report(LM_PATH, 0.0204, 0.170, **{key: value}))
         with pytest.raises(SystemExit, match="disetel di dev yang berbeda"):
             official_beam("crnn_fase8_std", "fase8_std", snapshot, beam_dir)

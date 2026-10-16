@@ -316,6 +316,13 @@ class Dataset extends Component
         if (($run['standard_prob'] ?? 0) > 0) {
             $parts[] = 'ejaan baku p '.self::dec($run['standard_prob']);
         }
+        // Render miring seperti huruf italic dan perbaikan font latih (sejak fase 9); kartu sebelumnya tanpa kuncinya.
+        if (($run['slant_prob'] ?? 0) > 0) {
+            $parts[] = 'miring p '.self::dec($run['slant_prob']).' (hingga '.self::dec($run['slant_max'] ?? 0).')';
+        }
+        if ($run['font_fixes'] ?? false) {
+            $parts[] = 'perbaikan font';
+        }
         if ($run['real_train'] ?? false) {
             $parts[] = 'data nyata ikut dilatih';
         }

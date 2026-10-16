@@ -7,6 +7,9 @@ Render bersih split test dengan font held-out ikut diukur untuk memastikan G1 ti
   .venv/Scripts/python scripts/beam_eval.py out/checkpoints/fase5_fonts/last_snapshot.pt \\
       --lm data/charlm/o5_n300000_ds0.5.pkl --name fonts_o5
 
+`--dev-from-checkpoint` merender dev dengan resep data training checkpoint itu sendiri (augmentasi, buang spasi, ejaan
+baku, render miring, perbaikan font dari argumennya; font dari log run-nya), menggantikan opsi --dev-* dan --extra-fonts.
+
 Hasil: out/beam/<name>.json.
 """
 
@@ -39,13 +42,17 @@ OUT_DIR = ROOT / "out" / "beam"
 HELD_OUT_FONT = "C:/Windows/Fonts/javatext.ttf"
 
 
-def synthetic_items(model, tokenizer, split, n, fonts, augment, drop_space_prob, seed, standard_prob=0.0) -> list:
+def synthetic_items(model, tokenizer, split, n, fonts, augment, drop_space_prob, seed, standard_prob=0.0,
+                    slant_prob=0.0, slant_max=0.0, avoid_conflicts=False) -> list:
     """Baris split yang dirender seperti saat training. `standard_prob` = peluang ejaan baku (src.train
-    --standard-prob); 0 tidak mengonsumsi angka acak, jadi dev laporan lama tetap sama persis."""
+    --standard-prob), `slant_prob`/`slant_max` = render miring (--slant-prob/--slant-max), `avoid_conflicts` = perbaikan
+    font (--font-fixes) untuk baris yang digambar sama oleh sebuah font; peluang 0 tidak mengonsumsi angka acak, jadi
+    dev laporan lama tetap sama persis."""
     lines = (ROOT / "data" / "splits" / f"{split}.txt").read_text(encoding="utf-8").splitlines()
     lines = random.Random(seed).sample(lines, min(n, len(lines)))
     dataset = SyntheticLines(lines, tokenizer, fonts, augment=build_augment(augment), deterministic=True,
-                             seed=seed, drop_space_prob=drop_space_prob, standard_prob=standard_prob)
+                             seed=seed, drop_space_prob=drop_space_prob, standard_prob=standard_prob,
+                             slant_prob=slant_prob, slant_max=slant_max, avoid_conflicts=avoid_conflicts)
     items = []
     for i in range(len(lines)):
         try:
@@ -54,6 +61,32 @@ def synthetic_items(model, tokenizer, split, n, fonts, augment, drop_space_prob,
             continue
         items.append((nfc(text), line_log_probs(img, model)))
     return items
+
+
+def training_recipe(checkpoint: Path, root: Path = ROOT) -> dict:
+    """Resep data training sebuah checkpoint, untuk merender dev seperti training-nya: argumen di checkpoint, dan font
+    dari event "start" proses yang menulis checkpoint itu (aturan export_datasets.logged_fonts; src.train mencatat font
+    SESUDAH perbaikan font, di interpreter training). Berhenti bila log tidak mencatat font atau berkas fontnya hilang."""
+    from export_datasets import logged_fonts, read_log  # impor di sini: hanya opsi ini yang membutuhkannya
+
+    saved = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    args, step = saved.get("args") or {}, saved.get("step") or 0
+    names = logged_fonts(read_log(checkpoint.parent / "log.jsonl"), step)
+    if not names:
+        raise SystemExit(f"log {checkpoint.parent / 'log.jsonl'} tidak mencatat font latih proses checkpoint ini; "
+                         "dev tidak bisa dirender seperti training-nya")
+    folders = [root / "fonts"] + ([root / args["extra_fonts"]] if args.get("extra_fonts") else [])
+    fonts = []
+    for name in names:
+        found = [folder / name for folder in folders if (folder / name).exists()]
+        if not found:
+            raise SystemExit(f"font latih {name} (log run checkpoint ini) tidak ada di {', '.join(map(str, folders))}")
+        fonts.append(found[0])
+    slant = args.get("slant_prob") or 0.0
+    return {"augment": args.get("augment") or "none", "drop_space_prob": args.get("drop_space_prob") or 0.0,
+            "standard_prob": args.get("standard_prob") or 0.0, "slant_prob": slant,
+            "slant_max": (args.get("slant_max") or 0.0) if slant else 0.0, "font_fixes": bool(args.get("font_fixes")),
+            "fonts": fonts}
 
 
 def real_items(model, labels: Path, pad_ratio: float) -> list:
@@ -99,6 +132,9 @@ def main() -> None:
     parser.add_argument("--dev-drop-space-prob", type=float, default=0.5)
     parser.add_argument("--dev-standard-prob", type=float, default=0.0,
                         help="peluang ejaan baku di dev (src.train --standard-prob); samakan dengan training checkpoint")
+    parser.add_argument("--dev-from-checkpoint", action="store_true",
+                        help="render dev dengan resep data training checkpoint itu (argumen + font dari log-nya), "
+                             "menggantikan opsi --dev-* di atas dan --extra-fonts")
     parser.add_argument("--extra-fonts", default="fonts/extra", help="ikut dipakai merender dev (seperti training)")
     parser.add_argument("--alphas", default="0,0.25,0.5,0.75,1,1.5")
     parser.add_argument("--betas", default="0,0.5,1,2")
@@ -114,12 +150,18 @@ def main() -> None:
     model, tokenizer = load_checkpoint(args.checkpoint)
     lm = CharLM.load(Path(args.lm))
     fonts = list(TRAIN_FONTS) + sorted(p for p in (ROOT / args.extra_fonts).glob("*") if p.suffix.lower() in {".ttf", ".otf"})
+    recipe = {"augment": args.dev_augment, "drop_space_prob": args.dev_drop_space_prob,
+              "standard_prob": args.dev_standard_prob, "slant_prob": 0.0, "slant_max": 0.0, "font_fixes": False}
+    if args.dev_from_checkpoint:
+        recipe = training_recipe(Path(args.checkpoint))
+        fonts = recipe.pop("fonts")
     report = {"checkpoint": args.checkpoint, "lm": args.lm, "lm_meta": lm.meta, "lm_order": lm.order,
               "beam_width": args.beam_width}
     started = time.time()
 
-    dev = synthetic_items(model, tokenizer, "val", args.dev_lines, fonts, args.dev_augment,
-                          args.dev_drop_space_prob, seed=4242, standard_prob=args.dev_standard_prob)
+    dev = synthetic_items(model, tokenizer, "val", args.dev_lines, fonts, recipe["augment"], recipe["drop_space_prob"],
+                          seed=4242, standard_prob=recipe["standard_prob"], slant_prob=recipe["slant_prob"],
+                          slant_max=recipe["slant_max"], avoid_conflicts=recipe["font_fixes"])
     dev_greedy = decode(dev, tokenizer, greedy=True)
     grid = []
     for alpha, beta in itertools.product(map(float, args.alphas.split(",")), map(float, args.betas.split(","))):
@@ -128,9 +170,8 @@ def main() -> None:
         print(f"dev alpha {alpha:<4} beta {beta:<3} CER {grid[-1]['cer']:.4%}", flush=True)
     chosen = min(grid, key=lambda g: (g["cer"], g["alpha"], g["beta"]))
     dev_beam = decode(dev, tokenizer, lm, chosen["alpha"], chosen["beta"], args.beam_width)
-    report["dev"] = {"augment": args.dev_augment, "drop_space_prob": args.dev_drop_space_prob,
-                     "standard_prob": args.dev_standard_prob, "grid": grid,
-                     "chosen": chosen, **compare(dev, dev_greedy, dev_beam)}
+    report["dev"] = {**recipe, "fonts": [Path(font).name for font in fonts], "from_checkpoint": args.dev_from_checkpoint,
+                     "grid": grid, "chosen": chosen, **compare(dev, dev_greedy, dev_beam)}
     print(f"dev: greedy {report['dev']['greedy_cer']:.4%} -> beam {report['dev']['beam_cer']:.4%} "
           f"(alpha {chosen['alpha']}, beta {chosen['beta']})", flush=True)
 

@@ -828,3 +828,34 @@ def test_standard_spelling_of_each_run_is_read_from_its_checkpoint(tmp_path):
     card = ed.build(root, "runB", root / "ujifont")
     first, last = card["lineage"]["runs"]
     assert (first["standard_prob"], last["standard_prob"], card["usage"]["train"]["standard_prob"]) == (0.25, 0.5, 0.5)
+
+
+def test_slant_and_font_fixes_of_each_run_are_read_from_its_checkpoint(tmp_path):
+    # Fase 9: render miring dan perbaikan font tiap run di rantai dibaca dari argumen checkpoint-nya; kemiringan terbesar
+    # hanya berarti bila render miring hidup (argparse menyimpan bawaannya, 0,6, juga untuk run tanpa render miring).
+    root = fake_repo(tmp_path)
+    ckpt = root / "out/checkpoints"
+    save_ckpt(ckpt / "runA" / "last_snapshot.pt", 6, train_lines=200, slant_max=0.6)
+    save_ckpt(ckpt / "runB" / "last_snapshot.pt", 10, init="out/checkpoints/runA/last_snapshot.pt", workers=2,
+              extra_fonts="fonts/extra", augment="fase5", drop_space_prob=0.5, track_prob=0.5, track_max=0.3,
+              slant_prob=0.5, slant_max=0.6, font_fixes=True)
+    card = ed.build(root, "runB", root / "ujifont")
+    first, last = card["lineage"]["runs"]
+
+    def facts(run):
+        return run["slant_prob"], run["slant_max"], run["font_fixes"]
+
+    assert facts(first) == (0.0, 0.0, False) and facts(last) == facts(card["usage"]["train"]) == (0.5, 0.6, True)
+    # Perbaikan font mengeluarkan font yang pasangannya tidak menumpuk saat run mulai, jadi font di folder yang tidak
+    # tercatat di log run itu diperingatkan bersama kemungkinan sebabnya.
+    core = [font.name for font in TRAIN_FONTS]
+    write_log(ckpt / "runB" / "log.jsonl", [{**start(0), "fonts": core}, {"step": 5, "val_cer": 0.1, "val_lines": 10},
+                                           {"step": 10, "val_cer": 0.05, "val_lines": 10}, {"step": 10, "event": "end"}])
+    card = ed.build(root, "runB", root / "ujifont")
+    assert card["warnings"] == [
+        "Run runB: folder font sekarang memuat 1 font yang tidak tercatat di log run itu (Salinan.ttf); font itu dicatat "
+        "tidak dipakai run itu. Run itu memakai perbaikan font (--font-fixes), yang mengeluarkan font yang pasangannya tidak "
+        "menumpuk di lingkungan training; font yang ditambahkan ke folder sesudah run dilatih juga tampil begini."]
+    # Cacat yang ditangani perbaikan font adalah cacat yang memang tercatat (kartu metode berhenti menghitungnya).
+    assert set(ed.FONT_FIXES_HANDLE) <= set(ed.FONT_DEFECTS)
+    assert all("--font-fixes" in " ".join(ed.FONT_NOTES[name]) for name in ed.FONT_FIXES_HANDLE)

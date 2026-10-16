@@ -60,7 +60,9 @@ ALPHA, BETA, WIDTH = 0.25, 1.0, 16
 # 2,04%).
 BEAM_REPORTS = {"o5": LM_PATH, "o5std": LM_STD_PATH}
 LM_LABELS = {LM_PATH.name: "LM karakter o5", LM_STD_PATH.name: "LM karakter o5 ejaan baku"}
-DEV_KEYS = ("augment", "drop_space_prob", "standard_prob", "lines")  # setelan dev yang harus sama untuk dibandingkan
+# Setelan dev yang harus sama untuk dibandingkan; laporan sebelum fase 9 tidak punya kunci render miring dan perbaikan
+# font (sama-sama None).
+DEV_KEYS = ("augment", "drop_space_prob", "standard_prob", "lines", "slant_prob", "slant_max", "font_fixes")
 CHECKPOINTS = {
     "crnn_4b": ROOT / "out/checkpoints/base/best_4b_step1500.pt",
     "crnn_core": ROOT / "out/checkpoints/fase5_core/last_snapshot.pt",

@@ -40,6 +40,7 @@ sys.path.insert(0, str(ROOT))
 
 from export_datasets import (  # noqa: E402
     FONT_DEFECTS,
+    FONT_FIXES_HANDLE,
     TEST_FONT_DIR,
     advances,
     chain,
@@ -114,14 +115,15 @@ CONTROLS = {
     "tracking": {"fase7_track": "fase7_ctrl"},
     "rare": {"fase7_track_rare": "fase7_track", "fase6_rare": "fase6_ctrl"},
     "spelling": {"fase8_std": "fase8_ctrl"},
+    "slant": {"fase9_slant": "fase9_ctrl"},
 }
 TREATMENTS = {"fonts": "font tambahan", "tracking": "jarak antar suku kata", "rare": "sisipan aksara langka",
-              "spelling": "ejaan baku"}
+              "spelling": "ejaan baku", "slant": "render miring"}
 # Argumen src.train milik tiap perlakuan (boleh berbeda antara run perlakuan dan kontrolnya), dan argumen pelatihan
 # yang harus sama di keduanya di samping argumen data (`data_recipe`).
 TREATMENT_KEYS = {"fonts": ("extra_fonts",), "tracking": ("track_prob", "track_max"),
                   "rare": ("rare_insert_prob", "rare_opener_prob", "rare_max_similarity", "rare_attach"),
-                  "spelling": ("standard_prob",)}
+                  "spelling": ("standard_prob",), "slant": ("slant_prob", "slant_max")}
 # Aturan ejaan baku src/spelling.py (nama di RULE_NAMES) dalam kata-kata kartu. Aturan baru tanpa kata di sini
 # menghentikan ekspor, supaya butir ejaan baku tidak menyebut daftar aturan yang sudah usang.
 SPELLING_WORDS = {"nya": "nya di depan ca/ja", "cerek": "pa cerek", "lelet": "nga lelet", "keret": "keret",
@@ -306,6 +308,23 @@ class Evidence:
                 return None
         return report
 
+    def slant(self, a: str, b: str) -> dict | None:
+        """Laporan scripts/eval_slant.py real untuk pipeline A dan B (CER per kelompok kemiringan baris nyata), dengan
+        aturan yang sama dengan `compare`: memang untuk keduanya, dan CER semua baris kedua sisinya sama dengan metrik
+        manifest ini."""
+        path = self.root / "out/compare" / f"slant_{a}_vs_{b}.json"
+        if not path.exists():
+            return None
+        report = read_json(path)
+        if report.get("a") != a or report.get("b") != b:
+            return None
+        whole = (report.get("groups") or {}).get("semua") or {}
+        for side, key in (("cer_a", a), ("cer_b", b)):
+            now, then = self.cer(self.SCOPE, key), whole.get(side)
+            if now is None or then is None or abs(then - now) > 1e-9:
+                return None
+        return report
+
     def g3_change(self, treated: str, control: str) -> tuple[str, str] | None:
         """Kalimat "G3 kontrol -> perlakuan (selisih; SK 95% per halaman)" dan berkas sumbernya."""
         after, before = self.cer(self.SCOPE, treated), self.cer(self.SCOPE, control)
@@ -354,10 +373,11 @@ def file_sha(path: Path) -> str:
 
 def data_recipe(args: dict) -> dict:
     """Argumen data sebuah run dalam bentuk yang bisa dibandingkan: yang mati (None, 0, "", False) disamakan, dan
-    pengaturan yang hanya berlaku bila induknya hidup (jarak terbesar, saringan dan tempelan sisipan) dikosongkan bila
-    induknya mati."""
+    pengaturan yang hanya berlaku bila induknya hidup (jarak terbesar, saringan dan tempelan sisipan, kemiringan
+    terbesar) dikosongkan bila induknya mati."""
     track = args.get("track_prob") or 0
     rare = bool(args.get("rare_insert_prob") or args.get("rare_opener_prob"))
+    slant = args.get("slant_prob") or 0
     return {
         "augment": args.get("augment") or "none",
         "extra_fonts": args.get("extra_fonts") or "",
@@ -373,14 +393,23 @@ def data_recipe(args: dict) -> dict:
         "real_train": args.get("real_train") or "",
         "real_val": args.get("real_val") or "",
         "standard_prob": args.get("standard_prob") or 0,
+        "slant_prob": slant,
+        "slant_max": (args.get("slant_max") or 0) if slant else 0,
+        "font_fixes": bool(args.get("font_fixes")),
     }
 
 
 def is_treated(kind: str, recipe: dict) -> bool:
     """Apakah perlakuan `kind` hidup di resep data ini."""
     return {"fonts": bool(recipe["extra_fonts"]), "tracking": recipe["track_prob"] > 0,
-            "spelling": recipe["standard_prob"] > 0,
+            "spelling": recipe["standard_prob"] > 0, "slant": recipe["slant_prob"] > 0,
             "rare": recipe["rare_insert_prob"] > 0 or recipe["rare_opener_prob"] > 0}[kind]
+
+
+def started_from(root: Path, run: str, base: str) -> bool:
+    """Apakah checkpoint `run` dilanjutkan langsung dari checkpoint run `base` (argumen --init-nya)."""
+    meta = run_meta(root, run)
+    return meta is not None and Path(training_value(meta[1], "init")).parent.name == base
 
 
 def control_run(root: Path, kind: str, run: str) -> str | None:
@@ -457,11 +486,15 @@ def font_facts(root: Path, link: dict, charset: list[str], recorded: dict[str, i
         missing, added = len(folder) < then, len(folder) > then
     else:
         paths, train_count, source, current = folder, len(folder), "folder", True
+    # Cacat yang ditangani perbaikan font (--font-fixes) bukan cacat run yang memakainya; cacat lain (glyph yang tidak
+    # ada) tetap.
+    fixed = FONT_FIXES_HANDLE if args.get("font_fixes") else ()
     return {
         "run": link["run"], "train": train_count, "core": core_count, "extra": train_count - core_count, "source": source,
         "measured": len(paths), "current": current, "paths": paths, "missing": missing, "added": added,
         "dropped": [Path(name).stem for name in dropped_fonts(rows, link["step"])], "real": bool(args.get("real_train")),
-        "defects": sorted(p.stem for p in paths if p.name in FONT_DEFECTS or missing_glyphs(p, charset)),
+        "defects": sorted(p.stem for p in paths
+                          if (p.name in FONT_DEFECTS and p.name not in fixed) or missing_glyphs(p, charset)),
         "narrow": sum(1 for p in paths if space_ratio(str(p)) < MIN_SPACE_RATIO),
     }
 
@@ -724,15 +757,29 @@ def data_group(run: str, args: dict, fonts: dict, real: dict, evidence: Evidence
     inherited = sorted({stem for fact in earlier for stem in fact["defects"] if stem not in fonts["defects"]})
     if inherited:
         runs = [fact["run"] for fact in earlier if any(stem in inherited for stem in fact["defects"])]
-        notes.append(f"Run sebelumnya di rantai ({listing(runs)}) dilatih dengan font bercacat yang tidak dipakai run resmi "
-                     f"({listing(inherited)}); model resmi mewarisi bobotnya.")
+        # Font bercacat run sebelumnya yang MASIH dipakai run resmi: cacatnya ditangani perbaikan font run resmi.
+        used = {path.stem for path in fonts.get("paths") or []}
+        avoided = [stem for stem in inherited if stem in used]
+        unused = [stem for stem in inherited if stem not in used]
+        if avoided:
+            parts = ([f"{listing(unused)} tidak dipakai run resmi"] if unused else []) + [
+                f"cacat {listing(avoided)} dihindari run resmi lewat perbaikan font"]
+            notes.append(f"Run sebelumnya di rantai ({listing(runs)}) dilatih dengan font bercacat ({listing(inherited)}): "
+                         f"{', dan '.join(parts)}; model resmi mewarisi bobotnya.")
+        else:
+            notes.append(f"Run sebelumnya di rantai ({listing(runs)}) dilatih dengan font bercacat yang tidak dipakai run "
+                         f"resmi ({listing(inherited)}); model resmi mewarisi bobotnya.")
+    render_settings = [("Ukuran huruf", f"{low} sampai {high} piksel, diundi per baris"), ("Tinggi citra akhir", f"{H} piksel")]
+    if args.get("font_fixes"):
+        render_settings.append(("Perbaikan font", "font yang pasangannya tidak menumpuk di lingkungan training "
+                                "dikeluarkan; baris berpangkon + lungsi tidak dirender dengan font yang menggambarnya "
+                                "seperti pangkon + lingsa"))
     methods = [
         entry("render", "Render teks dengan shaping OpenType", "data", "official",
               "Teks aksara Jawa dirender dengan font lewat mesin tata huruf HarfBuzz (RAQM), supaya pasangan menumpuk "
               "dan taling pindah ke kiri seperti pada tulisan aksara Jawa yang benar. Tanpa RAQM gambar tetap keluar "
               "tetapi salah, jadi keberadaannya diperiksa di kode.",
-              [("Ukuran huruf", f"{low} sampai {high} piksel, diundi per baris"), ("Tinggi citra akhir", f"{H} piksel")],
-              files=["src/render.py", "src/dataset.py"], note=" ".join(notes) or None),
+              render_settings, files=["src/render.py", "src/dataset.py"], note=" ".join(notes) or None),
     ]
 
     # Bukti variasi font berasal dari run perlakuan dan kontrolnya sendiri, bukan dari model resmi: itu disebut di
@@ -800,7 +847,10 @@ def data_group(run: str, args: dict, fonts: dict, real: dict, evidence: Evidence
              else None),
             change[1] if change else None, files=["src/render.py", "src/dataset.py"]))
     if args.get("standard_prob"):
-        methods.append(spelling_entry(run, args, evidence, root))
+        methods.append(spelling_entry(run, args, evidence, root, chain_runs))
+    slant = slant_entry(run, args, evidence, root, chain_runs)
+    if slant:
+        methods.append(slant)
     if args.get("drop_space_prob"):
         # Spasi dibuang bila undiannya kena ATAU font terpilih berspasi terlalu sempit (src/dataset.py), jadi porsi
         # baris tanpa spasi lebih besar dari peluangnya: p + (1 - p) x porsi font berspasi sempit. Aturan font
@@ -884,27 +934,30 @@ def data_group(run: str, args: dict, fonts: dict, real: dict, evidence: Evidence
     return {"key": "data", "title": "Data latih sintetis", "intro": intro, "methods": methods}
 
 
-def spelling_entry(run: str, args: dict, evidence: Evidence, root: Path) -> dict:
+def spelling_entry(run: str, args: dict, evidence: Evidence, root: Path, chain_runs: list[str] | None = None) -> dict:
     """Butir ejaan baku (src/spelling.py, `--standard-prob`). Buktinya = titik akhir utama fase 8: bentuk ejaan baku di
-    baris nyata yang terbaca benar, run ini lawan run kontrolnya (scripts/eval_spelling.py real), hanya bila pasangan
-    kontrolnya sah (`control_run`) dan laporannya dihitung dari prediksi yang sama dengan manifest."""
+    baris nyata yang terbaca benar, run perlakuan lawan run kontrolnya (scripts/eval_spelling.py real), hanya bila
+    pasangan kontrolnya sah (`control_run`) dan laporannya dihitung dari prediksi yang sama dengan manifest. Run resmi
+    yang sendiri tidak diuji dengan kontrol ejaan baku (mis. fase9_slant, turunan fase8_std): buktinya milik pasangan
+    terdekat di rantainya (`chain_pair`), dan itu disebut."""
     unknown = [name for name in RULE_NAMES if name not in SPELLING_WORDS]
     if unknown:
         raise SystemExit(f"aturan ejaan baku {', '.join(unknown)} belum punya kata di SPELLING_WORDS "
                          "(scripts/export_methods.py); perbarui butir ejaan baku")
-    control = control_run(root, "spelling", run)
-    report = evidence.spelling(pipeline_key(run) or "", pipeline_key(control) or "") if control else None
+    treated, control = chain_pair(root, "spelling", run, chain_runs or [run]) or (run, None)
+    report = evidence.spelling(pipeline_key(treated) or "", pipeline_key(control) or "") if control else None
+    lead = "Terhadap" if treated == run else f"Pada run {treated} di rantai model resmi, terhadap"
     measured, source = None, None
     if report and report["a"]["recall"] is not None and report["b"]["recall"] is not None:
         a, b = report["a"], report["b"]
         low, high = report["ci95_pages"]["recall"]
-        measured = (f"Terhadap run kontrol {control} (jumlah langkah sama, tanpa ejaan baku): dari {num(a['in_reference'])} "
+        measured = (f"{lead} run kontrol {control} (jumlah langkah sama, tanpa ejaan baku): dari {num(a['in_reference'])} "
                     f"bentuk ejaan baku di {num(report['lines'])} baris nyata, yang terbaca benar naik dari "
                     f"{pct(b['recall'], 1)} ke {pct(a['recall'], 1)} ({points(a['recall'] - b['recall'], 1)}; selang "
                     f"kepercayaan 95% per halaman {interval(low, high, 1)})"
                     + (f", dan {pct(a['precision'], 1)} dari keluarannya benar." if a["precision"] is not None else ".")
                     ) if a["recall"] > b["recall"] else (
-                    f"Terhadap run kontrol {control} (jumlah langkah sama, tanpa ejaan baku): bentuk ejaan baku di baris "
+                    f"{lead} run kontrol {control} (jumlah langkah sama, tanpa ejaan baku): bentuk ejaan baku di baris "
                     f"nyata yang terbaca benar {pct(b['recall'], 1)} lawan {pct(a['recall'], 1)}.")
         source = relative(root / "out/compare" / f"spelling_{a['key']}_vs_{b['key']}.json", root)
     return entry(
@@ -915,6 +968,66 @@ def spelling_entry(run: str, args: dict, evidence: Evidence, root: Path) -> dict
         [("Peluang", dec(args["standard_prob"])), ("Aturan", ", ".join(SPELLING_WORDS[name] for name in RULE_NAMES))],
         measured, source, files=["src/spelling.py", "src/dataset.py"],
         note="Bagian uji korpus (gerbang G1 dan G2) tetap berejaan korpus, jadi kedua gerbang itu tidak mengukur ejaan baku.")
+
+
+def slant_pair(root: Path, run: str, used: bool, chain_runs: list[str]) -> tuple[str, str] | None:
+    """Pasangan uji render miring yang dikutip kartu. Run resmi yang memakainya: pasangan terdekat di rantainya
+    (`chain_pair`). Run resmi yang tidak memakainya: pasangan sah yang KEDUA lengannya dilanjutkan langsung dari
+    checkpoint run resmi (diuji sebagai lanjutan model resmi, tetapi tidak dipakai), kalau tidak ada: None."""
+    if used:
+        return chain_pair(root, "slant", run, chain_runs)
+    return next(((treated, control) for treated, control in CONTROLS["slant"].items()
+                 if control_run(root, "slant", treated) == control and started_from(root, treated, run)), None)
+
+
+def slant_entry(run: str, args: dict, evidence: Evidence, root: Path, chain_runs: list[str] | None = None) -> dict | None:
+    """Butir render miring (src.dataset.oblique, `--slant-prob`): "official" bila run resmi memakainya, "tested" bila
+    hanya diuji sebagai lanjutan model resmi (`slant_pair`), tidak ada bila keduanya tidak. Buktinya = titik akhir
+    utama fase 9 dan efek sampingnya: CER baris nyata yang tertaksir miring dan yang tegak, run perlakuan lawan run
+    kontrolnya (scripts/eval_slant.py real, perlakuan sebagai A), hanya bila laporannya dihitung dari prediksi yang sama
+    dengan manifest."""
+    used = bool(args.get("slant_prob"))
+    pair = slant_pair(root, run, used, chain_runs or [run])
+    if not used and pair is None:
+        return None
+    measured, source = None, None
+    report = evidence.slant(pipeline_key(pair[0]) or "", pipeline_key(pair[1]) or "") if pair else None
+    groups = (report or {}).get("groups") or {}
+    tilted, upright = groups.get("miring") or {}, groups.get("tegak") or {}
+    if report and tilted.get("lines") and upright.get("lines"):
+        treated, control = pair
+        ci = report.get("ci95_pages") or {}
+
+        def part(name: str, group: dict, label: str) -> str:
+            text = (f"pada {num(group['lines'])} baris {label} ({num(group['pages'])} halaman) CER {pct(group['cer_b'])} → "
+                    f"{pct(group['cer_a'])} ({points(group['cer_a'] - group['cer_b'])}")
+            return text + (f"; selang kepercayaan 95% per halaman {interval(*ci[name])})" if ci.get(name) else ")")
+
+        if not used:
+            lead = f"Pada run {treated} lawan {control} (keduanya lanjutan model resmi, bukan model resmi): "
+        elif treated == run:
+            lead = f"Terhadap run kontrol {control} (jumlah langkah sama, tanpa render miring): "
+        else:
+            lead = f"Pada run {treated} di rantai model resmi, terhadap run kontrol {control} (jumlah langkah sama, tanpa render miring): "
+        measured = (lead + part("miring", tilted, "nyata yang tertaksir miring") + "; "
+                    + part("tegak", upright, "nyata yang tegak") + ("." if used else ". Run resmi tidak memakainya."))
+        source = relative(root / "out/compare" / f"slant_{report['a']}_vs_{report['b']}.json", root)
+    thresholds = (report or {}).get("thresholds") or {}
+    settings = ([("Peluang", dec(args["slant_prob"])),
+                 ("Kemiringan", f"0 sampai {dec(args.get('slant_max') or 0)} (geser mendatar per tinggi baris), diundi "
+                                "per baris")] if used else [])
+    if thresholds.get("tegak") and thresholds.get("miring"):
+        settings.append(("Kelompok baris nyata", f"ditaksir dari citra: tegak di bawah {dec(thresholds['tegak'][1])}, "
+                                                 f"miring {dec(thresholds['miring'][0])} ke atas"))
+    return entry(
+        "slant", "Render miring seperti huruf italic", "data", "official" if used else "tested",
+        "Sebagian citra hasil render dimiringkan ke kanan seperti huruf italic cetakan: tiap baris piksel digeser "
+        "mendatar sebanding dengan tingginya, sebelum augmentasi lain. Sebagian cetakan nyata memakai huruf miring, dan "
+        "baris seperti itu terbaca jauh lebih buruk daripada baris tegak.",
+        settings, measured, source, files=["src/dataset.py", "scripts/eval_slant.py"],
+        note="Kelompok baris nyata ditaksir dari citra (kemiringan yang membuat kolom tinta bersambung paling panjang); "
+             "potongan bertekstur raster kadang tertaksir tegak walau miring. Huruf italic cetakan berbeda bentuk dari huruf "
+             "tegak yang dimiringkan, jadi render miring hanya meniru sebagian.")
 
 
 def recipe_changes(links: list[dict], counts: list[int]) -> str:
@@ -947,6 +1060,12 @@ def recipe_changes(links: list[dict], counts: list[int]) -> str:
         if new["standard_prob"] != old["standard_prob"]:
             changed.append("tanpa ejaan baku" if not new["standard_prob"] else f"ejaan baku p {dec(new['standard_prob'])}"
                            + (f" (dari p {dec(old['standard_prob'])})" if old["standard_prob"] else ""))
+        if (new["slant_prob"], new["slant_max"]) != (old["slant_prob"], old["slant_max"]):
+            changed.append("tanpa render miring" if not new["slant_prob"] else "render miring" if not old["slant_prob"]
+                           else f"render miring p {dec(new['slant_prob'])} hingga {dec(new['slant_max'])} (dari p "
+                           f"{dec(old['slant_prob'])} hingga {dec(old['slant_max'])})")
+        if new["font_fixes"] != old["font_fixes"]:
+            changed.append("perbaikan font" if new["font_fixes"] else "tanpa perbaikan font")
         if new["train_lines"] != old["train_lines"]:
             changed.append(f"kumpulan {num(new['train_lines'])} baris (dari {num(old['train_lines'])})")
         if new["seed"] != old["seed"]:
@@ -1050,6 +1169,51 @@ def beam_lm(official: str, pipelines: list[dict]) -> Path:
         if f"· {LM_LABELS[lm.name]} ·" in config:
             return lm
     return LM_PATH
+
+
+def slant_probe_entry(run: str, args: dict, report: dict, root: Path, family: dict, chain_runs: list[str]) -> dict:
+    """Evaluasi kemiringan sintetis (scripts/eval_slant.py synthetic): CER render bersih yang dimiringkan bertahap, untuk
+    model resmi dan run pembanding render miring (kontrolnya bila run resmi memakai render miring, run perlakuannya bila
+    hanya diuji sebagai lanjutan model resmi). Angkanya hanya dikutip bila laporan itu membaca checkpoint kedua run yang
+    sekarang (`report_matches`)."""
+    settings = report.get("settings") or {}
+    shears = settings.get("shears") or []
+    used = bool(args.get("slant_prob"))
+    pair = slant_pair(root, run, used, chain_runs)
+    other, label = None, None
+    if pair and used:
+        other = pair[1]
+        whose = "" if pair[0] == run else f", kontrol untuk {pair[0]} di rantai model resmi"
+        label = f"run kontrol {other} (tanpa render miring{whose})"
+    elif pair:
+        other, label = pair[0], f"run {pair[0]} (dengan render miring, bukan model resmi)"
+    tied = report_matches(report, root, run) and (other is None or report_matches(report, root, other))
+    results = report.get("results") or {}
+
+    def series(name: str) -> str | None:
+        values = [((results.get(name) or {}).get(str(shear)) or {}).get("cer") for shear in shears]
+        return None if not values or None in values else " / ".join(pct(value) for value in values)
+
+    measured = None
+    ours, theirs = series(run), series(other) if other else None
+    if tied and ours:
+        font = Path(settings.get("font") or "").stem
+        measured = (f"Render bersih {font} ({num(settings.get('lines') or 0)} baris val) yang dimiringkan "
+                    f"{' / '.join(dec(shear) for shear in shears)}: CER model resmi {ours}"
+                    + (f"; {label} {theirs}" if theirs else "") + ".")
+        if used and any(shear > (args.get("slant_max") or 0) + 1e-9 for shear in shears):
+            measured += f" Kemiringan di atas {dec(args.get('slant_max') or 0)} di luar rentang yang dilatihkan."
+    twins, unknown = family_twins(family["owners"], [settings["font"]] if settings.get("font") else [], family["dir"])
+    stale = None if tied else ("Laporan evaluasi yang ada di mesin ini tidak bisa dicocokkan dengan checkpoint run resmi "
+                               "dan run pembandingnya yang sekarang, jadi angkanya tidak dikutip.")
+    return entry(
+        "slant_probe", "Evaluasi kemiringan sintetis", "evaluation", "used",
+        "Baris val dirender bersih dengan satu font lalu dimiringkan bertahap, dan semua model membaca citra yang sama. "
+        "Kepekaan model terhadap huruf miring jadi terukur tanpa menyentuh data uji nyata.",
+        [("Kemiringan yang diuji", "; ".join(dec(shear) for shear in shears)),
+         ("Baris", num(settings.get("lines") or 0))],
+        measured, "out/compare/slant_synthetic.json", files=["scripts/eval_slant.py"],
+        note=" ".join(part for part in (stale, probe_note(twins, unknown)) if part) or None)
 
 
 def decoding_group(official: str, evidence: Evidence, root: Path) -> dict:
@@ -1187,6 +1351,9 @@ def evaluation_group(run: str, args: dict, real: dict, evidence: Evidence, root:
             [("Jarak yang diuji", "; ".join(dec(t) for t in probe["tracking"]) + " em"), ("Baris", probe_lines)],
             measured_probe, "out/compare/spacing_synthetic.json", files=["scripts/eval_spacing.py", "scripts/eval_rare.py"],
             note=" ".join(part for part in (stale, probe_note(probe_twins, probe_unknown)) if part) or None))
+    tilt = root / "out/compare/slant_synthetic.json"
+    if tilt.exists():
+        methods.append(slant_probe_entry(run, args, read_json(tilt), root, family, chain_runs or [run]))
     if blind is not None and then is not None:
         methods.append(entry(
             "vlm_blind", "Uji buta terhadap model bahasa-visual", "evaluation", "comparator",

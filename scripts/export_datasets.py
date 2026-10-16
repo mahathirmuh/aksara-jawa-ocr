@@ -83,16 +83,22 @@ FONT_NOTES = {
     "TuladhaJejegOT-Regular.ttf": ["Konversi OpenType; versi aslinya hanya punya tabel Graphite, yang tidak dibaca "
                                    "HarfBuzz."],
     "BasaJan.ttf": ["Di lingkungan training (Pillow 12.3.0, HarfBuzz 14.2.1) aturan GSUB font ini tidak diterapkan: "
-                    "pasangan tidak menumpuk pada sekitar 10% sampel sintetis. Ditemukan 2026-10-03, belum "
-                    "diperbaiki."],
+                    "pasangan tidak menumpuk pada sekitar 10% sampel sintetis. Ditemukan 2026-10-03; run dengan "
+                    "perbaikan font (--font-fixes, sejak fase 9) mengeluarkannya dari data latih."],
     "NewKramawirya.ttf": ["Pada lungsi sesudah pangkon digambar dengan glyph pada lingsa, jadi dua label untuk "
-                          "gambar yang sama (pangkon + lungsi ada di 12% baris latih)."],
+                          "gambar yang sama (pangkon + lungsi ada di 12% baris latih). Run dengan perbaikan font "
+                          "(--font-fixes, sejak fase 9) tidak merender baris seperti itu dengan font ini."],
     "javatext.ttf": ["Javanese Text bawaan Windows; tidak dipakai merender data latih."],
 }
 # Font yang catatannya di atas adalah cacat (citra tidak sepadan dengan labelnya, atau tidak dirender dengan benar di
 # lingkungan training). Kartu metode menghitung font latih bercacat dari daftar ini ditambah font yang tidak punya
 # glyph sebuah karakter charset, supaya tidak menyebut label sintetis "pasti benar".
 FONT_DEFECTS = ("BasaJan.ttf", "NewKramawirya.ttf")
+# Cacat di FONT_DEFECTS yang ditangani `src.train --font-fixes` (sejak fase 9): font yang pasangannya tidak menumpuk
+# di interpreter training dikeluarkan (src.dataset.shaping_ok; BasaJan), dan baris berpangkon + lungsi tidak dirender
+# dengan font yang menggambarnya sama dengan pangkon + lingsa (src.dataset.render_conflicts; NewKramawirya). Pada run
+# dengan perbaikan itu, font-font ini tidak lagi menghasilkan citra yang tidak sepadan dengan labelnya.
+FONT_FIXES_HANDLE = ("BasaJan.ttf", "NewKramawirya.ttf")
 
 
 def count_lines(path: Path) -> int:
@@ -408,6 +414,11 @@ def run_usage(link: dict, schedule: Schedule, root: Path, warnings: list[str]) -
         # Ejaan baku saat render (src/spelling.py, sejak fase 8): menghasilkan pa cerek, nga lelet, dan keret yang di
         # teks korpus termasuk aksara langka.
         "standard_prob": args.get("standard_prob") or 0.0,
+        # Render miring seperti huruf italic dan perbaikan font latih (sejak fase 9); kemiringan terbesar hanya berarti
+        # bila render miring hidup.
+        "slant_prob": args.get("slant_prob") or 0.0,
+        "slant_max": (args.get("slant_max") or 0.0) if args.get("slant_prob") else 0.0,
+        "font_fixes": bool(args.get("font_fixes")),
         "val_lines": args.get("val_lines") or 0,
         "val_steps": sorted({row["step"] for row in rows if "val_cer" in row and row.get("step", 0) <= step}),
     }, scheduled
@@ -835,8 +846,14 @@ def build(root: Path = ROOT, run: str = OFFICIAL_RUN, test_font_dir: Path = TEST
             warnings.append(f"Run {run}: log mencatat {len(logged)} font latih, tetapi {len(gone)} di antaranya tidak ada "
                             f"lagi di folder font ({', '.join(gone)}); font itu tidak ada di tabel font kartu ini.")
         if added:
+            # Perbaikan font mengeluarkan font yang pasangannya tidak menumpuk saat run mulai, jadi font itu memang ada di
+            # folder tetapi tidak di log; font yang ditambahkan sesudah run dilatih tampil sama, dan ekspor tidak bisa
+            # membedakan keduanya (cek shaping-nya bergantung pada interpreter training, bukan interpreter ekspor).
+            reason = (" Run itu memakai perbaikan font (--font-fixes), yang mengeluarkan font yang pasangannya tidak "
+                      "menumpuk di lingkungan training; font yang ditambahkan ke folder sesudah run dilatih juga tampil "
+                      "begini." if official["args"].get("font_fixes") else "")
             warnings.append(f"Run {run}: folder font sekarang memuat {len(added)} font yang tidak tercatat di log run itu "
-                            f"({', '.join(added)}); font itu dicatat tidak dipakai run itu.")
+                            f"({', '.join(added)}); font itu dicatat tidak dipakai run itu.{reason}")
 
     real = nusaaksara_card(root / "data/real/nusaaksara/labels.tsv")
     gates = gate_reports(run, root, real["lines"])

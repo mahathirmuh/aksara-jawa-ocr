@@ -407,6 +407,23 @@ class DatasetPageTest extends TestCase
         $this->assertSame('Model bahasa karakter Kondisi "kamus": beam search + LM order 5 · 300.000 baris Bagian latih korpus, ejaan baku p 0,5',
             $this->part($this->get('/dataset')->assertOk()->getContent(), 'data-support', 'Model bahasa karakter'));
 
+        // Render miring dan perbaikan font (fase 9): resep tiap run menyebutnya; kemiringan terbesar milik render miring,
+        // dan perbaikan font disebut juga tanpa render miring. Kartu sebelum fase 9 tidak punya kuncinya (= mati).
+        $card = $this->card();
+        $card['lineage']['runs'][1] += ['slant_prob' => 0.5, 'slant_max' => 0.6, 'font_fixes' => true];
+        $card['lineage']['runs'][0] += ['slant_prob' => 0.0, 'slant_max' => 0.0, 'font_fixes' => true];
+        $this->import($card);
+        $html = $this->get('/dataset')->assertOk()->getContent();
+        $this->assertSame('fase7_track resmi 1.500 48.000 100.000 48.000 10 augmentasi fase5 · spasi dibuang p 0,5 · jarak antar suku kata p 0,5 (hingga 0,3 em) · miring p 0,5 (hingga 0,6) · perbaikan font',
+            $this->part($html, 'data-run', 'fase7_track'));
+        $this->assertSame('fase6_ctrl 1.500 48.000 100.000 19.712 10 augmentasi fase5 · spasi dibuang p 0,5 · perbaikan font',
+            $this->part($html, 'data-run', 'fase6_ctrl'));
+        $card['lineage']['runs'][1]['slant_prob'] = 0.25;
+        $card['lineage']['runs'][1]['font_fixes'] = false;
+        $this->import($card);
+        $this->assertStringEndsWith('(hingga 0,3 em) · miring p 0,25 (hingga 0,6)',
+            $this->part($this->get('/dataset')->assertOk()->getContent(), 'data-run', 'fase7_track'));
+
         // Data uji nyata yang bukan NusaAksara: kalimat "satu terbitan" (catatan khusus NusaAksara) tidak dipakai.
         $card = $this->card();
         $card['datasets'][1]['key'] = 'pindaian_lain';
@@ -650,6 +667,24 @@ class DatasetPageTest extends TestCase
         }));
         $rejects('kunci support.*.standard_prob harus bilangan dari 0 sampai 1', $changed(function (&$c) {
             $c['support'][array_search('charlm', array_column($c['support'], 'key'), true)]['standard_prob'] = 2;
+        }));
+        $rejects('kunci lineage.runs.*.slant_prob harus bilangan dari 0 sampai 1', $changed(function (&$c) {
+            $c['lineage']['runs'][1]['slant_prob'] = 50;
+        }));
+        $rejects('kunci usage.train.slant_prob harus bilangan dari 0 sampai 1', $changed(function (&$c) {
+            $c['usage']['train']['slant_prob'] = 'separuh';
+        }));
+        $rejects('kunci lineage.runs.*.slant_max harus bilangan yang tidak negatif', $changed(function (&$c) {
+            $c['lineage']['runs'][1]['slant_max'] = -0.6;
+        }));
+        $rejects('kunci usage.train.slant_max harus bilangan yang tidak negatif', $changed(function (&$c) {
+            $c['usage']['train']['slant_max'] = '0.6';
+        }));
+        $rejects('kunci lineage.runs.*.font_fixes harus benar/salah', $changed(function (&$c) {
+            $c['lineage']['runs'][1]['font_fixes'] = 1;
+        }));
+        $rejects('kunci usage.train.font_fixes harus benar/salah', $changed(function (&$c) {
+            $c['usage']['train']['font_fixes'] = 'ya';
         }));
         // Objek bukan daftar, dan angka bukan teks.
         $rejects('kunci fonts harus daftar', $changed(function (&$c) {
