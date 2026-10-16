@@ -594,6 +594,7 @@ def test_fase8_runs_are_told_apart_by_the_standard_spelling_option():
     assert optional_pipeline(STD8, 1500, fase8_args("fase8_std", 0.5), "fase7_track@1500")["config"] == (
         "crnn:fase8_std@1500 (lanjutan fase7_track@1500) · 10 font · aug fase5 · jarak antar-aksara p 0,5 hingga 0,3 em · "
         "ejaan baku p 0,5 · greedy")
+    assert "ejaan baku p 0,25 · greedy" in optional_pipeline(STD8, 1500, fase8_args("fase8_std", 0.25), "")["config"]
     assert optional_pipeline(CTRL8, 1500, fase8_args("fase8_ctrl"), "fase7_track@1500")["config"] == (
         "crnn:fase8_ctrl@1500 (lanjutan fase7_track@1500) · 10 font · aug fase5 · jarak antar-aksara p 0,5 hingga 0,3 em · "
         "tanpa ejaan baku (pembanding) · greedy")

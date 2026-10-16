@@ -13,6 +13,7 @@ Hasil: out/compare/spelling_<A>_vs_<B>.json dan out/compare/spelling_synthetic.j
 """
 
 import argparse
+import hashlib
 import json
 import random
 import sys
@@ -139,6 +140,16 @@ def real(a: str, b: str, results: Path, out_dir: Path) -> dict:
     return report
 
 
+def checkpoint_identity(path: Path) -> dict:
+    """Langkah checkpoint dan 12 heksadesimal pertama SHA-1 berkasnya, seperti laporan scripts/eval_spacing.py: kartu
+    hanya boleh mengutip laporan yang dibuat dari checkpoint yang sekarang (CLAUDE.md, aturan kartu metode (j))."""
+    import torch
+
+    with open(path, "rb") as handle:
+        sha = hashlib.file_digest(handle, "sha1").hexdigest()[:12]
+    return {"step": torch.load(path, map_location="cpu", weights_only=False)["step"], "sha1": sha}
+
+
 def synthetic(runs: list[str], lines: int, out_dir: Path, seed: int = 0) -> dict:
     from src.beam import greedy_ids, line_log_probs
     from src.infer import load_checkpoint
@@ -161,6 +172,7 @@ def synthetic(runs: list[str], lines: int, out_dir: Path, seed: int = 0) -> dict
     for run in runs:
         path = ROOT / "out/checkpoints" / run / "last_snapshot.pt"
         model, tok = load_checkpoint(str(path), "cpu")
+        report["checkpoints"][run] = checkpoint_identity(path)
         read = lambda img: tok.to_logical(tok.decode(greedy_ids(line_log_probs(img, model, "cpu", 0.0))))  # noqa: E731
         corpus = [line_counts(text, read(img)) for text, img, _, _ in images]
         standard = [line_counts(text, read(img)) for _, _, text, img in images]

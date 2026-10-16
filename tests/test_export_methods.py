@@ -1234,7 +1234,7 @@ def spelling_report(root: Path, a: str, b: str, cer_a: float, cer_b: float, reca
     """Laporan scripts/eval_spelling.py real (tanpa teks label), seperti yang ditulis skrip itu."""
     def side(key, cer, recall, precision):
         return {"key": key, "cer": cer, "recall": recall, "precision": precision, "in_reference": 212,
-                "read": round(212 * recall), "emitted": 0, "emitted_right": 0, "forms": {}, "cer_without_forms": cer,
+                "read": round(212 * recall) if recall is not None else 0, "emitted": 0, "emitted_right": 0, "forms": {}, "cer_without_forms": cer,
                 "lines_without_forms": 1}
     path = root / "out/compare" / f"spelling_{a}_vs_{b}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1276,6 +1276,12 @@ def test_spelling_entry_quotes_the_spelling_control_only_when_the_pair_is_valid(
     # Tanpa presisi (tidak ada keluaran bentuk baku), dan bila tidak naik: kalimatnya mengikuti nilainya.
     spelling_report(root, "crnn_fase8_std", "crnn_fase8_ctrl", 0.20, 0.21, 0.75, 0.292, precision_a=None)
     assert data_methods(root, "fase8_std", args)["spelling"]["evidence"].endswith("+54,0).")
+    spelling_report(root, "crnn_fase8_std", "crnn_fase8_ctrl", 0.20, 0.21, 0.75, 0.292, precision_a=0.0)
+    assert data_methods(root, "fase8_std", args)["spelling"]["evidence"].endswith("+54,0), dan 0,0% dari keluarannya benar.")
+    # Label tanpa satu pun bentuk ejaan baku (recall tidak terdefinisi): tidak ada bukti, bukan galat.
+    for recalls in ((None, 0.292), (0.75, None)):
+        spelling_report(root, "crnn_fase8_std", "crnn_fase8_ctrl", 0.20, 0.21, *recalls)
+        assert data_methods(root, "fase8_std", args)["spelling"]["evidence"] is None, recalls
     spelling_report(root, "crnn_fase8_std", "crnn_fase8_ctrl", 0.20, 0.21, 0.29, 0.30)
     assert data_methods(root, "fase8_std", args)["spelling"]["evidence"] == (
         "Terhadap run kontrol fase8_ctrl (jumlah langkah sama, tanpa ejaan baku): bentuk ejaan baku di baris nyata yang "
