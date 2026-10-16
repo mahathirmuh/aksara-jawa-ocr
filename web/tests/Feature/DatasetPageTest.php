@@ -395,6 +395,17 @@ class DatasetPageTest extends TestCase
         $html = $this->get('/dataset')->assertOk()->assertDontSee('muncul jauh lebih sering')->getContent();
         $this->assertStringEndsWith('· ejaan baku p 0,25', $this->part($html, 'data-run', 'fase6_ctrl'));
         $this->assertStringNotContainsString('ejaan baku', $this->part($html, 'data-run', 'fase7_track'));
+        $this->assertSame('Model bahasa karakter Kondisi "kamus": beam search + LM order 5 · 300.000 baris Bagian latih korpus',
+            $this->part($html, 'data-support', 'Model bahasa karakter'));
+
+        // Model bahasa beam + LM run resmi yang berejaan baku (fase 8): baris data pendukungnya menyebutnya.
+        $card = $this->card();
+        $lm = array_search('charlm', array_column($card['support'], 'key'), true);
+        $card['support'][$lm]['standard_prob'] = 0.5;
+        $card['support'][$lm]['file'] = 'data/charlm/o5_n300000_ds0.5_std0.5.pkl';
+        $this->import($card);
+        $this->assertSame('Model bahasa karakter Kondisi "kamus": beam search + LM order 5 · 300.000 baris Bagian latih korpus, ejaan baku p 0,5',
+            $this->part($this->get('/dataset')->assertOk()->getContent(), 'data-support', 'Model bahasa karakter'));
 
         // Data uji nyata yang bukan NusaAksara: kalimat "satu terbitan" (catatan khusus NusaAksara) tidak dipakai.
         $card = $this->card();
@@ -636,6 +647,9 @@ class DatasetPageTest extends TestCase
         }));
         $rejects('kunci usage.train.standard_prob harus bilangan dari 0 sampai 1', $changed(function (&$c) {
             $c['usage']['train']['standard_prob'] = 'separuh';
+        }));
+        $rejects('kunci support.*.standard_prob harus bilangan dari 0 sampai 1', $changed(function (&$c) {
+            $c['support'][array_search('charlm', array_column($c['support'], 'key'), true)]['standard_prob'] = 2;
         }));
         // Objek bukan daftar, dan angka bukan teks.
         $rejects('kunci fonts harus daftar', $changed(function (&$c) {

@@ -26,11 +26,12 @@ from src.infer import load_checkpoint
 from src.tokenizer import logical_syllables
 
 ROOT = Path(__file__).resolve().parents[1]
-# Bobot LM disetel di dev sintetis untuk checkpoint bawaan di bawah (out/beam/fase7_track_o5.json, 2026-10-12).
-ALPHA, BETA, WIDTH = 0.5, 1.0, 16
+# Model bahasa dan bobotnya disetel di dev sintetis untuk checkpoint bawaan di bawah (out/beam/fase8_std_o5std.json,
+# 2026-10-16: model bahasa berejaan baku menang di dev, 1,82% lawan 2,04%; export_results.official_beam memilih sama).
+ALPHA, BETA, WIDTH = 0.25, 1.0, 16
 # Harus sama dengan run resmi di scripts/export_results.py (dijaga tests/test_export_results.py).
-DEFAULT_CHECKPOINT = "out/checkpoints/fase7_track/last_snapshot.pt"
-DEFAULT_LM = "data/charlm/o5_n300000_ds0.5.pkl"
+DEFAULT_CHECKPOINT = "out/checkpoints/fase8_std/last_snapshot.pt"
+DEFAULT_LM = "data/charlm/o5_n300000_ds0.5_std0.5.pkl"
 PIPELINES = ("crnn_greedy", "crnn_beam_lm")
 # Bobot yang dipakai beam dan rumus skor kandidat, untuk ditampilkan web apa adanya.
 BEAM = {"alpha": ALPHA, "beta": BETA, "width": WIDTH}

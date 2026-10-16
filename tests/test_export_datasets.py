@@ -791,6 +791,32 @@ def test_shared_advances_count_only_glyphs_both_fonts_have():
 
 
 
+def test_language_model_support_row_follows_the_official_beam_report(tmp_path):
+    # Model bahasa di data pendukung = model bahasa beam + LM run resmi (laporan out/beam yang menang di dev), kalau
+    # tidak model bahasa fase5_fonts.
+    from export_results import LM_PATH, LM_STD_PATH, WIDTH
+
+    root = fake_repo(tmp_path)
+    snapshot = root / "out/checkpoints/runB/last_snapshot.pt"
+    for lm in (LM_PATH, LM_STD_PATH):
+        (root / lm.relative_to(ed.ROOT)).parent.mkdir(parents=True, exist_ok=True)
+        (root / lm.relative_to(ed.ROOT)).write_bytes(b"")
+    charset = ["U+A98F"]
+    assert ed.beam_lm_path(root, "runB", snapshot) == LM_PATH  # tanpa laporan beam
+    assert ed.support_cards(root, charset)[1] == {"key": "charlm", "file": "data/charlm/o5_n300000_ds0.5.pkl", "order": 5,
+                                                  "lines": 300000, "drop_space_prob": 0.5, "standard_prob": 0.0, "split": "train"}
+    std = ed.support_cards(root, charset, LM_STD_PATH)[1]
+    assert (std["file"], std["standard_prob"]) == ("data/charlm/o5_n300000_ds0.5_std0.5.pkl", 0.5)
+    (root / LM_STD_PATH.relative_to(ed.ROOT)).unlink()
+    assert [item["key"] for item in ed.support_cards(root, charset, LM_STD_PATH)] == ["charset"]  # berkasnya tidak ada
+    # Laporan beam berejaan baku untuk run resmi palsu (kunci pipeline-nya tidak dikenal ekspor: dicari lewat nama run).
+    (root / "out/beam").mkdir(parents=True)
+    (root / "out/beam/runB_o5std.json").write_text(json.dumps({
+        "checkpoint": "out/checkpoints/runB/last_snapshot.pt", "lm": f"data/charlm/{LM_STD_PATH.name}", "beam_width": WIDTH,
+        "dev": {"chosen": {"alpha": 0.25, "beta": 1.0, "cer": 0.02}}, "real": {"beam_cer": 0.2}}), encoding="utf-8")
+    assert ed.beam_lm_path(root, "runB", snapshot) == LM_STD_PATH
+
+
 def test_standard_spelling_of_each_run_is_read_from_its_checkpoint(tmp_path):
     # Fase 8: --standard-prob tiap run di rantai dibaca dari argumen checkpoint-nya, bukan disamakan antar-run.
     root = fake_repo(tmp_path)

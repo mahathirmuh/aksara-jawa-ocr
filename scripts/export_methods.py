@@ -57,12 +57,15 @@ from export_datasets import (  # noqa: E402
 )
 from export_results import (  # noqa: E402
     ALPHA,
+    BEAM_REPORTS,
     BETA,
+    LM_LABELS,
     LM_PATH,
     OFFICIAL_LINES,
     OFFICIAL_RUN,
     WIDTH,
     checkpoint_meta,
+    lm_facts,
     read_json,
     write_atomic,
 )
@@ -1039,8 +1042,19 @@ def beam_weights(official: str, pipelines: list[dict]) -> tuple[float, float]:
                          "ekspor dihentikan") from None
 
 
+def beam_lm(official: str, pipelines: list[dict]) -> Path:
+    """Model bahasa beam + LM yang ditampilkan kartu: milik pipeline beam run resmi (labelnya tertulis di konfigurasi
+    pipeline itu, LM_LABELS), kalau tidak model bahasa fase5_fonts (LM_PATH)."""
+    config = next((p.get("config") or "" for p in pipelines if official and p["key"] == f"{official}_beam"), "")
+    for lm in BEAM_REPORTS.values():
+        if f"· {LM_LABELS[lm.name]} ·" in config:
+            return lm
+    return LM_PATH
+
+
 def decoding_group(official: str, evidence: Evidence, root: Path) -> dict:
-    lm = re.fullmatch(r"o(\d+)_n(\d+)_ds([\d.]+)\.pkl", LM_PATH.name)
+    lm_path = beam_lm(official, evidence.manifest["pipelines"])
+    lm = lm_facts(lm_path)
 
     def measured(key: str, name: str) -> str | None:
         """Greedy lawan beam + LM pada checkpoint yang sama (pipeline `key` dan `key`_beam di manifest)."""
@@ -1059,8 +1073,9 @@ def decoding_group(official: str, evidence: Evidence, root: Path) -> dict:
             note += " Belum diuji pada checkpoint resmi."
     alpha, beta = beam_weights(official, evidence.manifest["pipelines"])
     settings = [("Lebar beam", str(WIDTH)), ("Bobot model bahasa", dec(alpha)), ("Bonus panjang", dec(beta))]
-    if lm and (root / LM_PATH.relative_to(ROOT)).exists():
-        settings.append(("Model bahasa", f"n-gram karakter order {lm[1]}, penghalusan Witten-Bell, {num(int(lm[2]))} baris latih"))
+    if lm and (root / lm_path.relative_to(ROOT)).exists():
+        settings.append(("Model bahasa", f"n-gram karakter order {lm['order']}, penghalusan Witten-Bell, {num(lm['lines'])} "
+                         "baris latih" + (f", ejaan baku p {dec(lm['standard_prob'])}" if lm["standard_prob"] else "")))
     return {
         "key": "decoding",
         "title": "Koreksi sesudah baca",

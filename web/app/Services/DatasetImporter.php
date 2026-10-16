@@ -92,6 +92,8 @@ class DatasetImporter extends CardImporter
                 'support' => 'list', 'support.*.key' => 'string', 'support.*.file' => 'string?']
             // Angka data pendukung milik repo OCR yang dicetak halaman (charset, model bahasa karakter, uji buta VLM).
             + $typed('int?', 'support.*.', ['characters', 'classes', 'order', 'lines'])
+            // Model bahasa berejaan baku (fase 8): kartu sebelumnya tidak memuat kuncinya.
+            + ['support.*.standard_prob' => 'share?']
             + ['warnings' => 'list', 'warnings.*' => 'string'];
     }
 

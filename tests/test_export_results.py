@@ -479,7 +479,7 @@ def test_official_beam_reads_its_weights_from_the_report_of_that_checkpoint(tmp_
     # Tanpa laporan beam run itu, dan untuk run resmi fase5_fonts (sudah punya crnn_fonts_beam): tidak ada tambahan.
     assert official_beam("crnn_fase7_track", "fase7_track", snapshot, beam_dir) is None
     report = {"checkpoint": "out/checkpoints/fase7_track/last_snapshot.pt", "lm": f"data/charlm/{LM_PATH.name}", "beam_width": WIDTH,
-              "dev": {"chosen": {"alpha": 0.5, "beta": 1.0}}, "real": {"beam_cer": 0.19}}
+              "dev": {"chosen": {"alpha": 0.5, "beta": 1.0, "cer": 0.02}}, "real": {"beam_cer": 0.19}}
     path = beam_dir / "fase7_track_o5.json"
     path.write_text(json.dumps(report), encoding="utf-8")
     assert official_beam("crnn_fonts", "fase7_track", snapshot, beam_dir) is None
@@ -501,27 +501,82 @@ def test_official_beam_reads_its_weights_from_the_report_of_that_checkpoint(tmp_
         official_beam("crnn_fase7_track", "fase7_track", snapshot, beam_dir)
 
 
+def test_official_beam_picks_the_language_model_that_wins_on_dev(tmp_path):
+    # Fase 8: dua laporan untuk checkpoint yang sama (model bahasa lama dan berejaan baku), disetel di dev yang sama.
+    # Yang dipakai = CER beam terendah di DEV, bukan di data uji; model bahasa dan labelnya ikut di konfigurasi pipeline.
+    from export_results import LM_PATH, LM_STD_PATH, WIDTH, official_beam
+
+    snapshot = save_ckpt(tmp_path / "ckpt" / "fase8_std" / "last_snapshot.pt", 1500, fase7_args("fase8_std", track=0.5))
+    beam_dir = tmp_path / "beam"
+    beam_dir.mkdir()
+
+    def report(lm, dev_cer, real_cer, alpha=0.25, **dev):
+        return {"checkpoint": "out/checkpoints/fase8_std/last_snapshot.pt", "lm": f"data/charlm/{lm.name}", "beam_width": WIDTH,
+                "dev": {"augment": "fase5", "drop_space_prob": 0.5, "standard_prob": 0.5, "lines": 300,
+                        "chosen": {"alpha": alpha, "beta": 1.0, "cer": dev_cer}, **dev}, "real": {"beam_cer": real_cer}}
+
+    def write(name, data):
+        (beam_dir / name).write_text(json.dumps(data), encoding="utf-8")
+
+    # Hanya laporan berejaan baku: itu yang dipakai.
+    write("fase8_std_o5std.json", report(LM_STD_PATH, 0.0182, 0.180))
+    only = official_beam("crnn_fase8_std", "fase8_std", snapshot, beam_dir)
+    assert only["lm"] == LM_STD_PATH and only["candidates"] == ["fase8_std_o5std.json"]
+    assert only["pipeline"]["config"] == f"crnn:fase8_std@1500 · beam {WIDTH} · LM karakter o5 ejaan baku · α 0.25 · β 1.0"
+    # Keduanya ada: yang menang di dev, walau yang lain lebih baik di data uji.
+    write("fase8_std_o5.json", report(LM_PATH, 0.0204, 0.170, alpha=0.5))
+    both = official_beam("crnn_fase8_std", "fase8_std", snapshot, beam_dir)
+    assert (both["lm"], both["alpha"], both["report"]["real"]["beam_cer"]) == (LM_STD_PATH, 0.25, 0.180)
+    assert both["candidates"] == ["fase8_std_o5.json", "fase8_std_o5std.json"]
+    write("fase8_std_o5.json", report(LM_PATH, 0.0150, 0.190, alpha=0.5))
+    flipped = official_beam("crnn_fase8_std", "fase8_std", snapshot, beam_dir)
+    assert (flipped["lm"], flipped["alpha"]) == (LM_PATH, 0.5)
+    assert "· LM karakter o5 · α 0.5 · β 1.0" in flipped["pipeline"]["config"]
+    write("fase8_std_o5.json", report(LM_PATH, 0.0182, 0.170, alpha=0.5))  # seri: urutan BEAM_REPORTS (model bahasa lama)
+    assert official_beam("crnn_fase8_std", "fase8_std", snapshot, beam_dir)["lm"] == LM_PATH
+    # Dev yang berbeda tidak bisa dibandingkan; laporan berejaan baku dengan model bahasa lain: ekspor berhenti.
+    for key, value in (("standard_prob", 0.0), ("lines", 200), ("augment", "none"), ("drop_space_prob", 0.0)):
+        write("fase8_std_o5.json", report(LM_PATH, 0.0204, 0.170, **{key: value}))
+        with pytest.raises(SystemExit, match="disetel di dev yang berbeda"):
+            official_beam("crnn_fase8_std", "fase8_std", snapshot, beam_dir)
+    write("fase8_std_o5.json", report(LM_PATH, 0.0204, 0.170))
+    write("fase8_std_o5std.json", report(LM_PATH, 0.0182, 0.180))
+    with pytest.raises(SystemExit, match="fase8_std_o5std.json tidak sah .*bukan yang dipakai ekspor"):
+        official_beam("crnn_fase8_std", "fase8_std", snapshot, beam_dir)
+
+
+def test_language_model_facts_come_from_the_file_name():
+    from export_results import LM_PATH, LM_STD_PATH, lm_facts
+
+    assert lm_facts(LM_PATH) == {"order": 5, "lines": 300000, "drop_space_prob": 0.5, "standard_prob": 0.0}
+    assert lm_facts(LM_STD_PATH) == {"order": 5, "lines": 300000, "drop_space_prob": 0.5, "standard_prob": 0.5}
+    assert lm_facts(Path("o3_n60_ds0.0_std1.0.pkl"))["standard_prob"] == 1.0
+    assert lm_facts(Path("lain.pkl")) is None and lm_facts(Path("o5_n300000_ds0.5.pkl.bak")) is None
+
+
 def beam_extra() -> dict:
     """Beam + LM run resmi seperti dikembalikan official_beam, dengan bobot yang bukan bobot fase5_fonts."""
     report = {"real": {"beam_cer": 0.19}, "dev": {"lines": 300, "greedy_cer": 0.02, "beam_cer": 0.015},
               "clean_heldout_font": {"lines": 200, "greedy_cer": 0.003, "beam_cer": 0.002}}
+    import export_results as er
+
     return {"key": "crnn_fase7_track_beam", "base": "crnn_fase7_track", "alpha": 0.5, "beta": 2.0, "report": report,
-            "path": Path("out/beam/fase7_track_o5.json")}
+            "path": Path("out/beam/fase7_track_o5.json"), "lm": er.LM_STD_PATH}
 
 
 def test_each_checkpoint_is_decoded_with_its_own_beam_weights():
     import export_results as er
 
     # Tanpa beam + LM run resmi: hanya pasangan fase5_fonts, dengan bobot fase5_fonts.
-    assert er.beam_decoders(None) == {"crnn_fonts": ("crnn_fonts_beam", er.ALPHA, er.BETA)}
+    assert er.beam_decoders(None) == {"crnn_fonts": ("crnn_fonts_beam", er.ALPHA, er.BETA, er.LM_PATH)}
     assert er.beam_pairs(None) == [("crnn_fonts_beam", "crnn_fonts")] and er.tag_pair(None) == ("crnn_fonts_beam", "crnn_fonts")
     assert er.beam_official(None) == {}
     # Dengan beam + LM run resmi: checkpoint resmi dibaca dengan bobot laporannya sendiri, pasangannya paling akhir dan
     # menentukan tag, dan CER 745 barisnya dicocokkan dengan laporannya.
     extra = beam_extra()
     assert (extra["alpha"], extra["beta"]) != (er.ALPHA, er.BETA)
-    assert er.beam_decoders(extra) == {"crnn_fonts": ("crnn_fonts_beam", er.ALPHA, er.BETA),
-                                       "crnn_fase7_track": ("crnn_fase7_track_beam", 0.5, 2.0)}
+    assert er.beam_decoders(extra) == {"crnn_fonts": ("crnn_fonts_beam", er.ALPHA, er.BETA, er.LM_PATH),
+                                       "crnn_fase7_track": ("crnn_fase7_track_beam", 0.5, 2.0, er.LM_STD_PATH)}
     assert er.beam_pairs(extra) == [("crnn_fonts_beam", "crnn_fonts"), ("crnn_fase7_track_beam", "crnn_fase7_track")]
     assert er.tag_pair(extra) == ("crnn_fase7_track_beam", "crnn_fase7_track")
     assert er.beam_official(extra) == {"crnn_fase7_track_beam": (0.19, str(Path("out/beam/fase7_track_o5.json")))}
@@ -559,9 +614,10 @@ def test_main_uses_the_beam_helpers_of_the_official_run():
     import export_results as er
 
     source = inspect.getsource(er.main)
-    assert "ALPHA" not in source and "BETA" not in source
-    for call in ("decoders = beam_decoders(extra_beam)", "beam_key, alpha, beta = decoders[key]",
-                 "prefix_beam_search(lp, tok.charset, lm, alpha, beta, WIDTH)", "hyps[beam_key][n] = ",
+    assert "ALPHA" not in source and "BETA" not in source and "LM_PATH" not in source
+    for call in ("decoders = beam_decoders(extra_beam)", "lms = {path: CharLM.load(path) for path in {spec[3] for spec in decoders.values()}}",
+                 "beam_key, alpha, beta, lm_path = decoders[key]",
+                 "prefix_beam_search(lp, tok.charset, lms[lm_path], alpha, beta, WIDTH)", "hyps[beam_key][n] = ",
                  "**beam_official(extra_beam)}", "mark_beam_changes(metrics, refs, hyps, names, beam_pairs(extra_beam))",
                  "delta = beam_delta(ref, hyps, n, tag_pair(extra_beam))", "check_official(metrics, official)",
                  'metrics += synth_metrics(extra_beam["key"], extra_beam["base"], extra_beam["report"])',
@@ -570,16 +626,18 @@ def test_main_uses_the_beam_helpers_of_the_official_run():
 
 
 def test_demo_service_decodes_with_the_beam_weights_tuned_for_its_checkpoint():
-    # Bobot LM disetel per checkpoint: Demo memakai bobot laporan beam run resmi (out/beam/<run>_o5.json, data lokal).
+    # Bobot LM dan model bahasa disetel per checkpoint: Demo memakai laporan beam run resmi yang dipilih ekspor
+    # (export_results.official_beam: yang menang di dev), data lokal.
     import export_results as er
     from src import serve
 
     assert serve.WIDTH == er.WIDTH
-    report = er.ROOT / "out/beam" / f"{OFFICIAL_RUN}_o5.json"
-    if not report.exists():
+    snapshot = er.ROOT / "out/checkpoints" / OFFICIAL_RUN / "last_snapshot.pt"
+    chosen = er.official_beam(f"crnn_{OFFICIAL_RUN}", OFFICIAL_RUN, snapshot) if snapshot.exists() else None
+    if chosen is None:
         pytest.skip("laporan beam run resmi tidak ada di mesin ini")
-    chosen = json.loads(report.read_text(encoding="utf-8"))["dev"]["chosen"]
     assert (serve.ALPHA, serve.BETA) == (chosen["alpha"], chosen["beta"])
+    assert Path(serve.DEFAULT_LM).name == chosen["lm"].name
 
 
 def fase8_args(run: str, standard: float = 0.0, **kwargs) -> dict:

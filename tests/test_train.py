@@ -127,6 +127,22 @@ def test_new_data_options_default_to_off():
 
     args = parse_args(["--run", "x"])
     assert (args.track_prob, args.rare_max_similarity, args.rare_attach) == (0.0, 0.0, False)
+    assert args.standard_prob == 0.0  # ejaan baku (fase 8) juga mati secara bawaan
+    assert parse_args(["--run", "x", "--standard-prob", "0.5"]).standard_prob == 0.5
     args = parse_args(["--run", "x", "--track-prob", "0.5", "--track-max", "0.25", "--rare-max-similarity", "0.9",
                        "--rare-attach"])
     assert (args.track_prob, args.track_max, args.rare_max_similarity, args.rare_attach) == (0.5, 0.25, 0.9, True)
+
+
+def test_build_datasets_passes_the_standard_spelling_option_to_training_lines_only(monkeypatch):
+    # --standard-prob sampai ke baris latih sintetis; validasi tetap berejaan korpus (val/test tidak berubah).
+    from src import train
+    from src.tokenizer import TOKENIZER_PATH, Tokenizer
+
+    lines = ["ꦥꦤ꧀ꦕꦶ ꦫꦼꦒ", "ꦏꦸꦭ ꦧꦝꦺ"] * 4
+    monkeypatch.setattr(train, "read_split", lambda name: list(lines))
+    tok = Tokenizer.load(TOKENIZER_PATH)
+    for value in (0.0, 0.5):
+        args = train.parse_args(["--run", "x", "--train-lines", "8", "--val-lines", "4", "--standard-prob", str(value)])
+        train_ds, val_ds = train.build_datasets(args, tok)
+        assert (train_ds.standard_prob, val_ds.standard_prob) == (value, 0.0)

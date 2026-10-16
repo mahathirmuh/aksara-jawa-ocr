@@ -1006,6 +1006,12 @@ def test_gates_and_beam_evidence_follow_what_the_results_contain(tmp_path):
         own = {"key": "crnn_fase7_track_beam", "label": "B", "kind": "beam", "status": "done", "config": config}
         return manifest["pipelines"] + [own]
 
+    # Model bahasa yang ditampilkan = milik pipeline beam run resmi (labelnya di konfigurasi), kalau tidak LM_PATH.
+    from export_results import LM_STD_PATH
+    assert em.beam_lm("crnn_fase7_track", manifest["pipelines"]) == LM_PATH
+    assert em.beam_lm("crnn_fase7_track", with_beam(f"crnn:fase7_track@10 · beam {WIDTH} · LM karakter o5 ejaan baku · α 0.25 · β 1.0")) == LM_STD_PATH
+    assert em.beam_lm("crnn_fase7_track", with_beam(f"crnn:fase7_track@10 · beam {WIDTH} · LM karakter o5 · α 0.25 · β 1.0")) == LM_PATH
+    assert em.beam_lm("crnn_fonts", with_beam(f"x · LM karakter o5 ejaan baku · α 0.25 · β 1.0")) == LM_PATH
     tuned = with_beam(f"crnn:fase7_track@10 · beam {WIDTH} · LM karakter o5 · α 0.75 · β 2.5")
     assert (0.75, 2.5) != (ALPHA, BETA) and em.beam_weights("crnn_fase7_track", tuned) == (0.75, 2.5)
     assert em.beam_weights("crnn_fonts", tuned) == (ALPHA, BETA)  # pipeline beam run lain bukan milik run resmi ini
@@ -1013,6 +1019,18 @@ def test_gates_and_beam_evidence_follow_what_the_results_contain(tmp_path):
     write_manifest(root, {**manifest, "pipelines": tuned, "metrics": manifest["metrics"] + extra})
     beam = em.decoding_group("crnn_fase7_track", em.Evidence(root), root)["methods"][0]
     assert beam["settings"][:3] == [["Lebar beam", str(WIDTH)], ["Bobot model bahasa", "0,75"], ["Bonus panjang", "2,5"]]
+    # Model bahasa berejaan baku di pipeline beam run resmi: butirnya menyebut ejaan bakunya, dari berkas yang ada.
+    std_lm = root / LM_STD_PATH.relative_to(em.ROOT)
+    std_lm.parent.mkdir(parents=True, exist_ok=True)
+    std_lm.write_bytes(b"")
+    write_manifest(root, {**manifest, "pipelines": with_beam(f"crnn:fase7_track@10 · beam {WIDTH} · LM karakter o5 ejaan baku · α 0.25 · β 1.0"),
+                          "metrics": manifest["metrics"] + extra})
+    beam = em.decoding_group("crnn_fase7_track", em.Evidence(root), root)["methods"][0]
+    assert beam["settings"] == [["Lebar beam", str(WIDTH)], ["Bobot model bahasa", "0,25"], ["Bonus panjang", "1"],
+                                ["Model bahasa", "n-gram karakter order 5, penghalusan Witten-Bell, 300.000 baris latih, ejaan baku p 0,5"]]
+    std_lm.unlink()
+    beam = em.decoding_group("crnn_fase7_track", em.Evidence(root), root)["methods"][0]
+    assert len(beam["settings"]) == 3  # berkas model bahasanya tidak ada di mesin ini: tidak disebut
     # Konfigurasi yang bobotnya tidak terbaca: ekspor berhenti, bukan menampilkan bobot checkpoint lain.
     for broken in ("crnn:fase7_track@10 · beam 16", "α banyak · β sedikit", ""):
         with pytest.raises(SystemExit, match="bobot beam \\+ LM pipeline crnn_fase7_track_beam tidak terbaca"):

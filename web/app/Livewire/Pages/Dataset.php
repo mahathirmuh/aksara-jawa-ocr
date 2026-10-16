@@ -441,7 +441,8 @@ class Dataset extends Component
                 $item['key'] === 'charset' && isset($item['characters'], $item['classes']) => ['Charset tokenizer', 'Kelas keluaran model',
                     nfmt($item['characters']).' karakter + blank = '.nfmt($item['classes']).' kelas', 'Dibangun dari korpus ('.($item['file'] ?? 'data/tokenizer.json').')'],
                 $item['key'] === 'charlm' && isset($item['order'], $item['lines']) => ['Model bahasa karakter', 'Kondisi "kamus": beam search + LM',
-                    'order '.$item['order'].' · '.nfmt($item['lines']).' baris', 'Bagian latih korpus'],
+                    'order '.$item['order'].' · '.nfmt($item['lines']).' baris',
+                    'Bagian latih korpus'.(($item['standard_prob'] ?? 0) > 0 ? ', ejaan baku p '.self::dec($item['standard_prob']) : '')],
                 $item['key'] === 'vlm_blind' && isset($item['lines']) => ['Uji buta VLM', 'Pembanding VLM zero-shot', nfmt($item['lines']).' baris', 'Sampel acak dari data uji nyata'],
                 default => null,
             };

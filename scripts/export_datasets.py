@@ -45,6 +45,8 @@ from export_results import (  # noqa: E402  (scripts/ bukan paket: dijalankan da
     OPTIONAL_CHECKPOINTS,
     checkpoint_meta,
     gate_problem,
+    lm_facts,
+    official_beam,
     read_json,
     write_atomic,
 )
@@ -678,18 +680,26 @@ def font_cards(root: Path, official_args: dict, test_fonts: list[str], charset: 
     return sorted(cards, key=lambda card: (order[card["group"]], card["file"].lower()))
 
 
-def support_cards(root: Path, charset: list[str]) -> list[dict]:
-    """Data pendukung milik repo OCR; data pendukung milik web (kamus, leksikon, anotasi) dihitung web sendiri."""
+def support_cards(root: Path, charset: list[str], lm_path: Path = LM_PATH) -> list[dict]:
+    """Data pendukung milik repo OCR; data pendukung milik web (kamus, leksikon, anotasi) dihitung web sendiri.
+    `lm_path` = model bahasa beam + LM run resmi (export_results.official_beam), bawaannya model bahasa fase5_fonts."""
     items = [{"key": "charset", "file": "data/tokenizer.json", "characters": len(charset), "classes": len(charset) + 1}]
-    lm = root / LM_PATH.relative_to(ROOT)
-    match = re.fullmatch(r"o(\d+)_n(\d+)_ds([\d.]+)\.pkl", lm.name)
-    if lm.exists() and match:
-        items.append({"key": "charlm", "file": relative(lm, root), "order": int(match[1]), "lines": int(match[2]),
-                      "drop_space_prob": float(match[3]), "split": "train"})
+    lm = root / lm_path.relative_to(ROOT)
+    facts = lm_facts(lm)
+    if lm.exists() and facts:
+        items.append({"key": "charlm", "file": relative(lm, root), "order": facts["order"], "lines": facts["lines"],
+                      "drop_space_prob": facts["drop_space_prob"], "standard_prob": facts["standard_prob"], "split": "train"})
     blind = root / "out/eval/vlm_blind_50.json"
     if blind.exists():
         items.append({"key": "vlm_blind", "file": relative(blind, root), "lines": len(read_json(blind).get("items", []))})
     return items
+
+
+def beam_lm_path(root: Path, run: str, snapshot: Path) -> Path:
+    """Model bahasa beam + LM run resmi, dipilih dengan aturan ekspor hasil (laporan out/beam/<run>_*.json yang menang di
+    dev); model bahasa fase5_fonts bila run itu belum punya laporan beam."""
+    chosen = official_beam(pipeline_key(run) or "", run, snapshot, root / "out/beam")
+    return chosen["lm"] if chosen else LM_PATH
 
 
 def label_rows(path: Path) -> int:
@@ -865,7 +875,7 @@ def build(root: Path = ROOT, run: str = OFFICIAL_RUN, test_font_dir: Path = TEST
         "rare": rare_coverage(train_lines, charset, schedule.pool(train["pool"], train["seed"]), scheduled),
         "datasets": dataset_cards(corpus, splits, real, commons, gates, official["args"], root),
         "fonts": font_cards(root, official["args"], test_fonts, charset, test_font_dir, warnings, logged),
-        "support": support_cards(root, charset),
+        "support": support_cards(root, charset, beam_lm_path(root, run, official["path"])),
         "warnings": warnings,
     }
 

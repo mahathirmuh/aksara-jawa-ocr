@@ -27,6 +27,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import sys
 import time
 from collections import Counter
@@ -51,7 +52,15 @@ from src.tokenizer import nfc  # noqa: E402
 SCHEMA = 1
 LABELS = ROOT / "data/real/nusaaksara/labels.tsv"
 LM_PATH = ROOT / "data/charlm/o5_n300000_ds0.5.pkl"
+LM_STD_PATH = ROOT / "data/charlm/o5_n300000_ds0.5_std0.5.pkl"  # src.charlm --standard-prob 0.5 (fase 8)
 ALPHA, BETA, WIDTH = 0.25, 1.0, 16
+# Laporan scripts/beam_eval.py run resmi yang boleh dipakai: akhiran nama berkas (out/beam/<run>_<akhiran>.json) ->
+# model bahasanya. Bila lebih dari satu ada, yang dipakai yang CER beam-nya di dev TERENDAH (dev-nya harus sama), bukan
+# yang terbaik di data uji: begitulah model bahasa berejaan baku dipilih untuk fase8_std (2026-10-16, dev 1,82% lawan
+# 2,04%).
+BEAM_REPORTS = {"o5": LM_PATH, "o5std": LM_STD_PATH}
+LM_LABELS = {LM_PATH.name: "LM karakter o5", LM_STD_PATH.name: "LM karakter o5 ejaan baku"}
+DEV_KEYS = ("augment", "drop_space_prob", "standard_prob", "lines")  # setelan dev yang harus sama untuk dibandingkan
 CHECKPOINTS = {
     "crnn_4b": ROOT / "out/checkpoints/base/best_4b_step1500.pt",
     "crnn_core": ROOT / "out/checkpoints/fase5_core/last_snapshot.pt",
@@ -119,8 +128,9 @@ EVAL_DIR = ROOT / "out/eval"
 # out/eval/ (LEGACY_REPORTS untuk run lama). Mengganti run resmi: buat dulu <run>_G1_10k.json dan <run>_G2_10k.json
 # (10.000 baris javatext; scripts/make_official.sh) di samping <run>_G3_full.json, lalu ubah konstanta ini dan
 # DEFAULT_CHECKPOINT di src/serve.py (Demo; tests/test_export_results.py menjaga keduanya sama).
-# Riwayat: fase5_fonts sampai 2026-10-04, lalu fase7_track (keputusan user).
-OFFICIAL_RUN = "fase7_track"
+# Riwayat: fase5_fonts sampai 2026-10-04, fase7_track sampai 2026-10-16, lalu fase8_std (keputusan user; ejaan baku
+# membantu menurut aturan analisis fase 8 di CLAUDE.md).
+OFFICIAL_RUN = "fase8_std"
 OFFICIAL_LINES = 10_000  # baris sintetis per gerbang G1/G2; tes cepat 100 baris bukan angka resmi
 LEGACY_REPORTS = {"fase5_fonts": "fonts", "fase5_core": "core"}  # laporan run lama memakai awalan pendek
 TOL = 1e-9  # selisih CER terhadap laporan resmi yang masih dianggap sama
@@ -272,45 +282,71 @@ def check_official(metrics: list[dict], official: dict[str, tuple[float, str]], 
             raise SystemExit(f"{key}: CER {exported[key]:.6%} berbeda dari laporan {source} ({value:.6%})")
 
 
+def lm_facts(path: Path) -> dict | None:
+    """Order, baris latih, peluang buang spasi, dan peluang ejaan baku sebuah model bahasa dari nama berkasnya
+    (src.charlm: o<order>_n<baris>_ds<p>[_std<p>].pkl); None bila namanya tidak berpola itu."""
+    match = re.fullmatch(r"o(\d+)_n(\d+)_ds([\d.]+)(?:_std([\d.]+))?\.pkl", path.name)
+    if not match:
+        return None
+    return {"order": int(match[1]), "lines": int(match[2]), "drop_space_prob": float(match[3]),
+            "standard_prob": float(match[4] or 0)}
+
+
 def official_beam(official_key: str, run: str, snapshot: Path, beam_dir: Path | None = None) -> dict | None:
-    """Beam + LM atas checkpoint run resmi, bila laporan scripts/beam_eval.py-nya (out/beam/<run>_o5.json) ada.
+    """Beam + LM atas checkpoint run resmi, bila laporan scripts/beam_eval.py-nya ada (BEAM_REPORTS: out/beam/<run>_o5.json
+    dengan model bahasa lama, <run>_o5std.json dengan model bahasa berejaan baku).
 
     Bobot LM (alpha, beta) dibaca dari laporan itu: disetel di dev sintetis untuk checkpoint INI, bukan bobot fase5_fonts
-    (ALPHA, BETA). Berhenti bila laporannya bukan milik checkpoint, model bahasa, atau lebar beam yang sekarang, atau
-    lebih tua dari last_snapshot.pt run itu. Run resmi fase5_fonts sudah punya crnn_fonts_beam: tidak ada yang ditambah.
+    (ALPHA, BETA). Bila ada lebih dari satu laporan, dipakai yang CER beam-nya di dev terendah. Berhenti bila sebuah
+    laporan bukan milik checkpoint, model bahasa, atau lebar beam yang dijanjikan namanya, lebih tua dari last_snapshot.pt
+    run itu, atau laporan-laporannya disetel di dev yang berbeda. Run resmi fase5_fonts sudah punya crnn_fonts_beam:
+    tidak ada yang ditambah.
     """
-    path = (beam_dir or ROOT / "out/beam") / f"{run}_o5.json"
-    if official_key == "crnn_fonts" or not path.exists():
+    if official_key == "crnn_fonts":
         return None
-    report = read_json(path)
-    problem = ""
-    if Path(report.get("checkpoint", "")).parent.name != run:
-        problem = f"checkpoint {report.get('checkpoint')!r} bukan milik run {run}"
-    elif Path(report.get("lm", "")).name != LM_PATH.name or report.get("beam_width") != WIDTH:
-        problem = f"model bahasa {report.get('lm')!r} atau lebar beam {report.get('beam_width')} bukan yang dipakai ekspor"
-    elif path.stat().st_mtime < snapshot.stat().st_mtime:
-        problem = f"lebih tua dari {snapshot.name} run itu"
-    if problem:
-        raise SystemExit(f"run resmi {run}: laporan beam {path} tidak sah ({problem}); ekspor dihentikan")
+    found = []
+    for suffix, lm in BEAM_REPORTS.items():
+        path = (beam_dir or ROOT / "out/beam") / f"{run}_{suffix}.json"
+        if not path.exists():
+            continue
+        report = read_json(path)
+        problem = ""
+        if Path(report.get("checkpoint", "")).parent.name != run:
+            problem = f"checkpoint {report.get('checkpoint')!r} bukan milik run {run}"
+        elif Path(report.get("lm", "")).name != lm.name or report.get("beam_width") != WIDTH:
+            problem = f"model bahasa {report.get('lm')!r} atau lebar beam {report.get('beam_width')} bukan yang dipakai ekspor"
+        elif path.stat().st_mtime < snapshot.stat().st_mtime:
+            problem = f"lebih tua dari {snapshot.name} run itu"
+        if problem:
+            raise SystemExit(f"run resmi {run}: laporan beam {path} tidak sah ({problem}); ekspor dihentikan")
+        found.append((path, lm, report))
+    if not found:
+        return None
+    if len({json.dumps([report["dev"].get(key) for key in DEV_KEYS]) for _, _, report in found}) > 1:
+        raise SystemExit(f"run resmi {run}: laporan beam {', '.join(path.name for path, _, _ in found)} disetel di dev yang "
+                         "berbeda, jadi model bahasanya tidak bisa dipilih; ekspor dihentikan")
+    path, lm, report = min(found, key=lambda item: item[2]["dev"]["chosen"]["cer"])  # seri: urutan BEAM_REPORTS
     alpha, beta = report["dev"]["chosen"]["alpha"], report["dev"]["chosen"]["beta"]
     step = checkpoint_meta(snapshot)[0]
     return {"key": f"{official_key}_beam", "base": official_key, "alpha": alpha, "beta": beta, "report": report, "path": path,
+            "lm": lm, "candidates": [p.name for p, _, _ in found],
             "pipeline": {"key": f"{official_key}_beam", "label": f"Beam + LM {run}", "kind": "beam", "status": "done",
-                         "config": f"crnn:{run}@{step} · beam {WIDTH} · LM karakter o5 · α {alpha} · β {beta}"}}
+                         "config": f"crnn:{run}@{step} · beam {WIDTH} · {LM_LABELS[lm.name]} · α {alpha} · β {beta}"}}
 
 
-def beam_decoders(extra_beam: dict | None) -> dict[str, tuple[str, float, float]]:
-    """Pipeline greedy yang logit-nya juga dibaca dengan beam + LM -> (kunci pipeline beam, alpha, beta). Bobot LM milik
-    checkpoint masing-masing: fase5_fonts memakai ALPHA/BETA, checkpoint resmi memakai bobot laporannya sendiri."""
-    decoders = {"crnn_fonts": ("crnn_fonts_beam", ALPHA, BETA)}
+def beam_decoders(extra_beam: dict | None) -> dict[str, tuple[str, float, float, Path]]:
+    """Pipeline greedy yang logit-nya juga dibaca dengan beam + LM -> (kunci pipeline beam, alpha, beta, model bahasa).
+    Bobot dan model bahasa milik checkpoint masing-masing: fase5_fonts memakai ALPHA/BETA dan LM_PATH, checkpoint resmi
+    memakai laporannya sendiri."""
+    decoders = {"crnn_fonts": ("crnn_fonts_beam", ALPHA, BETA, LM_PATH)}
     if extra_beam:
-        decoders[extra_beam["base"]] = (extra_beam["key"], extra_beam["alpha"], extra_beam["beta"])
+        decoders[extra_beam["base"]] = (extra_beam["key"], extra_beam["alpha"], extra_beam["beta"], extra_beam["lm"])
     return decoders
 
 
 def beam_pairs(extra_beam: dict | None) -> list[tuple[str, str]]:
     """Pasangan (beam + LM, greedy) yang dibandingkan per baris; pasangan milik run resmi, bila ada, paling akhir."""
-    return [(beam_key, base_key) for base_key, (beam_key, _, _) in beam_decoders(extra_beam).items()]
+    return [(beam_key, base_key) for base_key, (beam_key, *_) in beam_decoders(extra_beam).items()]
 
 
 def tag_pair(extra_beam: dict | None) -> tuple[str, str]:
@@ -464,8 +500,8 @@ def main(argv=None) -> None:
     refs = {Path(r["image_path"]).name: nfc(r["text"]) for r in rows}
     blind = [n for n in vlm if n in refs]
 
-    lm = CharLM.load(LM_PATH)
     decoders = beam_decoders(extra_beam)
+    lms = {path: CharLM.load(path) for path in {spec[3] for spec in decoders.values()}}
     hyps: dict[str, dict[str, str]] = {p["key"]: {} for p in pipelines if p["status"] == "done"}
     spans: dict[str, dict[str, list | None]] = {}
     sizes: dict[str, tuple[int, int]] = {}
@@ -480,8 +516,8 @@ def main(argv=None) -> None:
             hyps[key][n] = tok.to_logical(tok.decode(greedy_path(lp)[0]))
             spans[key][n] = syllable_spans(lp, tok, img.width, img.height)
             if key in decoders:
-                beam_key, alpha, beta = decoders[key]
-                beam_ids = prefix_beam_search(lp, tok.charset, lm, alpha, beta, WIDTH)
+                beam_key, alpha, beta, lm_path = decoders[key]
+                beam_ids = prefix_beam_search(lp, tok.charset, lms[lm_path], alpha, beta, WIDTH)
                 hyps[beam_key][n] = tok.to_logical(tok.decode(beam_ids))
         print(f"{key}: {len(rows)} baris ({time.time() - started:.0f} dtk)", flush=True)
     hyps["vlm_zeroshot"] = {n: nfc(vlm[n]["transcription"]) for n in blind}

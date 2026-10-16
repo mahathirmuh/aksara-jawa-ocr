@@ -45,6 +45,8 @@ def test_rules_apply_only_where_the_standard_spelling_does():
     # Bilangan berpemisah diapit sekali; yang sudah berpangkat tidak diapit lagi.
     assert standardize("꧑꧐:꧓꧐ ꧒,꧕") == "꧇꧑꧐:꧓꧐꧇ ꧇꧒,꧕꧇"
     assert standardize("꧇꧑꧙꧔꧕꧇") == "꧇꧑꧙꧔꧕꧇"
+    # Bilangan yang sudah dibuka atau ditutup pada pangkat tidak diapit lagi (tidak menjadi pada pangkat ganda).
+    assert standardize("꧇꧑꧒") == "꧇꧑꧒" and standardize("꧑꧒꧇") == "꧑꧒꧇"
     text = "ꦥꦤ꧀ꦕꦶ ꦫꦼꦒ ꦭꦼꦩꦃ ꦠꦿꦼꦱ꧀ꦤ ꧗"
     assert standardize(text) == "ꦥꦚ꧀ꦕꦶ ꦉꦒ ꦊꦩꦃ ꦠꦽꦱ꧀ꦤ ꧇꧗꧇"
     # `only`: hanya aturan yang disebut.
@@ -126,6 +128,17 @@ def test_synthetic_lines_render_the_standard_spelling_and_label_it(tok, monkeypa
     covered = font_codepoints(NOTO)
     monkeypatch.setattr(text_augment, "font_codepoints", lambda path: covered - {ord("ꦉ")})
     assert always.sample(0)[1] == "ꦥꦚ꧀ꦕꦶ ꦫꦼꦒ ꦊꦩꦃ"
+
+
+def test_synthetic_lines_drop_a_rule_whose_result_does_not_round_trip(tok, monkeypatch):
+    # Hasil aturan yang tidak lolos round-trip tokenizer (di sini: semua teks ber-pa cerek ditolak) dibuang per aturan;
+    # aturan lain tetap dipakai, dan label tetap sama dengan teks yang dirender.
+    always = SyntheticLines(LINES[:1], tok, [NOTO], deterministic=True, seed=3, standard_prob=1.0)
+    original = SyntheticLines._round_trips
+    monkeypatch.setattr(SyntheticLines, "_round_trips", lambda self, text: "ꦉ" not in text and original(self, text))
+    assert always.sample(0)[1] == "ꦥꦚ꧀ꦕꦶ ꦫꦼꦒ ꦊꦩꦃ"
+    monkeypatch.setattr(ds, "is_well_formed", lambda text: "ꦊ" not in text)  # nga lelet tidak well-formed: dilewati juga
+    assert always.sample(0)[1] == "ꦥꦚ꧀ꦕꦶ ꦫꦼꦒ ꦭꦼꦩꦃ"
 
 
 def test_fonts_that_render_both_spellings_alike_always_get_the_standard_one(tok, monkeypatch):
