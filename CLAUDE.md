@@ -102,6 +102,7 @@ python -m src.charlm --order 5 --lines 300000 --drop-space-prob 0.5             
 python -m src.charlm --order 5 --lines 300000 --drop-space-prob 0.5 --standard-prob 0.5   # LM yang sama dengan ejaan baku di separuh baris
 python scripts/beam_eval.py CKPT --lm data/charlm/o5_n300000_ds0.5.pkl --name N  # beam+LM vs greedy: disetel di dev sintetis, NusaAksara sekali
 python scripts/beam_eval.py CKPT --lm data/charlm/o5_n300000_ds0.5_std0.5.pkl --name RUN_o5std --dev-standard-prob 0.5   # run berejaan baku: dev dirender seperti training-nya
+python scripts/beam_eval.py CKPT --lm LM --name RUN_o5std --dev-from-checkpoint   # dev dirender dengan resep training checkpoint itu sendiri (argumen + font dari log; fase 9 ke atas)
 python scripts/export_results.py                 # kontrak data web -> out/results/ (~14 menit CPU dengan run fase6)
 python scripts/export_datasets.py                # kartu data halaman Dataset -> out/results/datasets.json (~20 dtk CPU, tanpa model)
 python scripts/export_methods.py                 # kartu metode halaman Metode -> out/results/methods.json (beberapa detik; SESUDAH export_results.py dan compare_runs.py, karena buktinya dikutip dari keluaran keduanya)
@@ -386,6 +387,23 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   Batasan yang diketahui sebelumnya: kelompok baris berasal dari penaksir yang kadang menggolongkan potongan raster miring
   sebagai tegak (pengenceran, bukan bias ke satu lengan); huruf italic cetakan berbeda bentuk dari huruf tegak yang digeser,
   jadi render miring mungkin hanya menutup sebagian celah (lever berikutnya: font aksara Jawa bergaya italic/kursif).
+  **Kode kartu untuk fase 9 (2026-10-16 malam, selama training; `ff47ebd`, `b9fd2d6`):** kartu metode mengenal
+  perlakuan `slant` (`CONTROLS["slant"]` = fase9_slant lawan fase9_ctrl). Butir "Render miring seperti huruf italic":
+  `official` bila run resmi memakainya, `tested` bila hanya diuji sebagai lanjutan model resmi (kedua lengan dilanjutkan
+  dari checkpoint run resmi, `started_from`); buktinya CER baris miring dan tegak dari `out/compare/slant_<A>_vs_<B>.json`
+  (perlakuan = A), hanya bila CER semua baris laporan sama dengan manifest. Butir evaluasi "Evaluasi kemiringan sintetis"
+  dari `slant_synthetic.json`, hanya bila laporan itu membaca checkpoint yang sekarang. Resep run menyebut render miring
+  dan perbaikan font; cacat font yang ditangani `--font-fixes` (`export_datasets.FONT_FIXES_HANDLE`) tidak dihitung untuk
+  run yang memakainya, dan font bercacat run sebelumnya yang masih dipakai run resmi disebut "dihindari lewat perbaikan
+  font"; bukti ejaan baku diwarisi lewat rantai (`spelling_entry` memakai `chain_pair`). Kartu data dan halaman Dataset
+  mencatat `slant_prob`, `slant_max`, `font_fixes` tiap run ("miring p X (hingga Y)", "perbaikan font").
+  `scripts/beam_eval.py --dev-from-checkpoint` merender dev dengan resep data training checkpoint itu (argumen dan font
+  dari log-nya), dan `export_results.DEV_KEYS` ikut membandingkan render miring dan perbaikan font.
+  `make_official.sh fase9_slant` menghitung pembanding dan `eval_slant.py real` untuk ketiga pasangan fase 9. Uji mutasi:
+  50 kerusakan terhadap kode itu, semuanya mati (satu baru mati sesudah test kemiringan terbesar ditambahkan).
+  Pencarian web 2026-10-16: tidak ditemukan font aksara Jawa bergaya italic (Noto Sans Javanese, Tuladha Jejeg, dan font
+  lain yang ditemukan hanya tegak), jadi huruf miring cetakan kemungkinan dibuat dengan memiringkan font biasa (dugaan,
+  belum diverifikasi; menegakkan potongan miring tetap memperburuk, lihat analisis galat di atas).
 - **OCR + VLM dan web UI (keputusan user 2026-09-24).**
   - **Dua pembaca, satu hakim:** CRNN tetap pembaca utama (offline, cepat) dan "hakim piksel"; VLM
     fine-tune = pembaca kedua yang menyumbang kandidat. Semua kandidat (greedy, N-best beam, VLM, LLM)
