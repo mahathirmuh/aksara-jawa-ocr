@@ -60,3 +60,27 @@ def test_real_report_per_group_without_label_text(tmp_path, monkeypatch):
     assert not any(ref in written for ref in refs.values())
     with pytest.raises(SystemExit, match="pipeline z tidak punya prediksi"):
         es.real("x", "z", results, tmp_path / "out")
+    # Halaman dengan nama selain "nusaaksara_hal_<N>": cetak.
+    k = report["kinds"]
+    assert (k["cetak"]["lines"], k["tulisan tangan"]["lines"], k["tulisan tangan"]["cer_a"]) == (3, 0, None)
+    assert report["ci95_pages"]["tulisan tangan"] is None and report["handwritten_pages"][:3] == [1, 6, 8]
+
+    # Halaman tulisan tangan (adendum fase 9): dipisahkan dari halaman cetak, dengan SK per halamannya sendiri.
+    (results / "lines.jsonl").write_text("".join(
+        json.dumps({"id": k, "image": f"img/{k}", "reference": v,
+                    "source_id": {"a.png": "nusaaksara_hal_0", "b.png": "nusaaksara_hal_92", "c.png": "nusaaksara_hal_91"}[k]}) + "\n"
+        for k, v in refs.items()), encoding="utf-8")
+    report = es.real("x", "y", results, tmp_path / "out", resamples=200)
+    k = report["kinds"]
+    assert (k["cetak"]["lines"], k["cetak"]["pages"], k["tulisan tangan"]["lines"], k["tulisan tangan"]["pages"]) == (2, 2, 1, 1)
+    assert k["cetak"]["cer_a"] == pytest.approx(1 / 6) and k["cetak"]["cer_b"] == pytest.approx(3 / 6)
+    assert k["tulisan tangan"]["cer_a"] == 0 and k["tulisan tangan"]["cer_b"] == pytest.approx(2 / 3)
+    low, high = report["ci95_pages"]["cetak"]
+    assert low <= high < 0 and report["ci95_pages"]["tulisan tangan"] == [pytest.approx(-2 / 3)] * 2
+
+
+def test_kind_follows_the_handwritten_pages():
+    assert es.kind("nusaaksara_hal_92") == "tulisan tangan" and es.kind("nusaaksara_hal_1") == "tulisan tangan"
+    assert es.kind("nusaaksara_hal_91") == "cetak" and es.kind("nusaaksara_hal_0") == "cetak"
+    assert es.kind("h1") == "cetak" and es.kind("halaman_x") == "cetak"
+    assert len(es.HANDWRITTEN_PAGES) == 20 and es.KINDS == ("cetak", "tulisan tangan")

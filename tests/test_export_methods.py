@@ -1484,6 +1484,25 @@ def test_slant_entry_quotes_the_italic_lines_only_for_a_valid_pair(tmp_path):
         "sampai +0,20).")
     assert measured["evidence_source"] == "out/compare/slant_crnn_fase9_slant_vs_crnn_fase9_ctrl.json"
     assert measured["settings"][-1] == ["Kelompok baris nyata", "ditaksir dari citra: tegak di bawah 0,1, miring 0,3 ke atas"]
+    # Laporan yang memisahkan halaman cetak dari tulisan tangan (adendum fase 9): efek sampingnya dibaca di baris cetak,
+    # dan catatannya menyebut bahwa baris miring itu tulisan tangan.
+    split = json.loads(report.read_text(encoding="utf-8"))
+    split["kinds"] = {"cetak": {"lines": 308, "pages": 72, "chars": 800, "cer_a": 0.12, "cer_b": 0.125},
+                      "tulisan tangan": {"lines": 437, "pages": 20, "chars": 1200, "cer_a": 0.21, "cer_b": 0.26}}
+    split["ci95_pages"]["cetak"] = [-0.012, 0.002]
+    split["handwritten_pages"] = list(range(20))
+    report.write_text(json.dumps(split), encoding="utf-8")
+    kinds = data_methods(root, "fase9_slant", SLANT9)["slant"]
+    assert kinds["evidence"].endswith(
+        "; pada 308 baris cetak (72 halaman) CER 12,50% → 12,00% (−0,50 poin; selang kepercayaan 95% per halaman −1,20 "
+        "sampai +0,20).")
+    assert kinds["note"].endswith("Baris yang miring ternyata reproduksi tulisan tangan (20 halaman uji, menurut pemeriksaan "
+                                  "visual yang belum diperiksa manusia), bukan huruf cetak yang dimiringkan; tulisan tangan "
+                                  "di luar scope repo ini, jadi render miring hanya meniru kemiringannya, bukan bentuk hurufnya.")
+    split["kinds"]["cetak"]["lines"] = 0  # tanpa baris cetak: kembali ke baris tegak
+    report.write_text(json.dumps(split), encoding="utf-8")
+    assert "baris nyata yang tegak (84 halaman)" in data_methods(root, "fase9_slant", SLANT9)["slant"]["evidence"]
+    report = slant_report(root, "crnn_fase9_slant", "crnn_fase9_ctrl", 0.17, 0.20)
     # Kelompok tanpa selang kepercayaan: angkanya tetap, selangnya tidak dikarang.
     data = json.loads(report.read_text(encoding="utf-8"))
     data["ci95_pages"]["tegak"] = None

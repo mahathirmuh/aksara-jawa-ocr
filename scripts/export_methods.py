@@ -994,7 +994,11 @@ def slant_entry(run: str, args: dict, evidence: Evidence, root: Path, chain_runs
     report = evidence.slant(pipeline_key(pair[0]) or "", pipeline_key(pair[1]) or "") if pair else None
     groups = (report or {}).get("groups") or {}
     tilted, upright = groups.get("miring") or {}, groups.get("tegak") or {}
-    if report and tilted.get("lines") and upright.get("lines"):
+    # Laporan yang memisahkan halaman cetak dari tulisan tangan (adendum fase 9): efek sampingnya dibaca di baris cetak,
+    # bukan di baris tegak (yang ikut memuat tulisan tangan tegak).
+    printed = ((report or {}).get("kinds") or {}).get("cetak") or {}
+    side, side_name, side_label = (printed, "cetak", "cetak") if printed.get("lines") else (upright, "tegak", "nyata yang tegak")
+    if report and tilted.get("lines") and side.get("lines"):
         treated, control = pair
         ci = report.get("ci95_pages") or {}
 
@@ -1010,9 +1014,10 @@ def slant_entry(run: str, args: dict, evidence: Evidence, root: Path, chain_runs
         else:
             lead = f"Pada run {treated} di rantai model resmi, terhadap run kontrol {control} (jumlah langkah sama, tanpa render miring): "
         measured = (lead + part("miring", tilted, "nyata yang tertaksir miring") + "; "
-                    + part("tegak", upright, "nyata yang tegak") + ("." if used else ". Run resmi tidak memakainya."))
+                    + part(side_name, side, side_label) + ("." if used else ". Run resmi tidak memakainya."))
         source = relative(root / "out/compare" / f"slant_{report['a']}_vs_{report['b']}.json", root)
     thresholds = (report or {}).get("thresholds") or {}
+    handwritten = (report or {}).get("handwritten_pages")
     settings = ([("Peluang", dec(args["slant_prob"])),
                  ("Kemiringan", f"0 sampai {dec(args.get('slant_max') or 0)} (geser mendatar per tinggi baris), diundi "
                                 "per baris")] if used else [])
@@ -1021,13 +1026,17 @@ def slant_entry(run: str, args: dict, evidence: Evidence, root: Path, chain_runs
                                                  f"miring {dec(thresholds['miring'][0])} ke atas"))
     return entry(
         "slant", "Render miring seperti huruf italic", "data", "official" if used else "tested",
-        "Sebagian citra hasil render dimiringkan ke kanan seperti huruf italic cetakan: tiap baris piksel digeser "
-        "mendatar sebanding dengan tingginya, sebelum augmentasi lain. Sebagian cetakan nyata memakai huruf miring, dan "
-        "baris seperti itu terbaca jauh lebih buruk daripada baris tegak.",
+        "Sebagian citra hasil render dimiringkan ke kanan seperti huruf italic: tiap baris piksel digeser mendatar "
+        "sebanding dengan tingginya, sebelum augmentasi lain. Dibuat untuk baris uji nyata yang miring, yang terbaca jauh "
+        "lebih buruk daripada baris tegak.",
         settings, measured, source, files=["src/dataset.py", "scripts/eval_slant.py"],
         note="Kelompok baris nyata ditaksir dari citra (kemiringan yang membuat kolom tinta bersambung paling panjang); "
-             "potongan bertekstur raster kadang tertaksir tegak walau miring. Huruf italic cetakan berbeda bentuk dari huruf "
-             "tegak yang dimiringkan, jadi render miring hanya meniru sebagian.")
+             "potongan bertekstur raster kadang tertaksir tegak walau miring. "
+             + (f"Baris yang miring ternyata reproduksi tulisan tangan ({len(handwritten)} halaman uji, menurut pemeriksaan "
+                "visual yang belum diperiksa manusia), bukan huruf cetak yang dimiringkan; tulisan tangan di luar scope repo "
+                "ini, jadi render miring hanya meniru kemiringannya, bukan bentuk hurufnya." if handwritten else
+                "Huruf miring nyata berbeda bentuk dari huruf tegak yang dimiringkan, jadi render miring hanya meniru "
+                "sebagian."))
 
 
 def recipe_changes(links: list[dict], counts: list[int]) -> str:
