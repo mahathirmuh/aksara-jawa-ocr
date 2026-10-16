@@ -294,6 +294,31 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   belum terukur; efek langsung paling banyak ~1 poin); (d) checkpoint dasar berikutnya dipilih dari (a)–(b), bukan
   dari G3; beam + LM dinilai ulang dengan model bahasa berejaan baku, disetel di dev sintetis; mengganti angka resmi
   tetap keputusan user.
+  **Jalannya fase 8:** `fase8_std` selesai 2026-10-13 14:21 (val bersih 0,169%): G3 **20,35%** (pad 0,06: 18,95%;
+  spasi dibuang 19,85%), q100 G1 0,34%, G2 0,79%. `fase8_ctrl` TERPUTUS di langkah ~1.100: laptop mati 2026-10-13
+  18:50:40 (Kernel-Power 41, BugcheckCode 0, tanpa tekan tombol daya): charger dicabut 16:05–17:24 dan lagi sejak
+  17:42, lid ditutup, Modern Standby tidak membekukan training, baterai habis. Sesuai protokol (titik lanjut
+  `fase8_std` = tidak ada), `fase8_ctrl` diulang dari langkah 0 pada 2026-10-16 11:55; checkpoint langkah 1.000 yang
+  terputus disimpan sebagai `out/checkpoints/fase8_ctrl/putus_step1000.pt` (tidak dipakai), dan event `start` proses
+  yang terputus tetap di log-nya (dihitung sekali oleh `resume_points`). `run_fase8.sh` kini tidak menyalin ulang
+  `last_snapshot.pt` `fase8_std` saat dijalankan ulang (salinan baru lebih muda dari laporan-laporannya).
+  **Tinjauan awal, BUKAN titik akhir utama** (2026-10-16, bacaan greedy `fase8_std` di luar ekspor, lawan prediksi
+  `fase7_track` di `out/results`; CER sama persis dengan laporan G3): bentuk ejaan baku terbaca **159/212 (75,0%)**
+  lawan 62/212 (29,2%), selisih +45,8 poin SK halaman [+37,1; +53,6]; per bentuk nya 47/59, pa cerek 36/44, nga lelet
+  21/26, keret 11/20, pada pangkat 44/63; keluaran bentuk baku 187 dengan presisi 81,3% (palsu: pangkat 16, keret 10,
+  lelet 7, cerek 2, nya 0); CER −1,11 poin [−1,57; −0,64]; CER 575 baris tanpa bentuk baku −0,61 [−1,11; −0,10]. Selisih
+  ini memuat juga +1.500 langkah, jadi efek ejaan baku dibaca dari `fase8_std` − `fase8_ctrl`.
+  `scripts/after_fase8.sh` (proses mandiri, log `out/after_fase8.log`) menunggu rantai selesai lalu menjalankan semua
+  titik akhir: ekspor hasil, `compare_runs.py` dan `eval_spelling.py real` untuk std−ctrl, std−fase7_track,
+  ctrl−fase7_track, kartu data dan metode + impor web (angka resmi tidak diganti), `eval_spelling.py synthetic` (300
+  baris val javatext, kedua ejaan), model bahasa `o5_n300000_ds0.5_std0.5.pkl`, lalu `beam_eval.py` untuk `fase8_std`
+  dengan model bahasa lama (`fase8_std_o5`) dan yang berejaan baku (`fase8_std_o5std`), keduanya disetel di dev yang
+  dirender seperti training-nya (`--dev-standard-prob 0.5`). Kartu metode dan kartu data sudah mengenal perlakuan ini
+  (butir "Ejaan baku pada baris latih" dengan bukti dari `out/compare/spelling_<A>_vs_<B>.json` yang hanya dikutip bila
+  CER kedua sisinya sama dengan manifest; resep run "ejaan baku p X"; batasan aksara langka menyebut bahwa pa cerek, nga
+  lelet, dan keret tidak lagi langka bagi run resmi berejaan baku). 42 mutan terhadap kode fase 8 di `scripts/` dan
+  `web/`: semuanya mati kecuali satu yang setara. Kode `src/spelling.py`, `src/dataset.py`, dan `src/charlm.py` BELUM
+  diuji mutasi (tidak boleh disentuh selama training dan skrip lanjutan berjalan).
 - **OCR + VLM dan web UI (keputusan user 2026-09-24).**
   - **Dua pembaca, satu hakim:** CRNN tetap pembaca utama (offline, cepat) dan "hakim piksel"; VLM
     fine-tune = pembaca kedua yang menyumbang kandidat. Semua kandidat (greedy, N-best beam, VLM, LLM)
