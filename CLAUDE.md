@@ -465,11 +465,16 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   19,76%, **−8,84 [−11,78; −6,02]** (membantu, tetapi semuanya tulisan tangan); (b) 424 baris tegak −0,94 [−2,49; +0,43];
   q100 G1 0,32% / 0,38%, G2 0,81% / 0,72%; (e) **308 baris CETAK 12,34% → 13,09%, +0,75 [+0,15; +1,39]: render miring
   memperburuk cetak secara nyata**; (f) 437 baris tulisan tangan 27,96% → 19,86%, −8,10 [−11,33; −5,21]; (c) G3 keseluruhan
-  −3,77 [−5,67; −1,73]. Menurut aturan dan adendumnya: **dasar berikutnya = `fase9_ctrl`** (cetak terbaik sejauh ini: 12,34%,
+  −3,77 [−5,67; −1,73]. Dosis-respons sintetis (`slant_synthetic.json`, javatext 300 baris val, miring 0 / 0,2 / 0,35 / 0,5 /
+  0,7): `fase9_slant` 0,28 / 0,25 / 0,31 / 0,49 / 1,23%, `fase9_ctrl` 0,28 / 0,96 / 4,91 / 14,75 / 43,38%, `fase8_std` 0,31 /
+  1,34 / 4,94 / 17,00 / 48,21% (searah; miring 0 tidak naik). Bentuk ejaan baku 168/212 lawan 163/212 (SK [−2,7; +6,9]),
+  presisi 85,0% lawan 78,4%. Menurut aturan dan adendumnya: **dasar berikutnya = `fase9_ctrl`** (cetak terbaik sejauh ini: 12,34%,
   `fase8_std` 12,63%); render miring tidak dipakai untuk model cetak. Angka resmi tidak diganti sekarang (ditunda sampai
   fase 10; keputusan user).
-  **Fase 10 (dimulai 2026-10-17 sesudah `after_fase9.sh`; `scripts/run_fase10.sh fase9_ctrl`, `scripts/after_fase10.sh
-  fase9_ctrl`, log `out/fase10_chain.log`):** `fase10_rare` = `fase9_ctrl` + 1.500 langkah, resep `fase9_ctrl` (jarak 0,5 /
+  **Fase 10 (dimulai 2026-10-17 04:35 sesudah `after_fase9.sh` selesai 04:34; `scripts/run_fase10.sh fase9_ctrl`,
+  `scripts/after_fase10.sh fase9_ctrl`, log `out/fase10_chain.log`; argumen di event `start` log diperiksa: 9 font, tanpa
+  miring, perbaikan font, ejaan baku 0,5, sisipan 0,3 / 0,15 / 0,9 / tempel; layanan terjemahan 8012 tetap mati selama
+  training):** `fase10_rare` = `fase9_ctrl` + 1.500 langkah, resep `fase9_ctrl` (jarak 0,5 /
   0,3, ejaan baku 0,5, augmentasi `fase5`, drop-space 0,5, `--font-fixes`) + sisipan aksara langka versi perbaikan
   (`--rare-insert-prob 0.3 --rare-opener-prob 0.15 --rare-max-similarity 0.9 --rare-attach`, sama persis dengan
   `fase7_track_rare`, jadi nilainya tidak disetel ulang); `fase10_ctrl` = sama tanpa sisipan, titik lanjut ditiru.
