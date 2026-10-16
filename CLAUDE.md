@@ -101,6 +101,7 @@ python -m src.gpt check                          # wadah API GPT (ablasi koreksi
 python -m src.charlm --order 5 --lines 300000 --drop-space-prob 0.5              # LM karakter dari split train (kondisi "kamus")
 python -m src.charlm --order 5 --lines 300000 --drop-space-prob 0.5 --standard-prob 0.5   # LM yang sama dengan ejaan baku di separuh baris
 python scripts/beam_eval.py CKPT --lm data/charlm/o5_n300000_ds0.5.pkl --name N  # beam+LM vs greedy: disetel di dev sintetis, NusaAksara sekali
+python scripts/beam_eval.py CKPT --lm data/charlm/o5_n300000_ds0.5_std0.5.pkl --name RUN_o5std --dev-standard-prob 0.5   # run berejaan baku: dev dirender seperti training-nya
 python scripts/export_results.py                 # kontrak data web -> out/results/ (~14 menit CPU dengan run fase6)
 python scripts/export_datasets.py                # kartu data halaman Dataset -> out/results/datasets.json (~20 dtk CPU, tanpa model)
 python scripts/export_methods.py                 # kartu metode halaman Metode -> out/results/methods.json (beberapa detik; SESUDAH export_results.py dan compare_runs.py, karena buktinya dikutip dari keluaran keduanya)
@@ -317,8 +318,34 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   (butir "Ejaan baku pada baris latih" dengan bukti dari `out/compare/spelling_<A>_vs_<B>.json` yang hanya dikutip bila
   CER kedua sisinya sama dengan manifest; resep run "ejaan baku p X"; batasan aksara langka menyebut bahwa pa cerek, nga
   lelet, dan keret tidak lagi langka bagi run resmi berejaan baku). 42 mutan terhadap kode fase 8 di `scripts/` dan
-  `web/`: semuanya mati kecuali satu yang setara. Kode `src/spelling.py`, `src/dataset.py`, dan `src/charlm.py` BELUM
-  diuji mutasi (tidak boleh disentuh selama training dan skrip lanjutan berjalan).
+  `web/`: semuanya mati kecuali satu yang setara; 25 mutan terhadap `src/spelling.py`, `src/dataset.py`,
+  `src/charlm.py`, dan `src/train.py` (dijalankan sesudah training selesai) semuanya mati.
+  **Hasil fase 8 (2026-10-16; `out/compare/spelling_crnn_fase8_std_vs_crnn_fase8_ctrl.json`,
+  `crnn_fase8_std_vs_crnn_fase8_ctrl.md`, `spelling_synthetic.json`).** `fase8_ctrl` (diulang dari awal) selesai 15:46,
+  val bersih 0,178%: G3 **20,81%** (pad 0,06: 19,41%; spasi dibuang 20,18%), q100 G1 0,27%, G2 0,90%.
+  (a) Titik akhir utama: bentuk ejaan baku terbaca **159/212 (75,0%) lawan 64/212 (30,2%)**, +44,8 poin, SK halaman
+  [+35,8; +53,1] → **membantu**. Per bentuk `fase8_std` / `fase8_ctrl`: nya 47/30 dari 59, pa cerek 36/0 dari 44, nga
+  lelet 21/0 dari 26, keret 11/0 dari 20, pada pangkat 44/34 dari 63. (b) Efek samping: presisi keluaran bentuk baku
+  81,3% (187 keluaran, 35 palsu: pangkat 16, keret 10, lelet 7, cerek 2) lawan 89,7% (68 keluaran, 7 palsu); CER 575
+  baris tanpa bentuk baku 20,45% lawan 20,60% (−0,14 [−0,75; +0,51], tidak memburuk); q100 G1 0,34% lawan 0,27% dan
+  G2 0,79% lawan 0,90% (di dalam ketidakpastian); nga lelet dibaca angka dua 21 → 1 kali; sintetis javatext (300
+  baris val yang kena aturan, kedua ejaan): bentuk baku terbaca 569/570 lawan 383/570 (`fase8_ctrl` hanya nya dan
+  pangkat; cerek, lelet, keret 0), CER baris berejaan korpus 0,34% lawan 0,31% (2 nga lelet palsu). (c) G3 −0,46 poin,
+  SK halaman [−1,03; +0,16], per baris [−0,92; −0,01]; 263 baris membaik, 209 memburuk: arah saja. +1.500 langkah tanpa
+  ejaan baku (`fase8_ctrl` − `fase7_track`) −0,65 poin [−1,15; −0,20], bentuk baku +0,9 poin [−2,0; +4,3]. (d) Dasar berikutnya =
+  `fase8_std`. **Beam + LM** (dev 300 baris dirender seperti training, ejaan baku p 0,5): model bahasa lama dev 2,54% →
+  2,04% (α 0,25, β 1,0); model bahasa berejaan baku `o5_n300000_ds0.5_std0.5.pkl` 2,54% → **1,82%** (α 0,25, β 1,0) →
+  dipakai; NusaAksara 20,35% → **18,02%** (lama 18,25%), 306 membaik / 135 memburuk (lama 297 / 159); render bersih
+  javatext 0,31% → 0,22%. Evaluasi jarak (`spacing_synthetic.json`, semua bacaan dihitung ulang karena sidik kode
+  `src/` berubah): baris tanpa spasi pada 0 / 0,1 / 0,2 / 0,3 / 0,45 / 0,6 em `fase8_std` 0 / 0 / 0 / 0,04 / 5,3 / 62,9
+  spasi palsu per 100 batas (`fase7_track` 0 / 0 / 0 / 0,02 / 4,2 / 67,5); recall spasi asli 99,8–100%. Terjemahan NLLB dari bacaan greedy `fase8_std`:
+  chrF 18,9 / BLEU 0,5 (`fase7_track` 18,5 / 0,4).
+  **Angka resmi = `fase8_std` (keputusan user 2026-10-16: "sesuai rekomendasimu saja baiknya"), menggantikan
+  `fase7_track`.** Evaluasi resmi 10.000 baris javatext: **G1 0,24%** (0,2353%), **G2 0,98%** (0,9774%), **G3 20,35%**;
+  beam + LM resmi 18,02%. Dipilih menurut aturan (a)–(b), bukan G3; data uji tetap dipakai berulang (sekarang paling
+  sedikit 44 pembacaan NusaAksara), jadi angkanya sedikit optimistis. Kartu metode mengutip bukti jarak antar suku
+  kata, evaluasi jarak, dan sisipan aksara langka dari pasangan di rantai model resmi (`chain_pair`: fase7_track lawan
+  fase7_ctrl, fase7_track_rare lawan fase7_track) dengan menyebut run-nya.
 - **OCR + VLM dan web UI (keputusan user 2026-09-24).**
   - **Dua pembaca, satu hakim:** CRNN tetap pembaca utama (offline, cepat) dan "hakim piksel"; VLM
     fine-tune = pembaca kedua yang menyumbang kandidat. Semua kandidat (greedy, N-best beam, VLM, LLM)
@@ -404,7 +431,9 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     dilaporkan kemungkinan terlalu rendah; menjalankannya ulang ~1 jam CPU dan mengubah angka tahap 3: keputusan user.
     **Batch dijalankan ulang tanpa "ê" 2026-10-12 (keputusan user; `BATCH_KEEPS_PEPET_MARK = false`, 51 menit CPU):**
     dari alih aksara manusia **chrF 38,6 / BLEU 11,6** (dulu 36,2 / 10,5: naik 2,4 poin chrF); dari bacaan greedy
-    model resmi `fase7_track` chrF 18,5 / BLEU 0,4. Angka OCR lama (19,4 / 1,0) dibuat dari beam + LM `fase5_fonts`
+    model resmi `fase7_track` chrF 18,5 / BLEU 0,4 (sejak 2026-10-16 dari `fase8_std`: chrF 18,9 / BLEU 0,5; berkas
+    batch lama dicadangkan `web/storage/app/mt/*_sebelum_20261016.*`, lalu `aksara:translate --dump` menulis ulang
+    berkas lengkap dari database). Angka OCR lama (19,4 / 1,0) dibuat dari beam + LM `fase5_fonts`
     DAN masih ber-"ê", jadi tidak sebanding; walau G3 turun dari 33,8% ke 21,5%, chrF dari keluaran OCR tidak naik
     (teks 1 dari 5 karakter salah masih terlalu rusak untuk diterjemahkan). Hasil lama dicadangkan di
     `web/storage/app/mt/*_sebelum_20261012.*` (tidak ikut git). Catatan pepet di butir NLLB-200 halaman Metode tidak
@@ -493,10 +522,10 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     CarakanJawa sama dengan javatext di 72 dari 73 aksara/angka/pada (dihitung ulang tiap ekspor; font latih lain 0
     dari 73). Bagian uji korpus tidak "disimpan sampai akhir": di luar gerbang resmi, 24 tes cepat (sampai 100 baris
     pertama; angka 200 di versi sebelumnya menghitung pasangan baris x font) dan 2 evaluasi penuh run lain juga
-    membacanya, dan 4 evaluasi di luar `out/eval` (dua laporan aksara langka sintetis 2.000 baris, dua laporan beam + LM
-    300 baris; kunci kartu `usage.test.others`) mengambil barisnya secara ACAK dari seluruh bagian uji, jadi baris di luar 10.000
-    pertama pun pernah dibaca. NusaAksara sudah dievaluasi paling sedikit 38 kali (36 laporan G3 di `out/eval` + dua laporan
-    beam + LM di `out/beam`, kunci kartu `usage.real.others`; pembacaan yang tidak meninggalkan laporan tidak
+    membacanya, dan 6 evaluasi di luar `out/eval` (dua laporan aksara langka sintetis 2.000 baris, empat laporan beam +
+    LM 300 baris; kunci kartu `usage.test.others`) mengambil barisnya secara ACAK dari seluruh bagian uji, jadi baris di luar 10.000
+    pertama pun pernah dibaca. NusaAksara sudah dievaluasi paling sedikit 44 kali (40 laporan G3 di `out/eval` + empat
+    laporan beam + LM di `out/beam`, per 2026-10-16; kunci kartu `usage.real.others`; pembacaan yang tidak meninggalkan laporan tidak
     terhitung, karena itu halaman menulis "paling sedikit"); halaman menyebut angka-angka itu. Font tiap run: dari log
     run bila mencatatnya (`src.train.start_record` menulis NAMA font perender data latih di event `start`; run sebelum
     2026-10-06 tidak), kalau tidak dari folder font SEKARANG (`fonts_source`, `font_names`), dan ekspor memperingatkan
@@ -718,7 +747,7 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     `phpunit.xml` memaksa SQLite in-memory (`force="true"`, jadi `DB_*` yang tertinggal di shell diabaikan) dan
     `tests/TestCase.php::createApplication` menolak database bernama `its_aksara` sebelum migrasi. Test memakai folder
     sementara untuk `storage/app/mt` (dulu `TranslationTest` menimpa hasil NLLB; dipulihkan dari DB lewat
-    `php artisan aksara:translate --dump`). 171 test lolos di SQLite dan PostgreSQL uji (2026-10-12, sesudah tinjauan keempat); 335 test Python.
+    `php artisan aksara:translate --dump`). 171 test lolos di SQLite dan PostgreSQL uji; 370 test Python (2026-10-16, sesudah fase 8 dan pergantian angka resmi).
     **Port:** Laravel 8010, layanan model 8011, layanan terjemahan 8012 — 8000/8001, 5173, dan 8020 dipakai proyek
     lain milik user di laptop yang sama (jangan dihentikan; cek dulu siapa yang mendengarkan sebelum memakai sebuah
     port, dan beri skrip sementara port 8030 ke atas). Test tetap bisa di SQLite in-memory
@@ -740,13 +769,19 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     `pipelines.official` dan membacanya lewat `Pipeline::official()` (manifest lama tanpa kunci itu =
     `crnn_fonts`); tidak ada lagi nama pipeline resmi yang tertanam di halaman. Demo: `DEFAULT_CHECKPOINT` di
     `src/serve.py` harus run yang sama (dijaga `tests/test_export_results.py`); bawaan Demo = greedy (jalur
-    angka resmi). Bobot LM beam di `src/serve.py` (`ALPHA`, `BETA`) milik checkpoint bawaan itu (sejak 2026-10-12:
-    0,5 / 1,0 dari `out/beam/fase7_track_o5.json`; test mencocokkannya dengan laporan itu bila berkasnya ada), dan
+    angka resmi). Bobot LM beam di `src/serve.py` (`ALPHA`, `BETA`) dan model bahasanya (`DEFAULT_LM`) milik checkpoint
+    bawaan itu (sejak 2026-10-16: model bahasa berejaan baku, 0,25 / 1,0 dari `out/beam/fase8_std_o5std.json`; test
+    mencocokkannya dengan laporan yang dipilih `export_results.official_beam`: di antara `BEAM_REPORTS`
+    (`<run>_o5.json` model bahasa lama, `<run>_o5std.json` berejaan baku) yang CER beam-nya di dev TERENDAH, dengan dev
+    yang harus sama; laporan yang tidak sah atau dev yang berbeda menghentikan ekspor), dan
     layanan melaporkannya di kunci `beam` jawaban `/health` dan `/predict`: halaman Demo menampilkan bobot dan rumus
     skor dari situ, tidak menuliskannya sendiri. **Mengganti run resmi:**
     `bash scripts/make_official.sh RUN` (evaluasi G1/G2 10.000 baris, ~30 menit per gerbang di CPU; menunggu
-    training selesai dulu), ubah `OFFICIAL_RUN` + `DEFAULT_CHECKPOINT`, jalankan `scripts/beam_eval.py` untuk run itu dan
-    salin bobot terpilihnya ke `ALPHA`/`BETA` di `src/serve.py`, lalu ekspor dan impor.
+    training selesai dulu), ubah `OFFICIAL_RUN` + `DEFAULT_CHECKPOINT`, jalankan `scripts/beam_eval.py` untuk run itu
+    dengan kedua model bahasa (`--name <run>_o5` dan `<run>_o5std`, `--dev-standard-prob` sama dengan training run itu)
+    dan salin bobot dan model bahasa yang menang di dev ke `src/serve.py`, lalu ekspor dan impor. `make_official.sh`
+    menunggu skrip lanjutan rantai mana pun (`after_fase*.sh`), menghitung ulang pembanding per run resmi (`pairs`), dan
+    membaca run resmi di evaluasi jarak; log-nya menumpuk antar-run, jadi baca baris sesudah "angka resmi -> RUN" terakhir.
   - **Seluruh alur = scope proyek (keputusan user 2026-09-24):** OCR -> transliterasi -> arti (Indonesia)
     -> tingkat tutur (ngoko / madya / krama / campur). Transliterasi & arti **manusia** untuk 745 label
     tersedia dari NusaAksara (config `Image Transliteration` / `Image Translation`, cocok 745/745, lisensi
@@ -994,7 +1029,7 @@ Detail lengkap di PLAN.md §7.
 | 3 | `src/dataset.py` + test shape | assert `model(dummy).shape[1] == W // DOWNSAMPLE` | **lolos**: 0/300 melanggar T≥1.5L |
 | 4 | `src/model.py`, `train.py`, `decode.py`, `infer.py` | 4a: CER<1% @32 → 4b: **CER<2% synthetic bersih** | 4a **lolos**: CER inference satu baris 0,07% (31/32 persis) dalam 375 langkah; 4b: berhenti di langkah 1500 karena val CER 0,376% < `--target-cer 0.005` (val = teks baru, font training); checkpoint tetap `out/checkpoints/base/best_4b_step1500.pt`; evaluasi test/G1–G3: `out/eval/base_*.json` |
 | 5 | `src/augment.py`, `scripts/ablation.py` | CER<5% synthetic augmentasi berat | tes cepat 100 baris (bukan angka resmi) `fase5_quick` langkah 500: G1 0,79%, G2 2,88%, G3 76,0% (spasi dibuang 57,5%); run 1500 langkah crash OOM di ~950; `fase5_fonts` (10 font: 2 inti + 8 tambahan) dilanjutkan dari langkah 500, berhenti di 1298 (batas 3 jam): G1 0,41%, G2 1,44%, **G3 39,1%** (margin 0,06: 35,2%; spasi dibuang 22,9%); **G3 resmi 745 baris: 37,2%** (margin 0,06: 34,9%; spasi dibuang 25,2% / 23,1%); pembanding font inti `fase5_core` (init, augmentasi, jadwal LR & langkah sama lewat `--steps 1500 --stop-step 1298`): G1 1,64%, G2 1,82%, G3 745 baris 66,6% (margin 0,06: 63,3%) → **font tambahan menurunkan G3 ~29 poin**, langkah tambahan saja ~8 poin (G3 q100 76,0% → 67,7%); **evaluasi resmi `fase5_fonts` 10.000 baris javatext: G1 0,34%, G2 2,01% → gerbang Fase 5 (G2 < 5%) LOLOS** (`out/eval/fonts_G1_10k.json`, `fonts_G2_10k.json`); **ablasi selesai 2026-09-15** (`out/ablation.md`; 12 run kumulatif dari 4b, 600 langkah, 10 font, drop-space 0,5, satu seed): val berat 65,1% → 12,0% lewat 7 op preset (blur −21, noise −10, rotate −7,5), lalu naik ke 19,3% dengan op pindaian; **G3 745 baris 75,1% → 44,1%** (tanpa spasi 69,8% → 30,0%): op preset hampir datar kecuali contrast −14,8; op pindaian **tight −14,6, stroke −10,5**, binarize −2,4, speckle −1,2; val bersih 0,34% → 0,43%. Batasan: G3 = test set (bias seleksi), satu seed (rotate +12,8 menunjukkan fluktuasi antar-run bisa besar), urutan kumulatif mencampur interaksi |
-| 6 | `src/real.py`, `--real-train` | CER<8% pada ≥200 baris nyata | test: `data/real/nusaaksara/labels.tsv` 745 baris (lisensi **non-komersial**, HANYA test); fine-tune: 43 baris papan Commons menunggu verifikasi pembaca aksara (`out/verifikasi_aksara.html` → `scripts/import_review.py`); **belum lolos**: terbaik sejauh ini `fase7_track` (masih sintetis saja; `fase6_ctrl` + 1.500 langkah dengan jarak antar suku kata acak) G3 **21,46%** (pad 0,06: 19,99%; spasi dibuang 20,99%) dan `fase7_track_rare` 21,18% (tidak berbeda nyata); kontrol `fase7_ctrl` (langkah sama tanpa jarak) 30,75% → efek jarak −9,29 poin (SK halaman [−11,92; −6,83]); sebelumnya `fase6_ctrl` 32,17%, `fase6_rare` 34,06%, beam+LM atas `fase5_fonts` 33,83%. **Angka resmi sejak 2026-10-04 = `fase7_track`** (keputusan user): G1 0,27%, G2 1,20% (10.000 baris javatext), G3 21,46%; sebelumnya `fase5_fonts` 0,34% / 2,01% / 37,25% |
+| 6 | `src/real.py`, `--real-train` | CER<8% pada ≥200 baris nyata | test: `data/real/nusaaksara/labels.tsv` 745 baris (lisensi **non-komersial**, HANYA test); fine-tune: 43 baris papan Commons menunggu verifikasi pembaca aksara (`out/verifikasi_aksara.html` → `scripts/import_review.py`); **belum lolos**: terbaik sejauh ini `fase8_std` (masih sintetis saja; `fase7_track` + 1.500 langkah dengan ejaan baku di separuh baris) G3 **20,35%** (beam + LM berejaan baku 18,02%; kontrol `fase8_ctrl` 20,81%); sebelumnya `fase7_track` (`fase6_ctrl` + 1.500 langkah dengan jarak antar suku kata acak) G3 **21,46%** (pad 0,06: 19,99%; spasi dibuang 20,99%) dan `fase7_track_rare` 21,18% (tidak berbeda nyata); kontrol `fase7_ctrl` (langkah sama tanpa jarak) 30,75% → efek jarak −9,29 poin (SK halaman [−11,92; −6,83]); sebelumnya `fase6_ctrl` 32,17%, `fase6_rare` 34,06%, beam+LM atas `fase5_fonts` 33,83%. **Angka resmi sejak 2026-10-16 = `fase8_std`** (keputusan user): G1 0,24%, G2 0,98% (10.000 baris javatext), G3 20,35%; sebelumnya `fase7_track` 0,27% / 1,20% / 21,46% (2026-10-04 sampai 2026-10-16) dan `fase5_fonts` 0,34% / 2,01% / 37,25% |
 
 **Fase 0 tidak bisa diotomatiskan.** Render PNG-nya, lalu **minta user membuka dan
 memeriksa sendiri**. Jangan menyatakan Fase 0 lulus berdasarkan "tidak ada error".
