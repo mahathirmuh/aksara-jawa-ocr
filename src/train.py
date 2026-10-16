@@ -22,7 +22,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from src.augment import build_augment
-from src.dataset import DOWNSAMPLE, H, TRAIN_FONTS, LengthBucketSampler, SyntheticLines, collate
+from src.dataset import DOWNSAMPLE, H, TRAIN_FONTS, LengthBucketSampler, SyntheticLines, collate, shaping_ok
 from src.decode import cer, greedy_decode
 from src.model import CRNN
 from src.real import ConcatLines, RealLines, read_labels
@@ -76,6 +76,13 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--standard-prob", type=float, default=0.0,
                    help="peluang baris sintetis ditulis ulang dengan ejaan baku sebelum dirender (src/spelling.py): "
                         "nya di depan ca/ja, pa cerek, nga lelet, keret, angka diapit pada pangkat")
+    p.add_argument("--slant-prob", type=float, default=0.0,
+                   help="peluang baris sintetis dimiringkan ke kanan seperti huruf italic cetakan (fase 9)")
+    p.add_argument("--slant-max", type=float, default=0.6,
+                   help="kemiringan terbesar (geser horizontal per tinggi baris), diundi seragam dari 0 per baris")
+    p.add_argument("--font-fixes", action="store_true",
+                   help="keluarkan font yang pasangannya tidak menumpuk di interpreter ini, dan jangan merender baris "
+                        "dengan font yang menggambar sebuah urutan sama dengan urutan lain (src.dataset)")
     p.add_argument("--real-train", default="", help="labels_train.tsv citra nyata (Fase 6)")
     p.add_argument("--real-val", default="", help="labels_val.tsv untuk memilih checkpoint (Fase 6)")
     p.add_argument("--real-repeat", type=int, default=10, help="berapa kali data nyata diulang per epoch")
@@ -247,6 +254,14 @@ def training_fonts(args) -> list[Path]:
         if not extra:
             raise ValueError(f"Tidak ada font .ttf/.otf di {args.extra_fonts}")
         fonts += extra
+    if getattr(args, "font_fixes", False):
+        # Kegagalan senyap: font tetap dirender tanpa galat, tetapi pasangan berjajar (BasaJan di .venv-xpu).
+        broken = [font for font in fonts if not shaping_ok(str(font))]
+        if broken:
+            print(f"font dikeluarkan (pasangan tidak menumpuk di interpreter ini): {', '.join(f.name for f in broken)}")
+        fonts = [font for font in fonts if font not in broken]
+        if not fonts:
+            raise ValueError("Semua font latih gagal cek shaping")
     return fonts
 
 
@@ -286,11 +301,14 @@ def build_datasets(args, tokenizer: Tokenizer):
             print(f"jarak antar suku kata: p={args.track_prob}, 0-{args.track_max} em")
         if args.standard_prob:
             print(f"ejaan baku: p={args.standard_prob}")
+        if args.slant_prob:
+            print(f"kemiringan italic: p={args.slant_prob}, 0-{args.slant_max}")
         synthetic = SyntheticLines(
             train_lines, tokenizer, train_fonts, augment=build_augment(args.augment),
             deterministic=bool(args.overfit), seed=args.seed, drop_space_prob=args.drop_space_prob,
             rare_text=rare_text, track_prob=args.track_prob, track_max=args.track_max,
-            standard_prob=args.standard_prob,
+            standard_prob=args.standard_prob, slant_prob=args.slant_prob, slant_max=args.slant_max,
+            avoid_conflicts=args.font_fixes,
         )
         parts.append((synthetic, 1))
     if args.real_train:

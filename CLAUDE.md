@@ -106,6 +106,9 @@ python scripts/export_results.py                 # kontrak data web -> out/resul
 python scripts/export_datasets.py                # kartu data halaman Dataset -> out/results/datasets.json (~20 dtk CPU, tanpa model)
 python scripts/export_methods.py                 # kartu metode halaman Metode -> out/results/methods.json (beberapa detik; SESUDAH export_results.py dan compare_runs.py, karena buktinya dikutip dari keluaran keduanya)
 python scripts/compare_runs.py A B               # dua pipeline di out/results: CER + SK bootstrap baris/halaman, recall aksara langka & adeg-adeg -> out/compare/
+python scripts/eval_spelling.py real A B          # bentuk ejaan baku (nya, pa cerek, nga lelet, keret, pada pangkat) di baris nyata, SK per halaman
+python scripts/eval_slant.py real A B             # CER per kelompok kemiringan baris nyata (tegak / agak miring / miring), SK per halaman
+python scripts/eval_slant.py synthetic RUN...     # dosis-respons kemiringan sintetis (javatext, 300 baris val, miring 0-0,7)
 python scripts/eval_rare.py --workers 2          # sintetis tertarget aksara langka (split test, font javatext, 3 kondisi x 3 checkpoint; ~1-2 jam CPU)
 python scripts/eval_spacing.py --lines 301 --threads 4   # dosis-respons jarak antar suku kata (split val, javatext): spasi palsu per 100 batas suku kata; memakai cache
 bash scripts/make_official.sh RUN                # evaluasi resmi G1/G2 10.000 baris untuk RUN, lalu ekspor + impor (OFFICIAL_RUN harus sudah RUN)
@@ -346,6 +349,43 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   sedikit 44 pembacaan NusaAksara), jadi angkanya sedikit optimistis. Kartu metode mengutip bukti jarak antar suku
   kata, evaluasi jarak, dan sisipan aksara langka dari pasangan di rantai model resmi (`chain_pair`: fase7_track lawan
   fase7_ctrl, fase7_track_rare lawan fase7_track) dengan menyebut run-nya.
+  **Analisis galat `fase8_std` (2026-10-16, 745 baris nyata; data uji, jadi hanya untuk memilih arah):** per kelas suntingan:
+  aksara 36% (galat 14,6% per karakter), tanda di atas aksara (cecak, wulu, pepet, layar, wignyan) **28,5% (galat 32% per
+  tanda)**: cecak hilang 212, wulu hilang 154, wulu ↔ pepet ↔ cecak ↔ layar saling tertukar 260 kali; aksara langka 7,2%
+  (galat 84%), taling 6,6%, adeg-adeg 2,7% (0/112 terbaca), spasi 4,5%. Galat di 10% awal baris 27,9% lawan ~19% di tengah;
+  baris yang tintanya menyentuh tepi KIRI potongan 26,5% lawan 16,4%. **Temuan utama: cetakan miring (italic).** Penaksir
+  kemiringan gaya Vinciarelli-Luettin (`scripts/eval_slant.py::slant`: tiap geser, jumlah kuadrat panjang kolom tinta yang
+  bersambung tanpa celah; render Noto/Tuladha yang dimiringkan 0,2/0,4/0,6 ditaksir persis; penaksir pertama berbasis
+  ketajaman profil kolom TIDAK andal: menggolongkan baris tegak tebal sebagai miring) memberi **270 baris miring (≥ 0,3; 20
+  halaman, 32% karakter) dengan CER 28,3% lawan 15,7% pada 424 baris tegak**, menyumbang 45% suntingan; potongan bertekstur
+  raster kadang tertaksir tegak walau miring. Bila baris miring setara baris tegak, G3 ≈ 16,3%. Menegakkan potongan miring
+  sebelum dibaca (diagnosis sekali pada data uji) MEMPERBURUK: 28,3% → 40,0% (huruf italic bukan sekadar huruf tegak yang
+  digeser), jadi koreksi saat baca tidak dipakai. Model sangat rentan terhadap kemiringan geometris: render javatext bersih
+  150 baris val, miring 0 / 0,2 / 0,35 / 0,5 → CER 0,16% / 1,24% / 4,52% / **15,43%** (gejala tereproduksi di sintetis,
+  seperti spasi sebelum fase 7).
+  **Fase 9 (dijalankan 2026-10-16 malam, `scripts/run_fase9.sh`, log `out/fase9_chain.log`; `scripts/after_fase9.sh`
+  menjalankan titik akhirnya; keputusan user: "setuju" pada rekomendasi analisis galat lalu run berikutnya):**
+  `fase9_slant` = `fase8_std` + 1.500 langkah, resep `fase8_std` (jarak 0,5/0,3, ejaan baku 0,5, augmentasi `fase5`,
+  drop-space 0,5) + `--font-fixes` + **`--slant-prob 0.5 --slant-max 0.6`** (`src.dataset.oblique`: citra hasil render
+  dimiringkan ke kanan seperti italic, geser horizontal per tinggi diundi seragam 0-0,6, sesudah semua undian lain dan
+  sebelum augmentasi; peluang 0 tidak mengonsumsi angka acak). `fase9_ctrl` = sama TANPA miring, titik lanjut ditiru.
+  **`--font-fixes` (kedua lengan; bawaan mati supaya run lama tidak berubah):** font yang pasangannya tidak menumpuk di
+  interpreter yang berjalan dikeluarkan (`src.dataset.shaping_ok`: lebar ka + pangkon + ka dibagi lebar ka < 1,8; terukur
+  2026-10-16 di `.venv-xpu`: BasaJan 2,56, font lain 1,00-1,39; di `.venv` BasaJan 1,00), jadi run fase 9 memakai **9 font**
+  (tercatat di event `start` log); dan baris yang memuat pangkon + lungsi tidak dirender dengan font yang menggambarnya sama
+  dengan pangkon + lingsa (`render_conflicts`; NewKramawirya), font diundi ulang di antara font lain. Ini perbaikan cacat
+  data, bukan perlakuan yang diukur (ada di kedua lengan). Rentang 0-0,6 dipilih dari sebaran penaksir di data uji (banyak
+  baris miring 0,5-0,8) dan dari dosis-respons sintetis; nilainya tidak disetel.
+  **Aturan analisis fase 9, ditetapkan 2026-10-16 SEBELUM ada angka:** (a) titik akhir utama = CER **270 baris miring**
+  (penaksir `eval_slant.py`, ≥ 0,3) `fase9_slant` − `fase9_ctrl`, "membantu" hanya bila SK 95% bootstrap per halaman di
+  bawah 0, DAN dosis-respons sintetis searah (`eval_slant.py synthetic`, javatext 300 baris val, miring 0 / 0,2 / 0,35 /
+  0,5 / 0,7; 0,7 di luar rentang latih); (b) efek samping = CER 424 baris tegak (SK halaman; tidak boleh memburuk nyata),
+  CER sintetis miring 0 (tidak boleh naik di luar ~0,1 poin), q100 G1/G2 (di dalam ~1 poin), bentuk ejaan baku
+  (`eval_spelling.py real`, tidak boleh turun nyata); (c) G3 keseluruhan dengan SK per halaman sebagai arah; (d) checkpoint
+  dasar berikutnya dan usulan angka resmi dipilih dari (a)-(b), bukan dari G3; mengganti angka resmi tetap keputusan user.
+  Batasan yang diketahui sebelumnya: kelompok baris berasal dari penaksir yang kadang menggolongkan potongan raster miring
+  sebagai tegak (pengenceran, bukan bias ke satu lengan); huruf italic cetakan berbeda bentuk dari huruf tegak yang digeser,
+  jadi render miring mungkin hanya menutup sebagian celah (lever berikutnya: font aksara Jawa bergaya italic/kursif).
 - **OCR + VLM dan web UI (keputusan user 2026-09-24).**
   - **Dua pembaca, satu hakim:** CRNN tetap pembaca utama (offline, cepat) dan "hakim piksel"; VLM
     fine-tune = pembaca kedua yang menyumbang kandidat. Semua kandidat (greedy, N-best beam, VLM, LLM)
@@ -1029,7 +1069,7 @@ Detail lengkap di PLAN.md §7.
 | 3 | `src/dataset.py` + test shape | assert `model(dummy).shape[1] == W // DOWNSAMPLE` | **lolos**: 0/300 melanggar T≥1.5L |
 | 4 | `src/model.py`, `train.py`, `decode.py`, `infer.py` | 4a: CER<1% @32 → 4b: **CER<2% synthetic bersih** | 4a **lolos**: CER inference satu baris 0,07% (31/32 persis) dalam 375 langkah; 4b: berhenti di langkah 1500 karena val CER 0,376% < `--target-cer 0.005` (val = teks baru, font training); checkpoint tetap `out/checkpoints/base/best_4b_step1500.pt`; evaluasi test/G1–G3: `out/eval/base_*.json` |
 | 5 | `src/augment.py`, `scripts/ablation.py` | CER<5% synthetic augmentasi berat | tes cepat 100 baris (bukan angka resmi) `fase5_quick` langkah 500: G1 0,79%, G2 2,88%, G3 76,0% (spasi dibuang 57,5%); run 1500 langkah crash OOM di ~950; `fase5_fonts` (10 font: 2 inti + 8 tambahan) dilanjutkan dari langkah 500, berhenti di 1298 (batas 3 jam): G1 0,41%, G2 1,44%, **G3 39,1%** (margin 0,06: 35,2%; spasi dibuang 22,9%); **G3 resmi 745 baris: 37,2%** (margin 0,06: 34,9%; spasi dibuang 25,2% / 23,1%); pembanding font inti `fase5_core` (init, augmentasi, jadwal LR & langkah sama lewat `--steps 1500 --stop-step 1298`): G1 1,64%, G2 1,82%, G3 745 baris 66,6% (margin 0,06: 63,3%) → **font tambahan menurunkan G3 ~29 poin**, langkah tambahan saja ~8 poin (G3 q100 76,0% → 67,7%); **evaluasi resmi `fase5_fonts` 10.000 baris javatext: G1 0,34%, G2 2,01% → gerbang Fase 5 (G2 < 5%) LOLOS** (`out/eval/fonts_G1_10k.json`, `fonts_G2_10k.json`); **ablasi selesai 2026-09-15** (`out/ablation.md`; 12 run kumulatif dari 4b, 600 langkah, 10 font, drop-space 0,5, satu seed): val berat 65,1% → 12,0% lewat 7 op preset (blur −21, noise −10, rotate −7,5), lalu naik ke 19,3% dengan op pindaian; **G3 745 baris 75,1% → 44,1%** (tanpa spasi 69,8% → 30,0%): op preset hampir datar kecuali contrast −14,8; op pindaian **tight −14,6, stroke −10,5**, binarize −2,4, speckle −1,2; val bersih 0,34% → 0,43%. Batasan: G3 = test set (bias seleksi), satu seed (rotate +12,8 menunjukkan fluktuasi antar-run bisa besar), urutan kumulatif mencampur interaksi |
-| 6 | `src/real.py`, `--real-train` | CER<8% pada ≥200 baris nyata | test: `data/real/nusaaksara/labels.tsv` 745 baris (lisensi **non-komersial**, HANYA test); fine-tune: 43 baris papan Commons menunggu verifikasi pembaca aksara (`out/verifikasi_aksara.html` → `scripts/import_review.py`); **belum lolos**: terbaik sejauh ini `fase8_std` (masih sintetis saja; `fase7_track` + 1.500 langkah dengan ejaan baku di separuh baris) G3 **20,35%** (beam + LM berejaan baku 18,02%; kontrol `fase8_ctrl` 20,81%); sebelumnya `fase7_track` (`fase6_ctrl` + 1.500 langkah dengan jarak antar suku kata acak) G3 **21,46%** (pad 0,06: 19,99%; spasi dibuang 20,99%) dan `fase7_track_rare` 21,18% (tidak berbeda nyata); kontrol `fase7_ctrl` (langkah sama tanpa jarak) 30,75% → efek jarak −9,29 poin (SK halaman [−11,92; −6,83]); sebelumnya `fase6_ctrl` 32,17%, `fase6_rare` 34,06%, beam+LM atas `fase5_fonts` 33,83%. **Angka resmi sejak 2026-10-16 = `fase8_std`** (keputusan user): G1 0,24%, G2 0,98% (10.000 baris javatext), G3 20,35%; sebelumnya `fase7_track` 0,27% / 1,20% / 21,46% (2026-10-04 sampai 2026-10-16) dan `fase5_fonts` 0,34% / 2,01% / 37,25% |
+| 6 | `src/real.py`, `--real-train` | CER<8% pada ≥200 baris nyata | test: `data/real/nusaaksara/labels.tsv` 745 baris (lisensi **non-komersial**, HANYA test); fine-tune: 43 baris papan Commons menunggu verifikasi pembaca aksara (`out/verifikasi_aksara.html` → `scripts/import_review.py`); **belum lolos**: terbaik sejauh ini `fase8_std` (masih sintetis saja; `fase7_track` + 1.500 langkah dengan ejaan baku di separuh baris) G3 **20,35%** (beam + LM berejaan baku 18,02%; kontrol `fase8_ctrl` 20,81%); sebelumnya `fase7_track` (`fase6_ctrl` + 1.500 langkah dengan jarak antar suku kata acak) G3 **21,46%** (pad 0,06: 19,99%; spasi dibuang 20,99%) dan `fase7_track_rare` 21,18% (tidak berbeda nyata); kontrol `fase7_ctrl` (langkah sama tanpa jarak) 30,75% → efek jarak −9,29 poin (SK halaman [−11,92; −6,83]); sebelumnya `fase6_ctrl` 32,17%, `fase6_rare` 34,06%, beam+LM atas `fase5_fonts` 33,83%. **Angka resmi sejak 2026-10-16 = `fase8_std`** (keputusan user): G1 0,24%, G2 0,98% (10.000 baris javatext), G3 20,35%; sebelumnya `fase7_track` 0,27% / 1,20% / 21,46% (2026-10-04 sampai 2026-10-16) dan `fase5_fonts` 0,34% / 2,01% / 37,25%. Fase 9 (render miring italic, `scripts/run_fase9.sh`) dijalankan 2026-10-16 malam |
 
 **Fase 0 tidak bisa diotomatiskan.** Render PNG-nya, lalu **minta user membuka dan
 memeriksa sendiri**. Jangan menyatakan Fase 0 lulus berdasarkan "tidak ada error".

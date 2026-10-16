@@ -120,6 +120,14 @@ OPTIONAL_CHECKPOINTS = [
      "track": True, "rare": False, "filtered": False, "standard": False,
      "detail": "10 font · aug {augment} · jarak antar-aksara p {track} hingga {track_max} em · tanpa ejaan baku "
                "(pembanding) · greedy"},
+    {"key": "crnn_fase9_slant", "run": "fase9_slant", "label": "CRNN fase9_slant",
+     "track": True, "rare": False, "filtered": False, "standard": True, "slant": True, "fixes": True,
+     "detail": "9 font · aug {augment} · jarak p {track} hingga {track_max} em · ejaan baku p {standard} · miring p {slant} "
+               "hingga {slant_max} · perbaikan font · greedy"},
+    {"key": "crnn_fase9_ctrl", "run": "fase9_ctrl", "label": "CRNN fase9_ctrl",
+     "track": True, "rare": False, "filtered": False, "standard": True, "slant": False, "fixes": True,
+     "detail": "9 font · aug {augment} · jarak p {track} hingga {track_max} em · ejaan baku p {standard} · tanpa miring "
+               "(pembanding) · perbaikan font · greedy"},
 ]
 CHECKPOINT_DIR = ROOT / "out/checkpoints"
 EVAL_DIR = ROOT / "out/eval"
@@ -173,6 +181,8 @@ def run_options(args: dict) -> dict:
     """
     return {"track": args.get("track_prob") or 0, "track_max": args.get("track_max") or 0,
             "standard": args.get("standard_prob") or 0,
+            "slant": args.get("slant_prob") or 0, "slant_max": args.get("slant_max") or 0,
+            "fixes": bool(args.get("font_fixes")),
             "insert": args.get("rare_insert_prob") or 0, "opener": args.get("rare_opener_prob") or 0,
             "similarity": args.get("rare_max_similarity") or 0, "attach": bool(args.get("rare_attach"))}
 
@@ -195,6 +205,14 @@ def check_optional_run(spec: dict, step: int, args: dict) -> None:
         raise SystemExit(f"{key}: run ejaan baku, tetapi standard_prob = {o['standard']}")
     if not spec.get("standard") and o["standard"] != 0:
         raise SystemExit(f"{key}: run tanpa ejaan baku, tetapi standard_prob = {o['standard']}")
+    # Kemiringan italic dan perbaikan font (fase 9): spesifikasi run sebelumnya tanpa kuncinya = mati.
+    if spec.get("slant") and not (o["slant"] > 0 and o["slant_max"] > 0):
+        raise SystemExit(f"{key}: run miring, tetapi slant_prob = {o['slant']}, slant_max = {o['slant_max']}")
+    if not spec.get("slant") and o["slant"] != 0:
+        raise SystemExit(f"{key}: run tanpa miring, tetapi slant_prob = {o['slant']}")
+    if bool(spec.get("fixes")) != o["fixes"]:
+        raise SystemExit(f"{key}: font_fixes = {o['fixes']}, padahal run ini {'dengan' if spec.get('fixes') else 'tanpa'} "
+                         "perbaikan font")
     if spec["rare"] and not o["insert"] > 0:
         raise SystemExit(f"{key}: run aksara langka, tetapi rare_insert_prob = {o['insert']}")
     if not spec["rare"] and (o["insert"] != 0 or o["opener"] != 0):
@@ -221,7 +239,8 @@ def optional_pipeline(spec: dict, step: int, args: dict, start: str) -> dict:
     detail = spec["detail"].format(augment=args.get("augment"), track=decimal(o["track"]),
                                    track_max=decimal(o["track_max"]), insert=decimal(o["insert"]),
                                    opener=decimal(o["opener"]), similarity=decimal(o["similarity"]),
-                                   standard=decimal(o["standard"]))
+                                   standard=decimal(o["standard"]), slant=decimal(o["slant"]),
+                                   slant_max=decimal(o["slant_max"]))
     head = f"crnn:{spec['run']}@{step}" + (f" (lanjutan {start})" if start else "")
     config = f"{head} · {detail}"
     if len(config) > MAX_CONFIG:

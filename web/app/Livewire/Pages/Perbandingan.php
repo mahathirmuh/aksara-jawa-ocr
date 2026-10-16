@@ -28,6 +28,8 @@ class Perbandingan extends Component
         'crnn_fase7_ctrl' => 'pembanding: langkah sama tanpa jarak tambahan',
         'crnn_fase8_std' => 'fase7_track + 1.500 langkah dengan ejaan baku di separuh baris',
         'crnn_fase8_ctrl' => 'pembanding: langkah sama tanpa ejaan baku',
+        'crnn_fase9_slant' => 'fase8_std + 1.500 langkah dengan render miring (italic) dan perbaikan font',
+        'crnn_fase9_ctrl' => 'pembanding: langkah dan perbaikan font sama, tanpa render miring',
     ];
 
     public function render()

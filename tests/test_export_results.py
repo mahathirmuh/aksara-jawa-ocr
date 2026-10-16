@@ -29,9 +29,9 @@ from export_results import (  # noqa: E402
     optional_pipeline,
 )
 
-RARE, CTRL, TRACK, TRACK_RARE, CTRL7, STD8, CTRL8 = OPTIONAL_CHECKPOINTS
+RARE, CTRL, TRACK, TRACK_RARE, CTRL7, STD8, CTRL8, SLANT9, CTRL9 = OPTIONAL_CHECKPOINTS
 OPTIONAL_KEYS = ["crnn_fase6_rare", "crnn_fase6_ctrl", "crnn_fase7_track", "crnn_fase7_track_rare", "crnn_fase7_ctrl",
-                 "crnn_fase8_std", "crnn_fase8_ctrl"]
+                 "crnn_fase8_std", "crnn_fase8_ctrl", "crnn_fase9_slant", "crnn_fase9_ctrl"]
 RARE_CONFIG = ("crnn:fase6_rare@1500 (lanjutan fase5_fonts@1298) · 10 font · aug fase5 · "
                "+ aksara langka (sisip 0,3 · adeg-adeg 0,15) · greedy")
 CTRL_CONFIG = ("crnn:fase6_ctrl@1500 (lanjutan fase5_fonts@1298) · 10 font · aug fase5 · "
@@ -680,6 +680,33 @@ def test_add_optional_adds_the_fase8_runs_after_fase7(tmp_path):
     assert included == [RARE, CTRL, TRACK, TRACK_RARE, CTRL7, STD8, CTRL8]
     k = keys(pipelines)
     at = k.index("crnn_fonts_beam")
-    assert k[at + 1: at + 9] == [*OPTIONAL_KEYS, "vlm_zeroshot"] and list(checkpoints) == [*CHECKPOINTS, *OPTIONAL_KEYS]
+    assert k[at + 1: at + 9] == [*OPTIONAL_KEYS[:7], "vlm_zeroshot"] and list(checkpoints) == [*CHECKPOINTS, *OPTIONAL_KEYS[:7]]
     assert [p["label"] for p in pipelines[at + 6: at + 8]] == ["CRNN fase8_std", "CRNN fase8_ctrl"]
     assert all(len(p["config"]) <= MAX_CONFIG for p in pipelines)
+
+
+def fase9_args(run: str, slant: float = 0.0, fixes: bool = True, **kwargs) -> dict:
+    """`fase8_args` resep fase8_std (ejaan baku p 0,5) + opsi fase 9: kemiringan italic dan perbaikan font."""
+    return {**fase8_args(run, kwargs.pop("standard", 0.5), **kwargs), "slant_prob": slant, "slant_max": 0.6, "font_fixes": fixes}
+
+
+def test_fase9_runs_are_told_apart_by_slant_and_both_have_the_font_fixes():
+    check_optional_run(SLANT9, 1500, fase9_args("fase9_slant", 0.5))
+    check_optional_run(CTRL9, 1500, fase9_args("fase9_ctrl"))
+    assert optional_pipeline(SLANT9, 1500, fase9_args("fase9_slant", 0.5), "fase8_std@1500")["config"] == (
+        "crnn:fase9_slant@1500 (lanjutan fase8_std@1500) · 9 font · aug fase5 · jarak p 0,5 hingga 0,3 em · ejaan baku p 0,5 · "
+        "miring p 0,5 hingga 0,6 · perbaikan font · greedy")
+    assert "tanpa miring (pembanding) · perbaikan font" in optional_pipeline(CTRL9, 1500, fase9_args("fase9_ctrl"), "")["config"]
+    assert all(len(optional_pipeline(spec, 1500, fase9_args(spec["run"], 0.5 if spec is SLANT9 else 0.0), "fase8_std@1500")["config"])
+               <= MAX_CONFIG for spec in (SLANT9, CTRL9))
+    for spec, args, message in (
+            (SLANT9, fase9_args("fase9_slant"), "crnn_fase9_slant: run miring, tetapi slant_prob = 0"),
+            (SLANT9, {**fase9_args("fase9_slant", 0.5), "slant_max": 0.0}, "slant_max = 0"),
+            (CTRL9, fase9_args("fase9_ctrl", 0.5), "crnn_fase9_ctrl: run tanpa miring, tetapi slant_prob = 0.5"),
+            (CTRL9, fase9_args("fase9_ctrl", fixes=False), "font_fixes = False, padahal run ini dengan perbaikan font"),
+            (SLANT9, fase9_args("fase9_slant", 0.5, standard=0.0), "run ejaan baku, tetapi standard_prob = 0"),
+            # Run lama (spesifikasinya tanpa kunci "slant"/"fixes") yang ternyata dilatih dengan opsi itu: berhenti.
+            (STD8, fase9_args("fase8_std", 0.5), "crnn_fase8_std: run tanpa miring, tetapi slant_prob = 0.5"),
+            (STD8, fase9_args("fase8_std", 0.0), "font_fixes = True, padahal run ini tanpa perbaikan font")):
+        with pytest.raises(SystemExit, match=message):
+            check_optional_run(spec, 1500, args)

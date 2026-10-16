@@ -76,6 +76,42 @@ def space_ratio(font_path: str) -> float:
     return (font.getlength(f"{ka}{ka} {ka}{ka}") - font.getlength(ka * 4)) / font.getlength(ka)
 
 
+# Pasangan yang tidak menumpuk: lebar "ka + pangkon + ka" dibagi lebar "ka". Terukur 2026-10-16 di lingkungan training:
+# font latih lain 1,00-1,39; BasaJan 2,56 di .venv-xpu (GSUB tidak diterapkan Pillow 12.3 / HarfBuzz 14.2), 1,00 di .venv.
+MAX_PASANGAN_WIDTH = 1.8
+# Urutan yang sebuah font gambar SAMA dengan urutan lain (dua label untuk satu gambar): urutan -> pembandingnya.
+# NewKramawirya menggambar pada lungsi sesudah pangkon dengan glyph pada lingsa (substitusi kontekstual).
+RENDER_CONFLICTS = {"꧀꧉": "꧀꧈"}
+
+
+def oblique(img: Image.Image, shear: float) -> Image.Image:
+    """Citra dimiringkan ke kanan seperti huruf italic: bagian atas bergeser ke kanan sejauh `shear` x tinggi. Kanvas
+    dilebarkan supaya tidak ada tinta yang terpotong; latar putih seperti render."""
+    w, h = img.size
+    return img.transform((w + int(round(shear * h)) + 1, h), Image.AFFINE, (1, shear, -shear * h, 0, 1, 0),
+                         resample=Image.Resampling.BILINEAR, fillcolor=255)
+
+
+@lru_cache(maxsize=None)
+def shaping_ok(font_path: str) -> bool:
+    """Pasangan font ini menumpuk di interpreter yang sedang berjalan (shaping berbeda antar lingkungan)."""
+    def width(text: str) -> int:
+        cols = np.nonzero((np.asarray(render_line(text, font_path, 64).convert("L")) < 128).any(axis=0))[0]
+        return int(cols[-1] - cols[0] + 1)
+
+    return width("ꦏ꧀ꦏ") / width("ꦏ") < MAX_PASANGAN_WIDTH
+
+
+@lru_cache(maxsize=None)
+def render_conflicts(font_path: str) -> frozenset[str]:
+    """Urutan RENDER_CONFLICTS yang di font ini tergambar sama persis dengan pembandingnya."""
+    def same(a: str, b: str) -> bool:
+        x, y = (np.asarray(render_line("ꦏ" + text, font_path, 64).convert("L")) < 128 for text in (a, b))
+        return x.shape == y.shape and not (x ^ y).any()
+
+    return frozenset(seq for seq, other in RENDER_CONFLICTS.items() if same(seq, other))
+
+
 @lru_cache(maxsize=None)
 def spelling_twins(font_path: str) -> frozenset[str]:
     """Aturan ejaan baku yang di font ini TIDAK mengubah citra: ejaan korpus dan ejaan baku dirender kembar (GumregahNew
@@ -110,9 +146,15 @@ class SyntheticLines(Dataset):
         track_prob: float = 0.0,
         track_max: float = 0.0,
         standard_prob: float = 0.0,
+        slant_prob: float = 0.0,
+        slant_max: float = 0.0,
+        avoid_conflicts: bool = False,
     ):
         if not font_paths:
             raise ValueError("Butuh minimal satu font")
+        self.slant_prob = slant_prob
+        self.slant_max = slant_max
+        self.avoid_conflicts = avoid_conflicts
         self.rare_text = rare_text
         self.track_prob = track_prob
         self.track_max = track_max
@@ -149,6 +191,14 @@ class SyntheticLines(Dataset):
         # val/test deterministik tidak berubah.
         drop = bool(drop_space) and rng.random() < drop_space
         font = rng.choice(self.font_paths)
+        # Font yang menggambar sebuah urutan di baris ini sama dengan urutan lain diganti (undian tambahan hanya bila itu
+        # terjadi, jadi baris lain dan render tanpa pilihan ini tidak berubah).
+        if getattr(self, "avoid_conflicts", False):
+            joined = text.replace(" ", "")
+            if any(seq in joined for seq in render_conflicts(font)):
+                others = [f for f in self.font_paths if not any(seq in joined for seq in render_conflicts(f))]
+                if others:
+                    font = rng.choice(others)
         size = rng.randint(*self.size_range)
         # Ejaan baku (src/spelling.py) pada sebagian baris, sebelum sisipan dan sebelum spasi dibuang (aturan nya di
         # depan ca/ja berlaku di dalam kata saja). Probabilitas 0 tidak mengonsumsi angka acak, jadi render val/test
@@ -183,6 +233,11 @@ class SyntheticLines(Dataset):
         if track_prob and rng.random() < track_prob:
             tracking = rng.uniform(0.0, self.track_max)
         img = render_line(text, font, size, tracking=tracking) if tracking else render_line(text, font, size)
+        # Kemiringan seperti huruf italic cetakan, diundi sesudah semua undian lain dan hanya bila aktif (render val/test
+        # dan run lama tidak berubah). Geometri, jadi sebelum degradasi kertas/tinta/optik.
+        slant_prob = getattr(self, "slant_prob", 0.0)
+        if slant_prob and rng.random() < slant_prob:
+            img = oblique(img, rng.uniform(0.0, self.slant_max))
         return (self.augment(img, rng) if self.augment else img), text
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor] | None:
