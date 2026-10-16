@@ -29,9 +29,10 @@ from export_results import (  # noqa: E402
     optional_pipeline,
 )
 
-RARE, CTRL, TRACK, TRACK_RARE, CTRL7, STD8, CTRL8, SLANT9, CTRL9 = OPTIONAL_CHECKPOINTS
+RARE, CTRL, TRACK, TRACK_RARE, CTRL7, STD8, CTRL8, SLANT9, CTRL9, RARE10, CTRL10 = OPTIONAL_CHECKPOINTS
 OPTIONAL_KEYS = ["crnn_fase6_rare", "crnn_fase6_ctrl", "crnn_fase7_track", "crnn_fase7_track_rare", "crnn_fase7_ctrl",
-                 "crnn_fase8_std", "crnn_fase8_ctrl", "crnn_fase9_slant", "crnn_fase9_ctrl"]
+                 "crnn_fase8_std", "crnn_fase8_ctrl", "crnn_fase9_slant", "crnn_fase9_ctrl", "crnn_fase10_rare",
+                 "crnn_fase10_ctrl"]
 RARE_CONFIG = ("crnn:fase6_rare@1500 (lanjutan fase5_fonts@1298) · 10 font · aug fase5 · "
                "+ aksara langka (sisip 0,3 · adeg-adeg 0,15) · greedy")
 CTRL_CONFIG = ("crnn:fase6_ctrl@1500 (lanjutan fase5_fonts@1298) · 10 font · aug fase5 · "
@@ -709,5 +710,28 @@ def test_fase9_runs_are_told_apart_by_slant_and_both_have_the_font_fixes():
             # Run lama (spesifikasinya tanpa kunci "slant"/"fixes") yang ternyata dilatih dengan opsi itu: berhenti.
             (STD8, fase9_args("fase8_std", 0.5), "crnn_fase8_std: run tanpa miring, tetapi slant_prob = 0.5"),
             (STD8, fase9_args("fase8_std", 0.0), "font_fixes = True, padahal run ini tanpa perbaikan font")):
+        with pytest.raises(SystemExit, match=message):
+            check_optional_run(spec, 1500, args)
+
+
+def test_fase10_runs_are_told_apart_by_the_filtered_rare_insertion():
+    # Fase 10: resep fase9_ctrl (tanpa miring, perbaikan font, ejaan baku) + sisipan aksara langka versi fase7_track_rare.
+    rare = fase9_args("fase10_rare", insert=0.3, opener=0.15, similarity=0.9, attach=True)
+    check_optional_run(RARE10, 1500, rare)
+    check_optional_run(CTRL10, 1500, fase9_args("fase10_ctrl"))
+    assert optional_pipeline(RARE10, 1500, rare, "fase9_ctrl@1500")["config"] == (
+        "crnn:fase10_rare@1500 (lanjutan fase9_ctrl@1500) · 9 font · aug fase5 · jarak p 0,5 hingga 0,3 em · ejaan baku p 0,5 · "
+        "+ aksara langka tersaring (sisip 0,3 · adeg-adeg 0,15 · mirip >= 0,9 · tempel) · perbaikan font · greedy")
+    assert "tanpa aksara langka (pembanding) · perbaikan font" in optional_pipeline(
+        CTRL10, 1500, fase9_args("fase10_ctrl"), "")["config"]
+    assert len(optional_pipeline(RARE10, 1500, rare, "fase9_ctrl@1500")["config"]) <= MAX_CONFIG
+    for spec, args, message in (
+            (RARE10, fase9_args("fase10_rare"), "crnn_fase10_rare: run aksara langka, tetapi rare_insert_prob = 0"),
+            (RARE10, {**rare, "rare_attach": False}, "run aksara langka tersaring, tetapi"),
+            (RARE10, {**rare, "slant_prob": 0.5}, "crnn_fase10_rare: run tanpa miring, tetapi slant_prob = 0.5"),
+            (RARE10, {**rare, "font_fixes": False}, "font_fixes = False, padahal run ini dengan perbaikan font"),
+            (CTRL10, {**rare, "run": "fase10_ctrl"}, "crnn_fase10_ctrl: run pembanding harus tanpa aksara langka|"
+                                                     "crnn_fase10_ctrl: run jarak antar-aksara harus tanpa aksara langka"),
+            (CTRL10, fase9_args("fase10_ctrl", standard=0.0), "run ejaan baku, tetapi standard_prob = 0")):
         with pytest.raises(SystemExit, match=message):
             check_optional_run(spec, 1500, args)

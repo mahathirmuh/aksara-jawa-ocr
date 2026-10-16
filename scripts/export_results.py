@@ -130,6 +130,14 @@ OPTIONAL_CHECKPOINTS = [
      "track": True, "rare": False, "filtered": False, "standard": True, "slant": False, "fixes": True,
      "detail": "9 font · aug {augment} · jarak p {track} hingga {track_max} em · ejaan baku p {standard} · tanpa miring "
                "(pembanding) · perbaikan font · greedy"},
+    {"key": "crnn_fase10_rare", "run": "fase10_rare", "label": "CRNN fase10_rare",
+     "track": True, "rare": True, "filtered": True, "standard": True, "slant": False, "fixes": True,
+     "detail": "9 font · aug {augment} · jarak p {track} hingga {track_max} em · ejaan baku p {standard} · + aksara langka "
+               "tersaring (sisip {insert} · adeg-adeg {opener} · mirip >= {similarity} · tempel) · perbaikan font · greedy"},
+    {"key": "crnn_fase10_ctrl", "run": "fase10_ctrl", "label": "CRNN fase10_ctrl",
+     "track": True, "rare": False, "filtered": False, "standard": True, "slant": False, "fixes": True,
+     "detail": "9 font · aug {augment} · jarak p {track} hingga {track_max} em · ejaan baku p {standard} · tanpa aksara "
+               "langka (pembanding) · perbaikan font · greedy"},
 ]
 CHECKPOINT_DIR = ROOT / "out/checkpoints"
 EVAL_DIR = ROOT / "out/eval"
