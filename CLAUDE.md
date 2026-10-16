@@ -422,6 +422,18 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   nyata); (f) CER 437 baris tulisan tangan dilaporkan terpisah, di luar scope. Checkpoint dasar berikutnya dipilih dari baris
   cetak dan efek samping (b), bukan dari tulisan tangan. G3 resmi tetap dihitung atas 745 baris sampai user memutuskan lain;
   pembagian cetak / tulisan tangan dilaporkan di sampingnya, bukan menggantikannya (target tidak dilonggarkan diam-diam).
+  **Analisis ulang pasangan lama pada baris cetak (2026-10-16 22:40, `eval_slant.py real` dengan pembagian halaman; data
+  uji, jadi untuk memilih arah):** selisih CER cetak (308 baris, 72 halaman) / tulisan tangan (437 baris, 20 halaman), SK 95%
+  per halaman: jarak antar suku kata `fase7_track` − `fase7_ctrl` **−13,88 [−15,97; −11,50]** / −4,89 [−9,20; −1,33];
+  sisipan aksara langka versi perbaikan `fase7_track_rare` − `fase7_track` **−0,80 [−1,32; −0,28]** / +0,23 [−0,84; +1,56]
+  (membantu cetak; di G3 keseluruhan −0,27 [−0,87; +0,38] karena tulisan tangan menutupinya); versi pertama `fase6_rare` −
+  `fase6_ctrl` +4,20 [+3,36; +4,96] / −0,33; ejaan baku `fase8_std` − `fase8_ctrl` −0,33 [−1,04; +0,42] / −0,59 [−1,51; +0,42].
+  Galat `fase8_std` di baris cetak (1.260 suntingan, 9.979 karakter): tanda atas (cecak, layar, wignyan, wulu, pepet) 26,9%
+  (20% per tanda; 144 hilang, wulu → cecak 30), aksara umum 25,9% (7%), aksara langka (murda, mahaprana, swara) 12,5% (83%
+  dari 189; sa murda → ga 19, na murda → ga 18, ka murda → na 12), taling/tarung 10,7%, pada 8,1% (adeg-adeg → suku 30, →
+  taling 13), tanda bawah 7,2%, spasi 5,1%, pangkon 3,6%; persepuluh pertama baris 0,19 suntingan per karakter, sisanya
+  0,11-0,14 (sebagian besar adeg-adeg pembuka). `fase7_track_rare` di baris cetak: aksara langka 190 → 108 suntingan, pada
+  107 → 76, tetapi aksara umum 386 → 425 dan pangkon 46 → 56.
 - **OCR + VLM dan web UI (keputusan user 2026-09-24).**
   - **Dua pembaca, satu hakim:** CRNN tetap pembaca utama (offline, cepat) dan "hakim piksel"; VLM
     fine-tune = pembaca kedua yang menyumbang kandidat. Semua kandidat (greedy, N-best beam, VLM, LLM)
