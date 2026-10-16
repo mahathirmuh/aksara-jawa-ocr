@@ -1183,6 +1183,83 @@ def test_training_sentences_follow_the_chain_and_the_logged_device(tmp_path):
     assert "dari nol" not in json.dumps(cut_card, ensure_ascii=False)
 
 
+def test_evidence_inherited_from_the_chain_is_quoted_when_the_official_run_changes(tmp_path):
+    # Fase 8: run resmi fase8_std melanjutkan fase7_track. Jarak antar suku kata dan sisipan aksara langka tidak diuji
+    # pada fase8_std sendiri; buktinya milik pasangan di rantainya (fase7_track lawan fase7_ctrl, fase7_track_rare
+    # lawan fase7_track), dikutip dengan menyebut run-nya, bukan dihilangkan dari kartu.
+    root = method_repo(tmp_path)
+    manifest = manifest_of(root)
+    for key, cer in (("crnn_fase8_std", 0.19), ("crnn_fase8_ctrl", 0.195), ("crnn_fase7_track_rare", 0.21)):
+        manifest["pipelines"].append({"key": key, "label": key.upper(), "kind": "crnn", "status": "done", "config": "x"})
+        manifest["metrics"].append({"scope": "nusaaksara_745", "pipeline": key, "lines": 3, "cer": cer})
+    write_manifest(root, manifest)
+    sibling(root, "fase8_std", standard_prob=0.5)
+    sibling(root, "fase8_ctrl", standard_prob=0.0)
+    chain = ["runA", RUN, "fase8_std"]
+    assert em.chain_pair(root, "tracking", "fase8_std", chain) == (RUN, "fase7_ctrl")
+    assert em.chain_pair(root, "tracking", RUN, ["runA", RUN]) == (RUN, "fase7_ctrl")  # run resmi lama: pasangannya sendiri
+    assert em.chain_pair(root, "spelling", "fase8_std", chain) == ("fase8_std", "fase8_ctrl")
+    assert em.chain_pair(root, "tracking", "fase8_std", ["fase8_std"]) is None  # tanpa rantai: tidak ada pasangan
+    assert em.chain_pair(root, "fonts", "fase8_std", chain) is None  # fase5_fonts tidak di rantai ini
+
+    facts = {"chain": [{"run": "runA", "defects": [], "narrow": 0}, {"run": RUN, "defects": [], "narrow": 0}]}
+    args = {"augment": "none", "track_prob": 0.5, "track_max": 0.3, "standard_prob": 0.5}
+    tracking = data_methods(root, "fase8_std", args, facts)["tracking"]
+    assert tracking["evidence"] == ("Pada run fase7_track di rantai model resmi, terhadap run kontrol fase7_ctrl (jumlah "
+                                    "langkah sama, tanpa jarak): G3 30,00% → 20,00% (−10,00 poin; selang kepercayaan 95% "
+                                    "per halaman −12,00 sampai −7,00).")
+    assert tracking["evidence_source"] == "out/compare/crnn_fase7_track_vs_crnn_fase7_ctrl.json"
+    # Tanpa rantai yang memuat fase7_track: tidak ada bukti (bukan bukti milik run yang tidak diwarisi).
+    assert data_methods(root, "fase8_std", args)["tracking"]["evidence"] is None
+    # Run resmi lama (fase7_track) tetap memakai kalimatnya sendiri.
+    assert data_methods(root, RUN, {"augment": "none", "track_prob": 0.5, "track_max": 0.3})["tracking"]["evidence"].startswith(
+        "Terhadap run kontrol fase7_ctrl (jumlah langkah sama, tanpa jarak): G3 30,00% → 20,00%")
+
+    # Sisipan aksara langka diuji dengan fase7_track (run di rantai) sebagai kontrol.
+    rare_groups = {"groups": {"langka": {"recall": {"a": 0.5, "b": 0.0}, "precision": {"a": 0.4}}}}
+    compare_file(root, "crnn_fase7_track_rare", "crnn_fase7_track", 0.21, 0.20, [-0.01, 0.02], rare=rare_groups)
+    sibling(root, "fase7_track_rare", rare_insert_prob=0.3, rare_opener_prob=0.15)
+    rare = data_methods(root, "fase8_std", args, facts)["rare"]
+    assert rare["status"] == "tested" and rare["settings"] == []
+    assert rare["evidence"] == ("Pada run fase7_track_rare lawan fase7_track (run di rantai model resmi), di 3 baris nyata, "
+                                "aksara langka yang terbaca benar naik dari 0,0% ke 50,0%, tetapi hanya 40,0% dari keluarannya "
+                                "benar, dan G3 tidak berbeda nyata (21,00% melawan 20,00%). Karena itu tidak dipakai di run resmi.")
+    assert rare["evidence_source"] == "out/compare/crnn_fase7_track_rare_vs_crnn_fase7_track.json"
+    assert "rare" not in data_methods(root, "fase8_std", args)  # fase7_track bukan run di rantai: tidak diuji untuknya
+    assert data_methods(root, RUN, {"augment": "none"})["rare"]["evidence"].startswith("Pada 3 baris nyata, aksara langka")
+    # Run resmi yang memakai sisipan sendiri: butirnya "official", bukan hasil uji pasangan lain.
+    used = data_methods(root, "fase8_std", {**args, "rare_insert_prob": 0.3}, facts)["rare"]
+    assert used["status"] == "official" and used["evidence"] is None
+
+    # Evaluasi jarak: model resmi (fase8_std) lawan kontrol jarak milik fase7_track di rantainya.
+    def rows(rates):
+        return [{"tracking": tracking, "false_per_boundary": rate} for tracking, rate in rates]
+
+    spacing = {"settings": {"tracking": [0.0, 0.3, 0.6], "lines": 300},
+               "checkpoints": {"fase8_std": {"step": 10}, "fase7_ctrl": {"step": 10}},
+               "fonts": {"javatext.ttf": {"lines": 300, "results": {
+                   "fase8_std": {"tanpa-spasi": rows([(0.0, 0.0), (0.3, 0.001), (0.6, 0.5)])},
+                   "fase7_ctrl": {"tanpa-spasi": rows([(0.0, 0.0), (0.3, 0.925), (0.6, 0.876)])}}}}}
+    (root / "out/compare/spacing_synthetic.json").write_text(json.dumps(spacing), encoding="utf-8")
+    family = {"owners": {}, "dir": root / "ujifont", "twins": [], "unknown": [], "incomplete": False}
+    real = em.nusaaksara_card(root / "data/real/nusaaksara/labels.tsv")
+
+    def probe(chain_runs):
+        group = em.evaluation_group("fase8_std", {"track_max": 0.3}, real, em.Evidence(root), root, family, [], chain_runs)
+        return {m["key"]: m for m in group["methods"]}["probe"]
+
+    assert probe(chain)["evidence"] == (
+        "Baris tanpa spasi yang direnggangkan 0,3 em: 0,1 spasi palsu per 100 batas suku kata pada model resmi, 92,5 pada "
+        "run kontrol fase7_ctrl (kontrol jarak untuk fase7_track di rantai model resmi). Di luar rentang jarak yang "
+        "dilatihkan (0,6 em) model resmi kembali mengeluarkan 50.")
+    assert probe(None)["evidence"] is None  # tanpa rantai: tidak ada kontrol jarak untuk dibandingkan
+    # Laporan yang tidak membaca checkpoint fase8_std sekarang tidak dikutip sebagai "model resmi".
+    stale = json.loads(json.dumps(spacing))
+    stale["checkpoints"]["fase8_std"]["step"] = 9
+    (root / "out/compare/spacing_synthetic.json").write_text(json.dumps(stale), encoding="utf-8")
+    assert probe(chain)["evidence"] is None
+
+
 def test_recipe_changes_name_what_was_added_removed_or_left_alone():
     def link(run, **args):
         return {"run": run, "args": args}

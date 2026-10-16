@@ -394,6 +394,17 @@ def control_run(root: Path, kind: str, run: str) -> str | None:
     return control if is_treated(kind, a) and not is_treated(kind, b) and same_data and same_training else None
 
 
+def chain_pair(root: Path, kind: str, run: str, chain_runs: list[str]) -> tuple[str, str] | None:
+    """Pasangan (run perlakuan, run kontrol) yang sah untuk perlakuan `kind`: milik run resmi sendiri bila ada, kalau
+    tidak milik run TERDEKAT di rantainya (`chain_runs`, urut dari run pertama sampai run resmi). Model resmi mewarisi
+    bobot run itu; pemanggil yang memastikan run resmi juga masih memakai perlakuan itu."""
+    for treated in [run] + [name for name in reversed(chain_runs) if name != run]:
+        control = control_run(root, kind, treated)
+        if control:
+            return treated, control
+    return None
+
+
 def training_value(args: dict, key: str):
     """Nilai argumen pelatihan yang bisa dibandingkan: jalur bobot awal tanpa beda pemisah folder, kosong = None."""
     value = args.get(key)
@@ -537,7 +548,7 @@ def report_matches(report: dict, root: Path, run: str) -> bool:
     return not info.get("sha1") or info["sha1"] == file_sha(root / "out/checkpoints" / run / "last_snapshot.pt")
 
 
-def spacing_note(report: dict, run: str, control: str | None, track_max: float) -> str | None:
+def spacing_note(report: dict, run: str, control: str | None, track_max: float, via: str | None = None) -> str | None:
     """Hasil scripts/eval_spacing.py untuk run resmi dan run kontrolnya: spasi palsu per 100 batas suku kata pada baris
     tanpa spasi yang direnggangkan sejauh jarak terbesar yang masih di dalam rentang latih run resmi, lalu pada jarak
     terbesar yang diuji di luar rentang itu (di sana gejalanya kembali)."""
@@ -557,8 +568,9 @@ def spacing_note(report: dict, run: str, control: str | None, track_max: float) 
 
         ours, theirs = widest(run), widest(control)
         if ours and theirs and ours["tracking"] == theirs["tracking"]:
+            whose = "" if via in (None, run) else f" (kontrol jarak untuk {via} di rantai model resmi)"
             text = (f"Baris tanpa spasi yang direnggangkan {dec(ours['tracking'])} em: {per_hundred(ours)} spasi palsu per "
-                    f"100 batas suku kata pada model resmi, {per_hundred(theirs)} pada run kontrol {control}.")
+                    f"100 batas suku kata pada model resmi, {per_hundred(theirs)} pada run kontrol {control}{whose}.")
             outside = [row for row in rows(run) if row["tracking"] > track_max + 1e-9]
             if outside:
                 far = max(outside, key=lambda row: row["tracking"])
@@ -682,6 +694,7 @@ def data_group(run: str, args: dict, fonts: dict, real: dict, evidence: Evidence
     augment = build_augment(args.get("augment") or "none")
     low, high = RENDER_SIZE_RANGE
     earlier = fonts.get("chain") or []
+    chain_runs = [fact["run"] for fact in earlier] + [run]
     measured = "" if fonts["current"] else f" yang ada di folder sekarang (run ini dilatih dengan {fonts['train']} font)"
     # Catatan butir render: font bercacat run resmi, font bercacat yang hanya dipakai run sebelumnya di rantai, dan
     # font yang tidak bisa diperiksa karena berkasnya sudah tidak ada. Yang tidak bisa diperiksa disebut, bukan didiamkan.
@@ -769,14 +782,19 @@ def data_group(run: str, args: dict, fonts: dict, real: dict, evidence: Evidence
             measured_ablation[0] if measured_ablation else None, "out/results/manifest.json",
             files=["src/augment.py", "scripts/ablation.py"], note=measured_ablation[1] if measured_ablation else None))
     if args.get("track_prob"):
-        control = control_run(root, "tracking", run)
-        change = evidence.g3_change(pipeline_key(run) or "", pipeline_key(control) or "") if control else None
+        # Run resmi yang sendiri tidak diuji dengan kontrol jarak (mis. fase8_std, turunan fase7_track): buktinya milik
+        # pasangan terdekat di rantainya, dan itu disebut.
+        pair = chain_pair(root, "tracking", run, chain_runs)
+        treated, control = pair or (run, None)
+        change = evidence.g3_change(pipeline_key(treated) or "", pipeline_key(control) or "") if control else None
+        where = "" if treated == run else f"Pada run {treated} di rantai model resmi, terhadap"
         methods.append(entry(
             "tracking", "Jarak antar suku kata acak", "data", "official",
             "Sebagian baris dirender dengan jarak tambahan yang seragam di antara suku kata. Cetakan nyata sering "
             "renggang, dan tanpa ini model membaca renggang itu sebagai spasi kata.",
             [("Peluang", dec(args["track_prob"])), ("Jarak tambahan", f"0 sampai {dec(args.get('track_max') or 0)} em")],
-            f"Terhadap run kontrol {control} (jumlah langkah sama, tanpa jarak): {change[0]}." if change else None,
+            (f"{where or 'Terhadap'} run kontrol {control} (jumlah langkah sama, tanpa jarak): {change[0]}." if change
+             else None),
             change[1] if change else None, files=["src/render.py", "src/dataset.py"]))
     if args.get("standard_prob"):
         methods.append(spelling_entry(run, args, evidence, root))
@@ -812,13 +830,17 @@ def data_group(run: str, args: dict, fonts: dict, real: dict, evidence: Evidence
             "data/real/nusaaksara/labels.tsv", files=["src/dataset.py"], note=" ".join(space_notes) or None))
 
     rare_used = bool(args.get("rare_insert_prob") or args.get("rare_opener_prob"))
-    # Sisipan aksara langka yang diuji dengan run resmi sebagai kontrolnya (run perlakuan = run resmi + sisipan).
-    report, source = None, None
+    # Sisipan aksara langka yang diuji dengan run resmi sebagai kontrolnya (run perlakuan = run resmi + sisipan), atau
+    # dengan run di rantainya sebagai kontrol (yang terdekat dulu): model resmi mewarisi run tanpa sisipan itu.
+    report, source, tested = None, None, None
     if not rare_used:
-        for treated, control in CONTROLS["rare"].items():
-            a, b = pipeline_key(treated) or "", pipeline_key(control) or ""
-            if control == run and control_run(root, "rare", treated) == control and (report := evidence.compare(a, b)):
-                source = f"out/compare/{a}_vs_{b}.json"
+        for base in [run] + [name for name in reversed(chain_runs) if name != run]:
+            for treated, control in CONTROLS["rare"].items():
+                a, b = pipeline_key(treated) or "", pipeline_key(control) or ""
+                if control == base and control_run(root, "rare", treated) == control and (report := evidence.compare(a, b)):
+                    source, tested = f"out/compare/{a}_vs_{b}.json", (treated, control)
+                    break
+            if report:
                 break
     if rare_used or report:
         measured_rare = None
@@ -830,7 +852,9 @@ def data_group(run: str, args: dict, fonts: dict, real: dict, evidence: Evidence
             recall, precision = group["recall"], group["precision"]["a"]
             # Kalimatnya mengikuti hasilnya: "tetapi hanya" untuk presisi di bawah separuh, dan "karena itu tidak
             # dipakai" hanya bila G3 tidak lebih baik (alasan yang dicatat proyek: efek samping, bukan G3 terendah).
-            measured_rare = (f"Pada {num(report['lines'])} baris nyata, aksara langka yang terbaca benar "
+            measured_rare = ((f"Pada run {tested[0]} lawan {tested[1]} (run di rantai model resmi), di " if tested[1] != run
+                              else "Pada ")
+                             + f"{num(report['lines'])} baris nyata, aksara langka yang terbaca benar "
                              f"{'naik' if recall['a'] > recall['b'] else 'berubah'} dari {pct(recall['b'], 1)} ke "
                              f"{pct(recall['a'], 1)}, "
                              + (f"tetapi hanya {pct(precision, 1)} dari keluarannya benar" if precision < 0.5
@@ -1053,7 +1077,7 @@ def decoding_group(official: str, evidence: Evidence, root: Path) -> dict:
 
 
 def evaluation_group(run: str, args: dict, real: dict, evidence: Evidence, root: Path, family: dict,
-                     test_fonts: list[str]) -> dict:
+                     test_fonts: list[str], chain_runs: list[str] | None = None) -> dict:
     """Butir evaluasi. `family` = font latih di rantai dan kemiripannya dengan font uji gerbang: "owners"
     (`chain_fonts`), "dir" (folder font uji), "twins" dan "unknown" (`family_twins` untuk font uji gerbang), dan
     "incomplete" (ada font latih yang berkasnya tidak ada lagi)."""
@@ -1134,9 +1158,10 @@ def evaluation_group(run: str, args: dict, real: dict, evidence: Evidence, root:
         # Font perender evaluasi ini dibaca dari laporannya sendiri (belum tentu font uji gerbang). Angkanya hanya
         # dikutip bila laporan itu memang membaca checkpoint run resmi dan run kontrolnya yang sekarang.
         probe_twins, probe_unknown = family_twins(family["owners"], list(report.get("fonts") or {}), family["dir"])
-        control = control_run(root, "tracking", run)
+        pair = chain_pair(root, "tracking", run, chain_runs or [run])
+        via, control = pair or (run, None)
         tied = report_matches(report, root, run) and (control is None or report_matches(report, root, control))
-        measured_probe = spacing_note(report, run, control, args.get("track_max") or 0.0) if tied else None
+        measured_probe = spacing_note(report, run, control, args.get("track_max") or 0.0, via) if tied else None
         stale = None if tied else ("Laporan evaluasi yang ada di mesin ini tidak bisa dicocokkan dengan checkpoint run "
                                    "resmi dan run kontrolnya yang sekarang, jadi angkanya tidak dikutip.")
         methods.append(entry(
@@ -1203,7 +1228,7 @@ def build(root: Path = ROOT, run: str = OFFICIAL_RUN, test_font_dir: Path = TEST
         data_group(run, args, {**fonts[-1], "recorded": recorded, "chain": fonts[:-1]}, real, evidence, root),
         training_group(links, complete, code_facts(), device, [facts["train"] for facts in fonts]),
         decoding_group(key or "", evidence, root),
-        evaluation_group(run, args, real, evidence, root, family, test_fonts),
+        evaluation_group(run, args, real, evidence, root, family, test_fonts, [link["run"] for link in links]),
     ]
     return {
         "schema": SCHEMA,
