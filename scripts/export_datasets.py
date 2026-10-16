@@ -419,6 +419,8 @@ def run_usage(link: dict, schedule: Schedule, root: Path, warnings: list[str]) -
         "slant_prob": args.get("slant_prob") or 0.0,
         "slant_max": (args.get("slant_max") or 0.0) if args.get("slant_prob") else 0.0,
         "font_fixes": bool(args.get("font_fixes")),
+        # Pecahan baris tetangga di tepi atas/bawah citra latih (src/neighbors.py, sejak fase 11).
+        "neighbor_prob": args.get("neighbor_prob") or 0.0,
         "val_lines": args.get("val_lines") or 0,
         "val_steps": sorted({row["step"] for row in rows if "val_cer" in row and row.get("step", 0) <= step}),
     }, scheduled

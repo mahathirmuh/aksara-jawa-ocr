@@ -116,14 +116,15 @@ CONTROLS = {
     "rare": {"fase10_rare": "fase10_ctrl", "fase7_track_rare": "fase7_track", "fase6_rare": "fase6_ctrl"},
     "spelling": {"fase8_std": "fase8_ctrl"},
     "slant": {"fase9_slant": "fase9_ctrl"},
+    "neighbor": {"fase11_neighbor": "fase11_ctrl"},
 }
 TREATMENTS = {"fonts": "font tambahan", "tracking": "jarak antar suku kata", "rare": "sisipan aksara langka",
-              "spelling": "ejaan baku", "slant": "render miring"}
+              "spelling": "ejaan baku", "slant": "render miring", "neighbor": "pecahan baris tetangga"}
 # Argumen src.train milik tiap perlakuan (boleh berbeda antara run perlakuan dan kontrolnya), dan argumen pelatihan
 # yang harus sama di keduanya di samping argumen data (`data_recipe`).
 TREATMENT_KEYS = {"fonts": ("extra_fonts",), "tracking": ("track_prob", "track_max"),
                   "rare": ("rare_insert_prob", "rare_opener_prob", "rare_max_similarity", "rare_attach"),
-                  "spelling": ("standard_prob",), "slant": ("slant_prob", "slant_max")}
+                  "spelling": ("standard_prob",), "slant": ("slant_prob", "slant_max"), "neighbor": ("neighbor_prob",)}
 # Aturan ejaan baku src/spelling.py (nama di RULE_NAMES) dalam kata-kata kartu. Aturan baru tanpa kata di sini
 # menghentikan ekspor, supaya butir ejaan baku tidak menyebut daftar aturan yang sudah usang.
 SPELLING_WORDS = {"nya": "nya di depan ca/ja", "cerek": "pa cerek", "lelet": "nga lelet", "keret": "keret",
@@ -325,6 +326,20 @@ class Evidence:
                 return None
         return report
 
+    def printed(self, treated: str, control: str) -> tuple[str, str] | None:
+        """Kalimat "pada N baris cetak CER kontrol → perlakuan (selisih; SK 95% per halaman)" dan berkas sumbernya, dari
+        bagian `kinds` laporan scripts/eval_slant.py real (perlakuan = A), hanya bila laporan itu sah (`slant`) dan
+        memisahkan baris cetak dari tulisan tangan (adendum fase 9: scope repo = cetak)."""
+        report = self.slant(treated, control)
+        block = ((report or {}).get("kinds") or {}).get("cetak") or {}
+        if not block.get("lines"):
+            return None
+        ci = (report.get("ci95_pages") or {}).get("cetak")
+        text = (f"pada {num(block['lines'])} baris cetak ({num(block['pages'])} halaman) CER {pct(block['cer_b'])} → "
+                f"{pct(block['cer_a'])} ({points(block['cer_a'] - block['cer_b'])}"
+                + (f"; selang kepercayaan 95% per halaman {interval(*ci)})" if ci else ")"))
+        return text, relative(self.root / "out/compare" / f"slant_{treated}_vs_{control}.json", self.root)
+
     def g3_change(self, treated: str, control: str) -> tuple[str, str] | None:
         """Kalimat "G3 kontrol -> perlakuan (selisih; SK 95% per halaman)" dan berkas sumbernya."""
         after, before = self.cer(self.SCOPE, treated), self.cer(self.SCOPE, control)
@@ -396,6 +411,7 @@ def data_recipe(args: dict) -> dict:
         "slant_prob": slant,
         "slant_max": (args.get("slant_max") or 0) if slant else 0,
         "font_fixes": bool(args.get("font_fixes")),
+        "neighbor_prob": args.get("neighbor_prob") or 0,
     }
 
 
@@ -403,6 +419,7 @@ def is_treated(kind: str, recipe: dict) -> bool:
     """Apakah perlakuan `kind` hidup di resep data ini."""
     return {"fonts": bool(recipe["extra_fonts"]), "tracking": recipe["track_prob"] > 0,
             "spelling": recipe["standard_prob"] > 0, "slant": recipe["slant_prob"] > 0,
+            "neighbor": recipe["neighbor_prob"] > 0,
             "rare": recipe["rare_insert_prob"] > 0 or recipe["rare_opener_prob"] > 0}[kind]
 
 
@@ -851,6 +868,9 @@ def data_group(run: str, args: dict, fonts: dict, real: dict, evidence: Evidence
     slant = slant_entry(run, args, evidence, root, chain_runs)
     if slant:
         methods.append(slant)
+    neighbor = neighbor_entry(run, args, evidence, root, chain_runs)
+    if neighbor:
+        methods.append(neighbor)
     if args.get("drop_space_prob"):
         # Spasi dibuang bila undiannya kena ATAU font terpilih berspasi terlalu sempit (src/dataset.py), jadi porsi
         # baris tanpa spasi lebih besar dari peluangnya: p + (1 - p) x porsi font berspasi sempit. Aturan font
@@ -1039,6 +1059,42 @@ def slant_entry(run: str, args: dict, evidence: Evidence, root: Path, chain_runs
                 "sebagian."))
 
 
+def neighbor_entry(run: str, args: dict, evidence: Evidence, root: Path, chain_runs: list[str] | None = None) -> dict | None:
+    """Butir pecahan baris tetangga (src/neighbors.py, `--neighbor-prob`): "official" bila run resmi memakainya, "tested"
+    bila hanya diuji sebagai lanjutan model resmi (kedua lengan dilanjutkan dari checkpoint run resmi), tidak ada bila
+    keduanya tidak. Buktinya = titik akhir utama fase 11: CER baris CETAK, perlakuan lawan kontrolnya (`Evidence.printed`)."""
+    used = bool(args.get("neighbor_prob"))
+    if used:
+        pair = chain_pair(root, "neighbor", run, chain_runs or [run])
+    else:
+        pair = next(((treated, control) for treated, control in CONTROLS["neighbor"].items()
+                     if control_run(root, "neighbor", treated) == control and started_from(root, treated, run)), None)
+        if pair is None:
+            return None
+    measured, source = None, None
+    change = evidence.printed(pipeline_key(pair[0]) or "", pipeline_key(pair[1]) or "") if pair else None
+    if change:
+        treated, control = pair
+        if not used:
+            lead = f"Pada run {treated} lawan {control} (keduanya lanjutan model resmi, bukan model resmi): "
+        elif treated == run:
+            lead = f"Terhadap run kontrol {control} (jumlah langkah sama, tanpa pecahan baris tetangga): "
+        else:
+            lead = (f"Pada run {treated} di rantai model resmi, terhadap run kontrol {control} (jumlah langkah sama, tanpa "
+                    "pecahan baris tetangga): ")
+        measured = lead + change[0] + ("." if used else ". Run resmi tidak memakainya.")
+        source = change[1]
+    return entry(
+        "neighbor", "Pecahan baris tetangga", "data", "official" if used else "tested",
+        "Potongan baris cetak nyata sering memuat sisa tinta baris di atas dan di bawahnya. Pada sebagian citra latih, "
+        "pita bawah sebuah baris lain ditempel di atas teks dan pita atas baris lain di bawahnya, dengan jarak kosong ke "
+        "teks; labelnya tetap teks baris itu sendiri, jadi model belajar mengabaikan pecahan di tepi.",
+        [("Peluang", dec(args["neighbor_prob"]))] if used else [],
+        measured, source, files=["src/neighbors.py", "src/dataset.py"],
+        note="Bentuk dan banyaknya pecahan ditiru dari pengamatan sejumlah kecil potongan cetak nyata, bukan diukur dari "
+             "seluruh data uji.")
+
+
 def recipe_changes(links: list[dict], counts: list[int]) -> str:
     """Apa yang berubah di argumen data tiap run dibanding run sebelumnya, dari argumen di checkpoint-nya (`data_recipe`,
     dibandingkan nilai demi nilai). `counts` = jumlah font latih tiap run. Yang tidak tercatat di argumen (mis. aturan
@@ -1075,6 +1131,10 @@ def recipe_changes(links: list[dict], counts: list[int]) -> str:
                            f"{dec(old['slant_prob'])} hingga {dec(old['slant_max'])})")
         if new["font_fixes"] != old["font_fixes"]:
             changed.append("perbaikan font" if new["font_fixes"] else "tanpa perbaikan font")
+        if new["neighbor_prob"] != old["neighbor_prob"]:
+            changed.append("tanpa pecahan baris tetangga" if not new["neighbor_prob"]
+                           else f"pecahan baris tetangga p {dec(new['neighbor_prob'])}"
+                           + (f" (dari p {dec(old['neighbor_prob'])})" if old["neighbor_prob"] else ""))
         if new["train_lines"] != old["train_lines"]:
             changed.append(f"kumpulan {num(new['train_lines'])} baris (dari {num(old['train_lines'])})")
         if new["seed"] != old["seed"]:

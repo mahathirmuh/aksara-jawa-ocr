@@ -423,6 +423,13 @@ class DatasetPageTest extends TestCase
         $this->import($card);
         $this->assertStringEndsWith('(hingga 0,3 em) · miring p 0,25 (hingga 0,6)',
             $this->part($this->get('/dataset')->assertOk()->getContent(), 'data-run', 'fase7_track'));
+        // Pecahan baris tetangga (fase 11): disebut sesudah perbaikan font; nol = tidak disebut.
+        $card['lineage']['runs'][1]['neighbor_prob'] = 0.5;
+        $card['lineage']['runs'][0]['neighbor_prob'] = 0.0;
+        $this->import($card);
+        $html = $this->get('/dataset')->assertOk()->getContent();
+        $this->assertStringEndsWith('· miring p 0,25 (hingga 0,6) · pecahan baris tetangga p 0,5', $this->part($html, 'data-run', 'fase7_track'));
+        $this->assertStringNotContainsString('pecahan baris tetangga', $this->part($html, 'data-run', 'fase6_ctrl'));
 
         // Data uji nyata yang bukan NusaAksara: kalimat "satu terbitan" (catatan khusus NusaAksara) tidak dipakai.
         $card = $this->card();
@@ -685,6 +692,12 @@ class DatasetPageTest extends TestCase
         }));
         $rejects('kunci usage.train.font_fixes harus benar/salah', $changed(function (&$c) {
             $c['usage']['train']['font_fixes'] = 'ya';
+        }));
+        $rejects('kunci lineage.runs.*.neighbor_prob harus bilangan dari 0 sampai 1', $changed(function (&$c) {
+            $c['lineage']['runs'][1]['neighbor_prob'] = 2;
+        }));
+        $rejects('kunci usage.train.neighbor_prob harus bilangan dari 0 sampai 1', $changed(function (&$c) {
+            $c['usage']['train']['neighbor_prob'] = -0.1;
         }));
         // Objek bukan daftar, dan angka bukan teks.
         $rejects('kunci fonts harus daftar', $changed(function (&$c) {

@@ -192,7 +192,7 @@ def run_options(args: dict) -> dict:
     return {"track": args.get("track_prob") or 0, "track_max": args.get("track_max") or 0,
             "standard": args.get("standard_prob") or 0,
             "slant": args.get("slant_prob") or 0, "slant_max": args.get("slant_max") or 0,
-            "fixes": bool(args.get("font_fixes")),
+            "fixes": bool(args.get("font_fixes")), "neighbor": args.get("neighbor_prob") or 0,
             "insert": args.get("rare_insert_prob") or 0, "opener": args.get("rare_opener_prob") or 0,
             "similarity": args.get("rare_max_similarity") or 0, "attach": bool(args.get("rare_attach"))}
 
@@ -223,6 +223,11 @@ def check_optional_run(spec: dict, step: int, args: dict) -> None:
     if bool(spec.get("fixes")) != o["fixes"]:
         raise SystemExit(f"{key}: font_fixes = {o['fixes']}, padahal run ini {'dengan' if spec.get('fixes') else 'tanpa'} "
                          "perbaikan font")
+    # Pecahan baris tetangga (src/neighbors.py, sejak fase 11): spesifikasi run sebelumnya tanpa kuncinya = mati.
+    if spec.get("neighbor") and not o["neighbor"] > 0:
+        raise SystemExit(f"{key}: run pecahan baris tetangga, tetapi neighbor_prob = {o['neighbor']}")
+    if not spec.get("neighbor") and o["neighbor"] != 0:
+        raise SystemExit(f"{key}: run tanpa pecahan baris tetangga, tetapi neighbor_prob = {o['neighbor']}")
     if spec["rare"] and not o["insert"] > 0:
         raise SystemExit(f"{key}: run aksara langka, tetapi rare_insert_prob = {o['insert']}")
     if not spec["rare"] and (o["insert"] != 0 or o["opener"] != 0):
@@ -250,7 +255,7 @@ def optional_pipeline(spec: dict, step: int, args: dict, start: str) -> dict:
                                    track_max=decimal(o["track_max"]), insert=decimal(o["insert"]),
                                    opener=decimal(o["opener"]), similarity=decimal(o["similarity"]),
                                    standard=decimal(o["standard"]), slant=decimal(o["slant"]),
-                                   slant_max=decimal(o["slant_max"]))
+                                   slant_max=decimal(o["slant_max"]), neighbor=decimal(o["neighbor"]))
     head = f"crnn:{spec['run']}@{step}" + (f" (lanjutan {start})" if start else "")
     config = f"{head} · {detail}"
     if len(config) > MAX_CONFIG:

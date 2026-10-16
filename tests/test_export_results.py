@@ -27,6 +27,7 @@ from export_results import (  # noqa: E402
     official_pipeline,
     optional_official,
     optional_pipeline,
+    run_options,
 )
 
 RARE, CTRL, TRACK, TRACK_RARE, CTRL7, STD8, CTRL8, SLANT9, CTRL9, RARE10, CTRL10 = OPTIONAL_CHECKPOINTS
@@ -735,3 +736,17 @@ def test_fase10_runs_are_told_apart_by_the_filtered_rare_insertion():
             (CTRL10, fase9_args("fase10_ctrl", standard=0.0), "run ejaan baku, tetapi standard_prob = 0")):
         with pytest.raises(SystemExit, match=message):
             check_optional_run(spec, 1500, args)
+
+
+def test_neighbor_fragments_are_a_run_option_that_older_specs_forbid():
+    # Fase 11: --neighbor-prob (src/neighbors.py). Spesifikasi run sebelumnya tanpa kunci "neighbor" = run tanpa itu.
+    assert run_options({})["neighbor"] == 0 == run_options({"neighbor_prob": None})["neighbor"]
+    assert run_options({"neighbor_prob": 0.5})["neighbor"] == 0.5
+    with pytest.raises(SystemExit, match="crnn_fase10_ctrl: run tanpa pecahan baris tetangga, tetapi neighbor_prob = 0.5"):
+        check_optional_run(CTRL10, 1500, {**fase9_args("fase10_ctrl"), "neighbor_prob": 0.5})
+    spec = {**CTRL10, "key": "crnn_uji", "run": "fase10_ctrl", "neighbor": True, "detail": "pecahan p {neighbor} · greedy"}
+    with pytest.raises(SystemExit, match="crnn_uji: run pecahan baris tetangga, tetapi neighbor_prob = 0"):
+        check_optional_run(spec, 1500, fase9_args("fase10_ctrl"))
+    args = {**fase9_args("fase10_ctrl"), "neighbor_prob": 0.25}  # beda dari jarak (0,5): nilainya tidak tertukar
+    check_optional_run(spec, 1500, args)
+    assert optional_pipeline(spec, 1500, args, "")["config"] == "crnn:fase10_ctrl@1500 · pecahan p 0,25 · greedy"

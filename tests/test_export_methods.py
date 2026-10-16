@@ -1686,6 +1686,72 @@ def test_recipe_changes_name_the_slant_and_the_font_fixes():
     assert em.is_treated("slant", em.data_recipe({"slant_prob": 0.5})) and not em.is_treated("slant", em.data_recipe({}))
 
 
+def test_neighbor_entry_quotes_the_printed_lines_of_its_pair(tmp_path, monkeypatch):
+    # Fase 11 (rencana): pecahan baris tetangga di atas dasar fase 10; bukti = CER baris CETAK dari laporan eval_slant.
+    root = fase9_repo(tmp_path)
+    monkeypatch.setattr(em, "pipeline_key", lambda run: f"crnn_{run}")
+    manifest = manifest_of(root)
+    for key, cer in (("crnn_fase11_neighbor", 0.15), ("crnn_fase11_ctrl", 0.16)):
+        manifest["pipelines"].append({"key": key, "label": key.upper(), "kind": "crnn", "status": "done", "config": "x"})
+        manifest["metrics"].append({"scope": "nusaaksara_745", "pipeline": key, "lines": 3, "cer": cer})
+    write_manifest(root, manifest)
+    init = "out/checkpoints/fase9_ctrl/last_snapshot.pt"
+    sibling(root, "fase11_neighbor", "fase9_ctrl", neighbor_prob=0.5, init=init)
+    sibling(root, "fase11_ctrl", "fase9_ctrl", neighbor_prob=0.0, init=init)
+    assert em.control_run(root, "neighbor", "fase11_neighbor") == "fase11_ctrl"
+    args = {key: value for key, value in SLANT9.items() if key not in ("slant_prob", "slant_max")}
+    used = {**args, "neighbor_prob": 0.5}
+    chain = ["runA", RUN, "fase8_std", "fase9_ctrl", "fase11_neighbor"]
+
+    # Tanpa laporan: butir resmi dengan peluangnya, tanpa bukti.
+    bare = em.neighbor_entry("fase11_neighbor", used, em.Evidence(root), root, chain)
+    assert (bare["status"], bare["settings"], bare["evidence"]) == ("official", [["Peluang", "0,5"]], None)
+    assert bare["files"] == ["src/neighbors.py", "src/dataset.py"] and bare["note"].startswith("Bentuk dan banyaknya pecahan")
+    # Laporan eval_slant tanpa pembagian cetak (format lama): tidak ada bukti.
+    report = slant_report(root, "crnn_fase11_neighbor", "crnn_fase11_ctrl", 0.15, 0.16)
+    assert em.Evidence(root).printed("crnn_fase11_neighbor", "crnn_fase11_ctrl") is None
+    data = json.loads(report.read_text(encoding="utf-8"))
+    data["kinds"] = {"cetak": {"lines": 308, "pages": 72, "chars": 800, "cer_a": 0.11, "cer_b": 0.123},
+                     "tulisan tangan": {"lines": 437, "pages": 20, "chars": 1200, "cer_a": 0.2, "cer_b": 0.2}}
+    data["ci95_pages"]["cetak"] = [-0.02, -0.006]
+    report.write_text(json.dumps(data), encoding="utf-8")
+    own = em.neighbor_entry("fase11_neighbor", used, em.Evidence(root), root, chain)
+    assert own["evidence"] == ("Terhadap run kontrol fase11_ctrl (jumlah langkah sama, tanpa pecahan baris tetangga): pada "
+                               "308 baris cetak (72 halaman) CER 12,30% → 11,00% (−1,30 poin; selang kepercayaan 95% per "
+                               "halaman −2,00 sampai −0,60).")
+    assert own["evidence_source"] == "out/compare/slant_crnn_fase11_neighbor_vs_crnn_fase11_ctrl.json"
+    # Tanpa selang: angkanya tetap. Laporan yang CER semua barisnya bukan CER manifest: tidak dikutip.
+    data["ci95_pages"]["cetak"] = None
+    report.write_text(json.dumps(data), encoding="utf-8")
+    assert em.neighbor_entry("fase11_neighbor", used, em.Evidence(root), root, chain)["evidence"].endswith("(−1,30 poin).")
+    data["ci95_pages"]["cetak"] = [-0.02, -0.006]
+    data["groups"]["semua"]["cer_a"] = 0.151
+    report.write_text(json.dumps(data), encoding="utf-8")
+    assert em.neighbor_entry("fase11_neighbor", used, em.Evidence(root), root, chain)["evidence"] is None
+    data["groups"]["semua"]["cer_a"] = 0.15
+    report.write_text(json.dumps(data), encoding="utf-8")
+    # Run resmi lanjutan yang mewarisinya: bukti pasangan di rantai, disebut.
+    later = em.neighbor_entry("fase12_x", used, em.Evidence(root), root, chain + ["fase12_x"])
+    assert later["evidence"].startswith("Pada run fase11_neighbor di rantai model resmi, terhadap run kontrol fase11_ctrl")
+    # Run resmi tanpa pecahan yang menjadi titik awal kedua lengan: "tested"; run lain tanpa pecahan: tidak ada butirnya.
+    tested = em.neighbor_entry("fase9_ctrl", args, em.Evidence(root), root, ["fase9_ctrl"])
+    assert tested["status"] == "tested" and tested["settings"] == []
+    assert tested["evidence"].startswith("Pada run fase11_neighbor lawan fase11_ctrl (keduanya lanjutan model resmi") and \
+        tested["evidence"].endswith(". Run resmi tidak memakainya.")
+    assert em.neighbor_entry("fase8_std", args, em.Evidence(root), root, ["fase8_std"]) is None
+    # Kontrol yang ikut memakai pecahan: bukan kontrol.
+    sibling(root, "fase11_ctrl", "fase9_ctrl", neighbor_prob=0.5, init=init)
+    assert em.control_run(root, "neighbor", "fase11_neighbor") is None
+    assert em.neighbor_entry("fase11_neighbor", used, em.Evidence(root), root, chain)["evidence"] is None
+    # Resep: argumen data, dan perubahan disebut di rantai.
+    assert em.data_recipe({})["neighbor_prob"] == 0 and em.is_treated("neighbor", em.data_recipe({"neighbor_prob": 0.5}))
+    link = lambda run, **a: {"run": run, "args": {"augment": "fase5", **a}}  # noqa: E731
+    assert em.recipe_changes([link("a"), link("b", neighbor_prob=0.5)], [9, 9]) == "b: pecahan baris tetangga p 0,5"
+    assert em.recipe_changes([link("a", neighbor_prob=0.5), link("b")], [9, 9]) == "b: tanpa pecahan baris tetangga"
+    assert em.recipe_changes([link("a", neighbor_prob=0.5), link("b", neighbor_prob=0.25)], [9, 9]) == (
+        "b: pecahan baris tetangga p 0,25 (dari p 0,5)")
+
+
 def test_spelling_evidence_is_inherited_by_a_later_official_run(tmp_path):
     root = fase9_repo(tmp_path)
     spelling_report(root, "crnn_fase8_std", "crnn_fase8_ctrl", 0.20, 0.21, 0.75, 0.292)

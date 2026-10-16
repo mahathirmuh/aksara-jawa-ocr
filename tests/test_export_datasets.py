@@ -846,6 +846,11 @@ def test_slant_and_font_fixes_of_each_run_are_read_from_its_checkpoint(tmp_path)
         return run["slant_prob"], run["slant_max"], run["font_fixes"]
 
     assert facts(first) == (0.0, 0.0, False) and facts(last) == facts(card["usage"]["train"]) == (0.5, 0.6, True)
+    # Pecahan baris tetangga (fase 11): checkpoint tanpa opsinya = 0.
+    assert first["neighbor_prob"] == last["neighbor_prob"] == 0.0
+    save_ckpt(ckpt / "runA" / "last_snapshot.pt", 6, train_lines=200, neighbor_prob=0.25)
+    assert ed.build(root, "runB", root / "ujifont")["lineage"]["runs"][0]["neighbor_prob"] == 0.25
+    save_ckpt(ckpt / "runA" / "last_snapshot.pt", 6, train_lines=200, slant_max=0.6)
     # Perbaikan font mengeluarkan font yang pasangannya tidak menumpuk saat run mulai, jadi font di folder yang tidak
     # tercatat di log run itu diperingatkan bersama kemungkinan sebabnya.
     core = [font.name for font in TRAIN_FONTS]

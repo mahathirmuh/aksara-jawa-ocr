@@ -323,6 +323,9 @@ class Dataset extends Component
         if ($run['font_fixes'] ?? false) {
             $parts[] = 'perbaikan font';
         }
+        if (($run['neighbor_prob'] ?? 0) > 0) {
+            $parts[] = 'pecahan baris tetangga p '.self::dec($run['neighbor_prob']);
+        }
         if ($run['real_train'] ?? false) {
             $parts[] = 'data nyata ikut dilatih';
         }

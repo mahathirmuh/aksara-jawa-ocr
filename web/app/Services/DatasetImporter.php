@@ -64,6 +64,8 @@ class DatasetImporter extends CardImporter
                 'usage.train.slant_prob' => 'share?', 'lineage.runs.*.slant_prob' => 'share?',
                 'usage.train.slant_max' => 'count?', 'lineage.runs.*.slant_max' => 'count?',
                 'usage.train.font_fixes' => 'bool?', 'lineage.runs.*.font_fixes' => 'bool?',
+                // Pecahan baris tetangga ada sejak fase 11.
+                'usage.train.neighbor_prob' => 'share?', 'lineage.runs.*.neighbor_prob' => 'share?',
                 'usage.val.lines' => 'int', 'usage.val.steps' => 'list', 'usage.val.steps.*' => 'int', 'usage.val.fonts' => 'int',
                 'usage.test.lines' => 'int', 'usage.test.gates' => 'list', 'usage.test.gates.*.code' => 'text',
                 'usage.test.quick' => 'int?', 'usage.test.quick_max_lines' => 'int?', 'usage.test.full' => 'int?',
