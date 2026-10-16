@@ -113,7 +113,7 @@ CODE_FACTS = {
 CONTROLS = {
     "fonts": {"fase5_fonts": "fase5_core"},
     "tracking": {"fase7_track": "fase7_ctrl"},
-    "rare": {"fase7_track_rare": "fase7_track", "fase6_rare": "fase6_ctrl"},
+    "rare": {"fase10_rare": "fase10_ctrl", "fase7_track_rare": "fase7_track", "fase6_rare": "fase6_ctrl"},
     "spelling": {"fase8_std": "fase8_ctrl"},
     "slant": {"fase9_slant": "fase9_ctrl"},
 }
