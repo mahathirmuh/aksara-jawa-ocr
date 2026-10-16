@@ -445,6 +445,16 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   `tight` hanya memotong rapat ~separuh citra latih dan memangkas paling banyak 2% tinggi. Calon: augmentasi potong rapat
   yang lebih keras, ATAU margin saat membaca (mengubah cara baca resmi = keputusan user; nilainya disetel di dev sintetis,
   bukan di data uji).
+  **Margin di dev sintetis (2026-10-17 05:40, `out/compare/pad_dev.json`, `fase9_ctrl`, 300 baris val, 9 font latih,
+  augmentasi `fase5`):** baris yang SELALU dipotong rapat 1,52% / 1,34% / 1,39% / 1,40% / 1,60% / 2,01% pada margin 0 / 0,02 /
+  0,04 / 0,06 / 0,08 / 0,12; tanpa potong rapat paksa 1,34% / 1,39% / 1,33% / 1,53% / 1,77% / 2,27%. Di dev margin hampir tidak
+  berpengaruh (terbaik 0,02: −0,18 poin), jadi keuntungan −1,40 poin di cetak nyata datang dari ciri potongan nyata yang
+  belum ditiru data sintetis. Yang terlihat di potongan cetak nyata (lembar kontak 8 potongan acak): **pecahan tinta baris
+  tetangga** di tepi atas (tanda bawah / pasangan baris di atasnya) dan tepi bawah, selain tepi rapat, bintik, dan tepi
+  goresan bergerigi. Ukuran kasar (>= 2 komponen kecil < 22% tinggi yang menyentuh tepi atas/bawah; ikut menghitung tanda baris
+  itu sendiri): 243 / 308 baris cetak, CER `fase9_ctrl` 12,59% lawan 11,34%, sisipan tanda atas 0,28 lawan 0,14 per baris.
+  Calon perlakuan: augmentasi pecahan baris tetangga (tempel potongan bawah/atas baris lain di tepi citra latih sebelum
+  potong rapat), diuji dengan kontrol seperti biasa.
   **Font Noto Sans Javanese Bold** (rilis resmi notofonts/javanese `NotoSansJavanese-v2.005`, OFL; berbeda versi dari Regular
   di repo): lolos keempat cek otomatis Fase 0 dan lembar kontak 13 kasus tampak benar (diperiksa Claude, belum mata
   manusia). Belum dipakai; calon perlakuan sesudah fase 10, karena huruf cetak majalah jauh lebih tebal dan lebar daripada
