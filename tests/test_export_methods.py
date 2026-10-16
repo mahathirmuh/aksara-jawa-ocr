@@ -1654,6 +1654,9 @@ def test_recipe_changes_name_the_slant_and_the_font_fixes():
     assert em.recipe_changes([slant, std], [9, 9]) == "fase8_std: tanpa render miring, tanpa perbaikan font"
     assert em.recipe_changes([slant, link("b", slant_prob=0.25, slant_max=0.4, font_fixes=True)], [9, 9]) == (
         "b: render miring p 0,25 hingga 0,4 (dari p 0,5 hingga 0,6)")
+    # Kemiringan terbesar saja yang berubah: tetap disebut (bukan "argumen data sama").
+    assert em.recipe_changes([slant, link("b", slant_prob=0.5, slant_max=0.4, font_fixes=True)], [9, 9]) == (
+        "b: render miring p 0,5 hingga 0,4 (dari p 0,5 hingga 0,6)")
     assert em.recipe_changes([slant, link("c", **slant["args"])], [9, 9]) == "c: argumen data sama, langkah tambahan"
     # Kemiringan terbesar tanpa render miring tidak berarti apa-apa; perbaikan font tanpa render miring tetap disebut.
     assert em.recipe_changes([std, link("d", slant_max=0.9)], [10, 10]) == "d: argumen data sama, langkah tambahan"
