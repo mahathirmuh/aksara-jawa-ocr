@@ -403,6 +403,9 @@ def run_usage(link: dict, schedule: Schedule, root: Path, warnings: list[str]) -
         "track_max": args.get("track_max") or 0.0,
         "rare_insert_prob": args.get("rare_insert_prob") or 0.0,
         "rare_opener_prob": args.get("rare_opener_prob") or 0.0,
+        # Ejaan baku saat render (src/spelling.py, sejak fase 8): menghasilkan pa cerek, nga lelet, dan keret yang di
+        # teks korpus termasuk aksara langka.
+        "standard_prob": args.get("standard_prob") or 0.0,
         "val_lines": args.get("val_lines") or 0,
         "val_steps": sorted({row["step"] for row in rows if "val_cer" in row and row.get("step", 0) <= step}),
     }, scheduled

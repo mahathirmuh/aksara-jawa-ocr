@@ -313,6 +313,9 @@ class Dataset extends Component
         } elseif ($run['rare_opener_prob'] > 0) {
             $parts[] = 'pembuka baris adeg-adeg';
         }
+        if (($run['standard_prob'] ?? 0) > 0) {
+            $parts[] = 'ejaan baku p '.self::dec($run['standard_prob']);
+        }
         if ($run['real_train'] ?? false) {
             $parts[] = 'data nyata ikut dilatih';
         }
@@ -408,7 +411,11 @@ class Dataset extends Component
                 .($scheduled ? ' Di antara '.nfmt($train['distinct_lines']).' baris yang dijadwalkan run resmi, tiap karakter itu muncul di '
                     .nfmt($seen['min']).'–'.nfmt($seen['max']).' baris, rata-rata '.self::dec($seen['mean'], 1).'.'
                     : ' Berapa baris di antaranya yang dijadwalkan run resmi tidak dihitung.')
-                .($trial ? ' Sisipan aksara langka saat render sudah diuji; hasilnya ada di halaman Metode.' : '')];
+                .($trial ? ' Sisipan aksara langka saat render sudah diuji; hasilnya ada di halaman Metode.' : '')
+                // Ejaan baku saat render (fase 8) menulis pa cerek, nga lelet, dan keret ke baris yang memuat ra/la/cakra
+                // berpepet, jadi bagi run resmi ketiganya tidak lagi langka; hitungan di atas berasal dari teks korpus.
+                .(($train['standard_prob'] ?? 0) > 0 ? ' Run resmi menulis ulang sebagian baris dengan ejaan baku saat render, '
+                    .'jadi pa cerek, nga lelet, dan keret muncul jauh lebih sering daripada hitungan dari teks korpus ini.' : '')];
         }
 
         return $limits;

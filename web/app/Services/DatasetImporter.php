@@ -57,6 +57,8 @@ class DatasetImporter extends CardImporter
             + ['usage.train.distinct_lines' => 'int?', 'lineage.distinct_lines' => 'int?', 'lineage.runs.*.distinct_lines' => 'int?',
                 'usage.train.real_train' => 'bool?', 'usage.train.real_val' => 'bool?',
                 'usage.train.rare_insert_prob' => 'share?', 'usage.train.rare_opener_prob' => 'share?',
+                // Ejaan baku saat render ada sejak fase 8: kartu sebelumnya tidak memuatnya.
+                'usage.train.standard_prob' => 'share?', 'lineage.runs.*.standard_prob' => 'share?',
                 'usage.val.lines' => 'int', 'usage.val.steps' => 'list', 'usage.val.steps.*' => 'int', 'usage.val.fonts' => 'int',
                 'usage.test.lines' => 'int', 'usage.test.gates' => 'list', 'usage.test.gates.*.code' => 'text',
                 'usage.test.quick' => 'int?', 'usage.test.quick_max_lines' => 'int?', 'usage.test.full' => 'int?',

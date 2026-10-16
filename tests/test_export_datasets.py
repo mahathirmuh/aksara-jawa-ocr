@@ -268,6 +268,8 @@ def test_build_describes_a_fake_repo(tmp_path):
     assert (last["run"], last["init"], last["pool"], last["steps"], last["samples"]) == ("runB", "runA", 400, 10, 80)
     assert last["distinct_lines"] == 80 and last["processes"] == 1 and last["val_steps"] == [5, 10]
     assert (last["fonts"], last["extra_fonts"], last["track_prob"], last["drop_space_prob"]) == (3, 1, 0.5, 0.5)
+    # Ejaan baku saat render (fase 8): checkpoint sebelumnya tidak punya opsinya, jadi 0.
+    assert (first["standard_prob"], last["standard_prob"]) == (0.0, 0.0) and card["usage"]["train"]["standard_prob"] == 0.0
     lineage = card["lineage"]
     assert lineage["complete"] and lineage["steps"] == 16 and lineage["samples"] == 128 and lineage["pool"] == 400
     # Gabungan rantai dihitung ulang di sini tanpa Schedule: runA tanpa worker (panggilan pertama sampler), runB dengan
@@ -787,3 +789,16 @@ def test_shared_advances_count_only_glyphs_both_fonts_have():
     assert ed.shared_advances(differing(need), full) == {"same": need, "of": count, "family": True}
     assert ed.shared_advances(differing(need - 1), full) == {"same": need - 1, "of": count, "family": False}
 
+
+
+def test_standard_spelling_of_each_run_is_read_from_its_checkpoint(tmp_path):
+    # Fase 8: --standard-prob tiap run di rantai dibaca dari argumen checkpoint-nya, bukan disamakan antar-run.
+    root = fake_repo(tmp_path)
+    ckpt = root / "out/checkpoints"
+    save_ckpt(ckpt / "runA" / "last_snapshot.pt", 6, train_lines=200, standard_prob=0.25)
+    save_ckpt(ckpt / "runB" / "last_snapshot.pt", 10, init="out/checkpoints/runA/last_snapshot.pt", workers=2,
+              extra_fonts="fonts/extra", augment="fase5", drop_space_prob=0.5, track_prob=0.5, track_max=0.3,
+              standard_prob=0.5)
+    card = ed.build(root, "runB", root / "ujifont")
+    first, last = card["lineage"]["runs"]
+    assert (first["standard_prob"], last["standard_prob"], card["usage"]["train"]["standard_prob"]) == (0.25, 0.5, 0.5)

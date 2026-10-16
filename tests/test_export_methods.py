@@ -1216,6 +1216,108 @@ def test_recipe_changes_name_what_was_added_removed_or_left_alone():
     assert em.data_recipe({"track_prob": 0.5, "track_max": 0.3})["track_max"] == 0.3
     assert set(em.TREATMENT_KEYS) == set(em.CONTROLS) == set(em.TREATMENTS)
     assert all(key in em.data_recipe({}) for keys in em.TREATMENT_KEYS.values() for key in keys)
+    # Fase 8: ejaan baku (--standard-prob) adalah argumen data; checkpoint sebelum fase 8 tidak punya opsinya (= mati).
+    plain = link("p", augment="fase5", track_prob=0.5)
+    spelled = link("q", augment="fase5", track_prob=0.5, standard_prob=0.5)
+    assert em.recipe_changes([plain, spelled], [3, 3]) == "q: ejaan baku p 0,5"
+    assert em.recipe_changes([spelled, plain], [3, 3]) == "p: tanpa ejaan baku"
+    assert em.recipe_changes([spelled, link("r", augment="fase5", track_prob=0.5, standard_prob=0.25)], [3, 3]) == (
+        "r: ejaan baku p 0,25 (dari p 0,5)")
+    assert em.recipe_changes([spelled, link("r", **spelled["args"])], [3, 3]) == "r: argumen data sama, langkah tambahan"
+    assert em.data_recipe({})["standard_prob"] == 0 == em.data_recipe({"standard_prob": None})["standard_prob"]
+    assert em.is_treated("spelling", em.data_recipe({"standard_prob": 0.5}))
+    assert not em.is_treated("spelling", em.data_recipe({}))
+
+
+def spelling_report(root: Path, a: str, b: str, cer_a: float, cer_b: float, recall_a: float, recall_b: float,
+                    precision_a: float | None = 0.8, ci=(0.37, 0.54)) -> Path:
+    """Laporan scripts/eval_spelling.py real (tanpa teks label), seperti yang ditulis skrip itu."""
+    def side(key, cer, recall, precision):
+        return {"key": key, "cer": cer, "recall": recall, "precision": precision, "in_reference": 212,
+                "read": round(212 * recall), "emitted": 0, "emitted_right": 0, "forms": {}, "cer_without_forms": cer,
+                "lines_without_forms": 1}
+    path = root / "out/compare" / f"spelling_{a}_vs_{b}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"a": side(a, cer_a, recall_a, precision_a), "b": side(b, cer_b, recall_b, 0.85), "lines": 3,
+                                "diff": {}, "ci95_pages": {"recall": list(ci), "cer": [-0.02, -0.01], "cer_without_forms": None,
+                                                           "resamples": 10000, "seed": 0, "pages": 2}}), encoding="utf-8")
+    return path
+
+
+def test_spelling_entry_quotes_the_spelling_control_only_when_the_pair_is_valid(tmp_path, monkeypatch):
+    root = method_repo(tmp_path)
+    manifest = manifest_of(root)
+    for key, cer in (("crnn_fase8_std", 0.20), ("crnn_fase8_ctrl", 0.21)):
+        manifest["pipelines"].append({"key": key, "label": key.upper(), "kind": "crnn", "status": "done", "config": "x"})
+        manifest["metrics"].append({"scope": "nusaaksara_745", "pipeline": key, "lines": 3, "cer": cer})
+    write_manifest(root, manifest)
+    sibling(root, "fase8_std", standard_prob=0.5)
+    sibling(root, "fase8_ctrl", standard_prob=0.0)
+    args = {"augment": "none", "standard_prob": 0.5}
+
+    # Tanpa laporan: butirnya ada dengan pengaturan dari argumen dan daftar aturan dari src/spelling.py, tanpa bukti.
+    bare = data_methods(root, "fase8_std", args)["spelling"]
+    assert (bare["kind"], bare["status"], bare["evidence"], bare["evidence_source"]) == ("data", "official", None, None)
+    assert bare["settings"] == [["Peluang", "0,5"],
+                                ["Aturan", "nya di depan ca/ja, pa cerek, nga lelet, keret, angka diapit pada pangkat"]]
+    assert bare["note"] == ("Bagian uji korpus (gerbang G1 dan G2) tetap berejaan korpus, jadi kedua gerbang itu tidak "
+                            "mengukur ejaan baku.")
+    assert bare["files"] == ["src/spelling.py", "src/dataset.py"]
+    # Run tanpa ejaan baku tidak punya butirnya.
+    assert "spelling" not in data_methods(root, "fase8_std", {"augment": "none"})
+
+    spelling_report(root, "crnn_fase8_std", "crnn_fase8_ctrl", 0.20, 0.21, 0.75, 0.292)
+    measured = data_methods(root, "fase8_std", args)["spelling"]
+    assert measured["evidence"] == (
+        "Terhadap run kontrol fase8_ctrl (jumlah langkah sama, tanpa ejaan baku): dari 212 bentuk ejaan baku di 3 baris "
+        "nyata, yang terbaca benar naik dari 29,2% ke 75,0% (+45,8 poin; selang kepercayaan 95% per halaman +37,0 sampai "
+        "+54,0), dan 80,0% dari keluarannya benar.")
+    assert measured["evidence_source"] == "out/compare/spelling_crnn_fase8_std_vs_crnn_fase8_ctrl.json"
+    # Tanpa presisi (tidak ada keluaran bentuk baku), dan bila tidak naik: kalimatnya mengikuti nilainya.
+    spelling_report(root, "crnn_fase8_std", "crnn_fase8_ctrl", 0.20, 0.21, 0.75, 0.292, precision_a=None)
+    assert data_methods(root, "fase8_std", args)["spelling"]["evidence"].endswith("+54,0).")
+    spelling_report(root, "crnn_fase8_std", "crnn_fase8_ctrl", 0.20, 0.21, 0.29, 0.30)
+    assert data_methods(root, "fase8_std", args)["spelling"]["evidence"] == (
+        "Terhadap run kontrol fase8_ctrl (jumlah langkah sama, tanpa ejaan baku): bentuk ejaan baku di baris nyata yang "
+        "terbaca benar 30,0% lawan 29,0%.")
+    # Laporan dari ekspor hasil lain (CER salah satu sisi bukan CER manifest), untuk pasangan lain, atau tanpa CER:
+    # tidak dikutip.
+    evidence = em.Evidence(root)
+    for a_cer, b_cer in ((0.2001, 0.21), (0.20, 0.2101)):
+        spelling_report(root, "crnn_fase8_std", "crnn_fase8_ctrl", a_cer, b_cer, 0.75, 0.292)
+        assert evidence.spelling("crnn_fase8_std", "crnn_fase8_ctrl") is None
+        assert data_methods(root, "fase8_std", args)["spelling"]["evidence"] is None
+    wrong = spelling_report(root, "crnn_fase8_std", "crnn_fase8_ctrl", 0.20, 0.21, 0.75, 0.292)
+    wrong.write_text(wrong.read_text(encoding="utf-8").replace('"crnn_fase8_ctrl"', '"crnn_lain"'), encoding="utf-8")
+    assert evidence.spelling("crnn_fase8_std", "crnn_fase8_ctrl") is None
+    gone = json.loads(spelling_report(root, "crnn_fase8_std", "crnn_fase8_ctrl", 0.20, 0.21, 0.75, 0.292).read_text(encoding="utf-8"))
+    del gone["b"]["cer"]
+    (root / "out/compare/spelling_crnn_fase8_std_vs_crnn_fase8_ctrl.json").write_text(json.dumps(gone), encoding="utf-8")
+    assert evidence.spelling("crnn_fase8_std", "crnn_fase8_ctrl") is None
+    assert evidence.spelling("crnn_tidak", "crnn_ada") is None
+    spelling_report(root, "crnn_fase8_std", "crnn_fase8_ctrl", 0.20, 0.21, 0.75, 0.292)
+    assert evidence.spelling("crnn_fase8_std", "crnn_fase8_ctrl")["a"]["recall"] == 0.75
+    # Checkpoint "kontrol" yang ternyata dilatih dengan ejaan baku juga, atau tanpa jarak: bukan kontrol, tanpa bukti.
+    assert em.control_run(root, "spelling", "fase8_std") == "fase8_ctrl"
+    sibling(root, "fase8_ctrl", standard_prob=0.5)
+    assert em.control_run(root, "spelling", "fase8_std") is None
+    assert data_methods(root, "fase8_std", args)["spelling"]["evidence"] is None
+    sibling(root, "fase8_ctrl", standard_prob=0.0, track_prob=0.0)
+    assert em.control_run(root, "spelling", "fase8_std") is None
+    sibling(root, "fase8_ctrl", standard_prob=0.0)
+    assert em.control_run(root, "spelling", "fase8_std") == "fase8_ctrl"
+    # Pasangan ejaan baku ikut disebut di butir run kontrol.
+    family = {"owners": {}, "dir": root / "ujifont", "twins": [], "unknown": [], "incomplete": False}
+    real = em.nusaaksara_card(root / "data/real/nusaaksara/labels.tsv")
+    group = em.evaluation_group(RUN, {"track_max": 0.3}, real, evidence, root, family, [])
+    control = {m["key"]: m for m in group["methods"]}["control"]
+    assert ["Kontrol ejaan baku", "fase8_ctrl (untuk fase8_std)"] in control["settings"]
+    assert "jarak antar suku kata, dan ejaan baku)" in control["summary"]
+
+    # Aturan ejaan baru tanpa kata di kartu: ekspor berhenti, bukan menyebut daftar aturan yang usang.
+    monkeypatch.setattr(em, "RULE_NAMES", em.RULE_NAMES + ("baru",))
+    with pytest.raises(SystemExit, match="aturan ejaan baku baru belum punya kata di SPELLING_WORDS"):
+        data_methods(root, "fase8_std", args)
 
 
 def test_main_writes_the_card(tmp_path, monkeypatch, capsys):

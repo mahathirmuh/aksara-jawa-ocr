@@ -39,11 +39,13 @@ OUT_DIR = ROOT / "out" / "beam"
 HELD_OUT_FONT = "C:/Windows/Fonts/javatext.ttf"
 
 
-def synthetic_items(model, tokenizer, split, n, fonts, augment, drop_space_prob, seed) -> list:
+def synthetic_items(model, tokenizer, split, n, fonts, augment, drop_space_prob, seed, standard_prob=0.0) -> list:
+    """Baris split yang dirender seperti saat training. `standard_prob` = peluang ejaan baku (src.train
+    --standard-prob); 0 tidak mengonsumsi angka acak, jadi dev laporan lama tetap sama persis."""
     lines = (ROOT / "data" / "splits" / f"{split}.txt").read_text(encoding="utf-8").splitlines()
     lines = random.Random(seed).sample(lines, min(n, len(lines)))
     dataset = SyntheticLines(lines, tokenizer, fonts, augment=build_augment(augment), deterministic=True,
-                             seed=seed, drop_space_prob=drop_space_prob)
+                             seed=seed, drop_space_prob=drop_space_prob, standard_prob=standard_prob)
     items = []
     for i in range(len(lines)):
         try:
@@ -95,6 +97,8 @@ def main() -> None:
     parser.add_argument("--dev-lines", type=int, default=300)
     parser.add_argument("--dev-augment", default="fase5")
     parser.add_argument("--dev-drop-space-prob", type=float, default=0.5)
+    parser.add_argument("--dev-standard-prob", type=float, default=0.0,
+                        help="peluang ejaan baku di dev (src.train --standard-prob); samakan dengan training checkpoint")
     parser.add_argument("--extra-fonts", default="fonts/extra", help="ikut dipakai merender dev (seperti training)")
     parser.add_argument("--alphas", default="0,0.25,0.5,0.75,1,1.5")
     parser.add_argument("--betas", default="0,0.5,1,2")
@@ -115,7 +119,7 @@ def main() -> None:
     started = time.time()
 
     dev = synthetic_items(model, tokenizer, "val", args.dev_lines, fonts, args.dev_augment,
-                          args.dev_drop_space_prob, seed=4242)
+                          args.dev_drop_space_prob, seed=4242, standard_prob=args.dev_standard_prob)
     dev_greedy = decode(dev, tokenizer, greedy=True)
     grid = []
     for alpha, beta in itertools.product(map(float, args.alphas.split(",")), map(float, args.betas.split(","))):
@@ -124,7 +128,8 @@ def main() -> None:
         print(f"dev alpha {alpha:<4} beta {beta:<3} CER {grid[-1]['cer']:.4%}", flush=True)
     chosen = min(grid, key=lambda g: (g["cer"], g["alpha"], g["beta"]))
     dev_beam = decode(dev, tokenizer, lm, chosen["alpha"], chosen["beta"], args.beam_width)
-    report["dev"] = {"augment": args.dev_augment, "drop_space_prob": args.dev_drop_space_prob, "grid": grid,
+    report["dev"] = {"augment": args.dev_augment, "drop_space_prob": args.dev_drop_space_prob,
+                     "standard_prob": args.dev_standard_prob, "grid": grid,
                      "chosen": chosen, **compare(dev, dev_greedy, dev_beam)}
     print(f"dev: greedy {report['dev']['greedy_cer']:.4%} -> beam {report['dev']['beam_cer']:.4%} "
           f"(alpha {chosen['alpha']}, beta {chosen['beta']})", flush=True)

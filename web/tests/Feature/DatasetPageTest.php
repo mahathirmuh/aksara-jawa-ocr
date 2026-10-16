@@ -371,6 +371,30 @@ class DatasetPageTest extends TestCase
         $this->assertStringContainsString('pembuka baris adeg-adeg', $run);
         $this->assertStringNotContainsString('sisipan aksara langka', $run);
         MethodReport::query()->delete();
+        $this->assertStringNotContainsString('ejaan baku', $run);
+        $this->assertStringNotContainsString('muncul jauh lebih sering', $page->getContent());
+
+        // Ejaan baku saat render (fase 8): resep run menyebutnya, dan batasan aksara langka menyebut bahwa pa cerek, nga
+        // lelet, dan keret tidak lagi langka bagi run resmi. Kartu sebelum fase 8 tidak punya kuncinya (= mati).
+        $card = $this->card();
+        $card['usage']['train']['standard_prob'] = 0.5;
+        $card['lineage']['runs'][1]['standard_prob'] = 0.5;
+        $this->import($card);
+        $page = $this->get('/dataset')->assertOk()->assertSee('Aksara langka nyaris tidak terlihat saat training')
+            ->assertSee('rata-rata 5,9. Run resmi menulis ulang sebagian baris dengan ejaan baku saat render, jadi pa cerek, nga lelet, '
+                .'dan keret muncul jauh lebih sering daripada hitungan dari teks korpus ini.');
+        $this->assertSame('fase7_track resmi 1.500 48.000 100.000 48.000 10 augmentasi fase5 · spasi dibuang p 0,5 · jarak antar suku kata p 0,5 (hingga 0,3 em) · ejaan baku p 0,5',
+            $this->part($page->getContent(), 'data-run', 'fase7_track'));
+        $this->assertSame('fase6_ctrl 1.500 48.000 100.000 19.712 10 augmentasi fase5 · spasi dibuang p 0,5',
+            $this->part($page->getContent(), 'data-run', 'fase6_ctrl'));
+        // Hanya ejaan baku run RESMI yang menentukan kalimat batasan; run sebelumnya di rantai hanya resepnya.
+        $card['usage']['train']['standard_prob'] = 0.0;
+        $card['lineage']['runs'][1]['standard_prob'] = 0.0;
+        $card['lineage']['runs'][0]['standard_prob'] = 0.25;
+        $this->import($card);
+        $html = $this->get('/dataset')->assertOk()->assertDontSee('muncul jauh lebih sering')->getContent();
+        $this->assertStringEndsWith('· ejaan baku p 0,25', $this->part($html, 'data-run', 'fase6_ctrl'));
+        $this->assertStringNotContainsString('ejaan baku', $this->part($html, 'data-run', 'fase7_track'));
 
         // Data uji nyata yang bukan NusaAksara: kalimat "satu terbitan" (catatan khusus NusaAksara) tidak dipakai.
         $card = $this->card();
@@ -606,6 +630,12 @@ class DatasetPageTest extends TestCase
         }));
         $rejects('kunci lineage.runs.*.track_max harus bilangan yang tidak negatif', $changed(function (&$c) {
             $c['lineage']['runs'][1]['track_max'] = -0.3;
+        }));
+        $rejects('kunci lineage.runs.*.standard_prob harus bilangan dari 0 sampai 1', $changed(function (&$c) {
+            $c['lineage']['runs'][1]['standard_prob'] = 1.5;
+        }));
+        $rejects('kunci usage.train.standard_prob harus bilangan dari 0 sampai 1', $changed(function (&$c) {
+            $c['usage']['train']['standard_prob'] = 'separuh';
         }));
         // Objek bukan daftar, dan angka bukan teks.
         $rejects('kunci fonts harus daftar', $changed(function (&$c) {

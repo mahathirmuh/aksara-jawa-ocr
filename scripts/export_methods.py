@@ -79,6 +79,7 @@ from src.dataset import (  # noqa: E402
 )
 from src.evaluate import TARGETS  # noqa: E402
 from src.model import CRNN  # noqa: E402
+from src.spelling import RULE_NAMES  # noqa: E402
 from src.tokenizer import BLANK  # noqa: E402
 
 SCHEMA = 1
@@ -109,12 +110,19 @@ CONTROLS = {
     "fonts": {"fase5_fonts": "fase5_core"},
     "tracking": {"fase7_track": "fase7_ctrl"},
     "rare": {"fase7_track_rare": "fase7_track", "fase6_rare": "fase6_ctrl"},
+    "spelling": {"fase8_std": "fase8_ctrl"},
 }
-TREATMENTS = {"fonts": "font tambahan", "tracking": "jarak antar suku kata", "rare": "sisipan aksara langka"}
+TREATMENTS = {"fonts": "font tambahan", "tracking": "jarak antar suku kata", "rare": "sisipan aksara langka",
+              "spelling": "ejaan baku"}
 # Argumen src.train milik tiap perlakuan (boleh berbeda antara run perlakuan dan kontrolnya), dan argumen pelatihan
 # yang harus sama di keduanya di samping argumen data (`data_recipe`).
 TREATMENT_KEYS = {"fonts": ("extra_fonts",), "tracking": ("track_prob", "track_max"),
-                  "rare": ("rare_insert_prob", "rare_opener_prob", "rare_max_similarity", "rare_attach")}
+                  "rare": ("rare_insert_prob", "rare_opener_prob", "rare_max_similarity", "rare_attach"),
+                  "spelling": ("standard_prob",)}
+# Aturan ejaan baku src/spelling.py (nama di RULE_NAMES) dalam kata-kata kartu. Aturan baru tanpa kata di sini
+# menghentikan ekspor, supaya butir ejaan baku tidak menyebut daftar aturan yang sudah usang.
+SPELLING_WORDS = {"nya": "nya di depan ca/ja", "cerek": "pa cerek", "lelet": "nga lelet", "keret": "keret",
+                  "pangkat": "angka diapit pada pangkat"}
 # Termasuk bobot awal (`init`) dan cara melatih (packing LSTM, pemotongan gradien, ukuran model, pemecahan batch
 # lebar): kontrol yang berangkat dari bobot lain atau dilatih dengan cara lain bukan kontrol.
 TRAINING_KEYS = ("batch_size", "lr", "weight_decay", "steps", "init", "packed", "clip", "channels", "hidden",
@@ -280,6 +288,21 @@ class Evidence:
                 return None
         return report
 
+    def spelling(self, a: str, b: str) -> dict | None:
+        """Laporan scripts/eval_spelling.py real untuk pipeline A dan B (bentuk ejaan baku di baris nyata), dengan aturan
+        yang sama dengan `compare`: memang untuk keduanya, dan CER kedua sisinya sama dengan metrik manifest ini."""
+        path = self.root / "out/compare" / f"spelling_{a}_vs_{b}.json"
+        if not path.exists():
+            return None
+        report = read_json(path)
+        if report.get("a", {}).get("key") != a or report.get("b", {}).get("key") != b:
+            return None
+        for side, key in (("a", a), ("b", b)):
+            now, then = self.cer(self.SCOPE, key), report[side].get("cer")
+            if now is None or then is None or abs(then - now) > 1e-9:
+                return None
+        return report
+
     def g3_change(self, treated: str, control: str) -> tuple[str, str] | None:
         """Kalimat "G3 kontrol -> perlakuan (selisih; SK 95% per halaman)" dan berkas sumbernya."""
         after, before = self.cer(self.SCOPE, treated), self.cer(self.SCOPE, control)
@@ -346,12 +369,14 @@ def data_recipe(args: dict) -> dict:
         "seed": args.get("seed") or 0,
         "real_train": args.get("real_train") or "",
         "real_val": args.get("real_val") or "",
+        "standard_prob": args.get("standard_prob") or 0,
     }
 
 
 def is_treated(kind: str, recipe: dict) -> bool:
     """Apakah perlakuan `kind` hidup di resep data ini."""
     return {"fonts": bool(recipe["extra_fonts"]), "tracking": recipe["track_prob"] > 0,
+            "spelling": recipe["standard_prob"] > 0,
             "rare": recipe["rare_insert_prob"] > 0 or recipe["rare_opener_prob"] > 0}[kind]
 
 
@@ -753,6 +778,8 @@ def data_group(run: str, args: dict, fonts: dict, real: dict, evidence: Evidence
             [("Peluang", dec(args["track_prob"])), ("Jarak tambahan", f"0 sampai {dec(args.get('track_max') or 0)} em")],
             f"Terhadap run kontrol {control} (jumlah langkah sama, tanpa jarak): {change[0]}." if change else None,
             change[1] if change else None, files=["src/render.py", "src/dataset.py"]))
+    if args.get("standard_prob"):
+        methods.append(spelling_entry(run, args, evidence, root))
     if args.get("drop_space_prob"):
         # Spasi dibuang bila undiannya kena ATAU font terpilih berspasi terlalu sempit (src/dataset.py), jadi porsi
         # baris tanpa spasi lebih besar dari peluangnya: p + (1 - p) x porsi font berspasi sempit. Aturan font
@@ -830,6 +857,39 @@ def data_group(run: str, args: dict, fonts: dict, real: dict, evidence: Evidence
     return {"key": "data", "title": "Data latih sintetis", "intro": intro, "methods": methods}
 
 
+def spelling_entry(run: str, args: dict, evidence: Evidence, root: Path) -> dict:
+    """Butir ejaan baku (src/spelling.py, `--standard-prob`). Buktinya = titik akhir utama fase 8: bentuk ejaan baku di
+    baris nyata yang terbaca benar, run ini lawan run kontrolnya (scripts/eval_spelling.py real), hanya bila pasangan
+    kontrolnya sah (`control_run`) dan laporannya dihitung dari prediksi yang sama dengan manifest."""
+    unknown = [name for name in RULE_NAMES if name not in SPELLING_WORDS]
+    if unknown:
+        raise SystemExit(f"aturan ejaan baku {', '.join(unknown)} belum punya kata di SPELLING_WORDS "
+                         "(scripts/export_methods.py); perbarui butir ejaan baku")
+    control = control_run(root, "spelling", run)
+    report = evidence.spelling(pipeline_key(run) or "", pipeline_key(control) or "") if control else None
+    measured, source = None, None
+    if report and report["a"]["recall"] is not None and report["b"]["recall"] is not None:
+        a, b = report["a"], report["b"]
+        low, high = report["ci95_pages"]["recall"]
+        measured = (f"Terhadap run kontrol {control} (jumlah langkah sama, tanpa ejaan baku): dari {num(a['in_reference'])} "
+                    f"bentuk ejaan baku di {num(report['lines'])} baris nyata, yang terbaca benar naik dari "
+                    f"{pct(b['recall'], 1)} ke {pct(a['recall'], 1)} ({points(a['recall'] - b['recall'], 1)}; selang "
+                    f"kepercayaan 95% per halaman {interval(low, high, 1)})"
+                    + (f", dan {pct(a['precision'], 1)} dari keluarannya benar." if a["precision"] is not None else ".")
+                    ) if a["recall"] > b["recall"] else (
+                    f"Terhadap run kontrol {control} (jumlah langkah sama, tanpa ejaan baku): bentuk ejaan baku di baris "
+                    f"nyata yang terbaca benar {pct(b['recall'], 1)} lawan {pct(a['recall'], 1)}.")
+        source = relative(root / "out/compare" / f"spelling_{a['key']}_vs_{b['key']}.json", root)
+    return entry(
+        "spelling", "Ejaan baku pada baris latih", "data", "official",
+        "Korpus latih ditulis dengan konvensi alat transliterasi, sedangkan cetakan memakai ejaan baku. Sebagian baris "
+        "ditulis ulang dengan ejaan baku sebelum dirender, jadi citra dan labelnya tetap sama; font yang menggambar kedua "
+        "ejaan persis sama selalu memakai ejaan baku, supaya satu gambar tidak berlabel dua.",
+        [("Peluang", dec(args["standard_prob"])), ("Aturan", ", ".join(SPELLING_WORDS[name] for name in RULE_NAMES))],
+        measured, source, files=["src/spelling.py", "src/dataset.py"],
+        note="Bagian uji korpus (gerbang G1 dan G2) tetap berejaan korpus, jadi kedua gerbang itu tidak mengukur ejaan baku.")
+
+
 def recipe_changes(links: list[dict], counts: list[int]) -> str:
     """Apa yang berubah di argumen data tiap run dibanding run sebelumnya, dari argumen di checkpoint-nya (`data_recipe`,
     dibandingkan nilai demi nilai). `counts` = jumlah font latih tiap run. Yang tidak tercatat di argumen (mis. aturan
@@ -857,6 +917,9 @@ def recipe_changes(links: list[dict], counts: list[int]) -> str:
             was, now = is_treated("rare", old), is_treated("rare", new)
             changed.append("tanpa sisipan aksara langka" if not now else "sisipan aksara langka" if not was
                            else "sisipan aksara langka dengan pengaturan lain")
+        if new["standard_prob"] != old["standard_prob"]:
+            changed.append("tanpa ejaan baku" if not new["standard_prob"] else f"ejaan baku p {dec(new['standard_prob'])}"
+                           + (f" (dari p {dec(old['standard_prob'])})" if old["standard_prob"] else ""))
         if new["train_lines"] != old["train_lines"]:
             changed.append(f"kumpulan {num(new['train_lines'])} baris (dari {num(old['train_lines'])})")
         if new["seed"] != old["seed"]:

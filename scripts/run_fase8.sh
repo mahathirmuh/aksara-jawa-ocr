@@ -45,7 +45,9 @@ note "== rantai fase8 $(now)"
 wait_no_training
 
 train_to_end fase8_std "${STANDARD[@]}" || { note "== fase8_std tidak selesai; rantai berhenti $(now)"; exit 1; }
-evaluate fase8_std
+# Rantai yang dijalankan ulang sesudah terputus di run kontrol (2026-10-13 18:50, laptop mati): fase8_std sudah
+# dievaluasi, dan menyalin ulang last_snapshot.pt akan membuatnya lebih baru dari laporan-laporannya.
+cmp -s out/checkpoints/fase8_std/last.pt out/checkpoints/fase8_std/last_snapshot.pt || evaluate fase8_std
 
 # Langkah tempat fase8_std dimulai ulang dari checkpoint = event "start" dengan langkah > 0 (kosong bila tidak ada).
 bounds=$(.venv/Scripts/python.exe -c "
