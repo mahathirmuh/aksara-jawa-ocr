@@ -30,10 +30,10 @@ from export_results import (  # noqa: E402
     run_options,
 )
 
-RARE, CTRL, TRACK, TRACK_RARE, CTRL7, STD8, CTRL8, SLANT9, CTRL9, RARE10, CTRL10 = OPTIONAL_CHECKPOINTS
+RARE, CTRL, TRACK, TRACK_RARE, CTRL7, STD8, CTRL8, SLANT9, CTRL9, RARE10, CTRL10, NEIGHBOR11, CTRL11 = OPTIONAL_CHECKPOINTS
 OPTIONAL_KEYS = ["crnn_fase6_rare", "crnn_fase6_ctrl", "crnn_fase7_track", "crnn_fase7_track_rare", "crnn_fase7_ctrl",
                  "crnn_fase8_std", "crnn_fase8_ctrl", "crnn_fase9_slant", "crnn_fase9_ctrl", "crnn_fase10_rare",
-                 "crnn_fase10_ctrl"]
+                 "crnn_fase10_ctrl", "crnn_fase11_neighbor", "crnn_fase11_ctrl"]
 RARE_CONFIG = ("crnn:fase6_rare@1500 (lanjutan fase5_fonts@1298) · 10 font · aug fase5 · "
                "+ aksara langka (sisip 0,3 · adeg-adeg 0,15) · greedy")
 CTRL_CONFIG = ("crnn:fase6_ctrl@1500 (lanjutan fase5_fonts@1298) · 10 font · aug fase5 · "
@@ -750,3 +750,27 @@ def test_neighbor_fragments_are_a_run_option_that_older_specs_forbid():
     args = {**fase9_args("fase10_ctrl"), "neighbor_prob": 0.25}  # beda dari jarak (0,5): nilainya tidak tertukar
     check_optional_run(spec, 1500, args)
     assert optional_pipeline(spec, 1500, args, "")["config"] == "crnn:fase10_ctrl@1500 · pecahan p 0,25 · greedy"
+
+
+def test_fase11_runs_are_told_apart_by_the_neighbor_fragments():
+    # Fase 11: resep fase9_ctrl (dasar dipilih sesudah fase 10) + pecahan baris tetangga; kontrolnya = resep fase10_ctrl.
+    neighbor = {**fase9_args("fase11_neighbor"), "neighbor_prob": 0.25}  # beda dari jarak (0,5): nilainya tidak tertukar
+    check_optional_run(NEIGHBOR11, 1500, neighbor)
+    check_optional_run(CTRL11, 1500, fase9_args("fase11_ctrl"))
+    assert optional_pipeline(NEIGHBOR11, 1500, neighbor, "fase9_ctrl@1500")["config"] == (
+        "crnn:fase11_neighbor@1500 (lanjutan fase9_ctrl@1500) · 9 font · aug fase5 · jarak p 0,5 hingga 0,3 em · ejaan baku "
+        "p 0,5 · pecahan baris tetangga p 0,25 · perbaikan font · greedy")
+    assert "tanpa pecahan baris tetangga (pembanding) · perbaikan font" in optional_pipeline(
+        CTRL11, 1500, fase9_args("fase11_ctrl"), "")["config"]
+    assert all(len(optional_pipeline(spec, 1500, args, "fase9_ctrl@1500")["config"]) <= MAX_CONFIG
+               for spec, args in ((NEIGHBOR11, neighbor), (CTRL11, fase9_args("fase11_ctrl"))))
+    rare = {**neighbor, "rare_insert_prob": 0.3, "rare_opener_prob": 0.15, "rare_max_similarity": 0.9, "rare_attach": True}
+    for spec, args, message in (
+            (NEIGHBOR11, fase9_args("fase11_neighbor"), "crnn_fase11_neighbor: run pecahan baris tetangga, tetapi neighbor_prob = 0"),
+            (CTRL11, {**neighbor, "run": "fase11_ctrl"}, "crnn_fase11_ctrl: run tanpa pecahan baris tetangga, tetapi neighbor_prob = 0.25"),
+            (NEIGHBOR11, rare, "crnn_fase11_neighbor: run jarak antar-aksara harus tanpa aksara langka"),
+            (NEIGHBOR11, {**neighbor, "slant_prob": 0.5}, "crnn_fase11_neighbor: run tanpa miring, tetapi slant_prob = 0.5"),
+            (CTRL11, fase9_args("fase11_ctrl", fixes=False), "font_fixes = False, padahal run ini dengan perbaikan font"),
+            (CTRL11, fase9_args("fase11_ctrl", standard=0.0), "run ejaan baku, tetapi standard_prob = 0")):
+        with pytest.raises(SystemExit, match=message):
+            check_optional_run(spec, 1500, args)

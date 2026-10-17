@@ -496,6 +496,50 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   boleh turun nyata), evaluasi sintetis aksara langka (`eval_rare.py`, javatext: teks biasa tidak boleh naik di luar ~0,1
   poin); (c) tulisan tangan dilaporkan terpisah, G3 keseluruhan dengan SK per halaman sebagai arah; (d) dasar berikutnya dan
   usulan angka resmi dipilih dari (a)-(b), bukan dari G3 atau tulisan tangan; mengganti angka resmi tetap keputusan user.
+  **Hasil fase 10 (2026-10-17 15:21; `out/compare/crnn_fase10_rare_vs_crnn_fase10_ctrl_cetak.md`,
+  `slant_crnn_fase10_rare_vs_crnn_fase10_ctrl.json`, `spelling_crnn_fase10_rare_vs_crnn_fase10_ctrl.json`).** `fase10_rare`
+  dievaluasi 09:21 (val bersih 0,131%; dihentikan Claude sesudah last.pt langkah 1.000 karena charger tercabut, dilanjutkan
+  07:18): G3 19,69% (pad 0,06: 18,65%), q100 G1 0,32%, G2 0,70%. `fase10_ctrl` selesai 14:40 (val bersih 0,141%; titik
+  lanjut 1.000 ditiru; charger tercabut lagi 13:59-15:10, training tetap selesai): G3 21,48% (pad 0,06: 19,53%), q100 G1
+  0,29%, G2 0,63%. (a) Titik akhir utama: 308 baris cetak 12,29% lawan 12,73%, **−0,44 [−1,00; +0,07] → TIDAK memenuhi
+  aturan** (temuan fase 7 −0,80 [−1,33; −0,28] tidak terulang; per halaman 45 lebih baik, 22 lebih buruk, 5 sama; spasi
+  dibuang −0,49 [−1,02; +0,01]). (b) Efek samping di baris cetak: recall 44 codepoint langka 72,8% lawan 14,2% (kontrol
+  hanya pa cerek, nga lelet, keret dari ejaan baku), murda 53,7% lawan 0 (presisi 80,2%), adeg-adeg pembuka 64/69 lawan 0;
+  presisi aksara langka 48,1% (405 keluaran; da mahaprana 71 keluaran berpresisi 19,7%, pada isen-isen 33 palsu), pembuka
+  palsu 10/239 (4,2%); **CER 133 baris cetak tanpa aksara langka 12,11% lawan 10,59%, +1,52 [+0,68; +2,33]** (fase 7: +0,87;
+  efek samping nyata dan lebih besar); q100 G1/G2 di dalam 1 poin; bentuk ejaan baku 174/212 lawan 164/212 (+4,7 [+1,4;
+  +8,1], tidak turun). (c) Tulisan tangan 26,79% lawan 29,88% (−3,09 [−4,75; −1,80]); G3 −1,80 [−2,61; −1,03] (arah saja:
+  penurunan G3 terutama dari tulisan tangan). Tambahan 1.500 langkah TANPA sisipan tidak menolong: `fase10_ctrl` −
+  `fase9_ctrl` cetak +0,39 [+0,00; +0,85], tulisan tangan +1,92 [+0,05; +3,98]; `fase10_rare` − `fase9_ctrl` cetak −0,05
+  [−0,56; +0,50]. (d) Menurut aturan: sisipan aksara langka TIDAK dipakai untuk model cetak (manfaat CER tidak terbukti,
+  efek samping pada teks umum nyata). Akibatnya model tanpa sisipan tidak membaca murda dan adeg-adeg sama sekali; bila
+  kemampuan itu dianggap lebih penting daripada CER, itu keputusan user.
+  **Dasar fase 11 = `fase9_ctrl`** (dipilih Claude SESUDAH melihat angka fase 10, bukan aturan yang ditetapkan sebelumnya):
+  resep tanpa sisipan, dan `fase10_ctrl` tidak lebih baik dari induknya di baris cetak (+0,39 [+0,00; +0,85]). Dengan dasar
+  itu `fase11_ctrl` mengulang resep `fase10_ctrl` persis (bobot awal, argumen, seed, urutan batch, berhenti dan lanjut di
+  langkah 1.000); bedanya hanya acak render dan perangkat, jadi selisih keduanya = ukuran pertama derau antar-run.
+  **Fase 11 (pecahan baris tetangga; `scripts/run_fase11.sh fase9_ctrl`, `scripts/after_fase11.sh fase9_ctrl`, log
+  `out/fase11_chain.log`):** `fase11_neighbor` = `fase9_ctrl` + 1.500 langkah, resep `fase9_ctrl` (jarak 0,5 / 0,3, ejaan
+  baku 0,5, augmentasi `fase5`, drop-space 0,5, `--font-fixes`) + `--neighbor-prob 0.5` (`src/neighbors.py` lewat
+  `SyntheticLines`: pita bawah satu baris latih lain ditempel di atas citra dan pita atas baris latih lain di bawahnya, font
+  dan ukuran sama, tanpa spasi; tiap sisi kosong dengan peluang 0,3; pita 5-25% tinggi tinta baris tetangga, jarak kosong
+  2-15% tinggi tinta baris utama; diundi sesudah semua undian lain dan sebelum augmentasi, jadi `tight` memotong rapat
+  sampai pecahan menyentuh tepi; peluang 0 tidak mengonsumsi angka acak); `fase11_ctrl` = sama tanpa pecahan, titik lanjut
+  ditiru; kedua lengan berhenti dan lanjut di langkah 1.000. Peluang 0,5 mengikuti perlakuan lain (tidak disetel); rentang
+  pita dan jarak dari lembar kontak potongan cetak nyata (data uji, dilihat, bukan disetel pada angka).
+  **Aturan analisis fase 11, ditetapkan 2026-10-17 SEBELUM ada angka:** (a) titik akhir utama = CER **308 baris cetak**
+  `fase11_neighbor` − `fase11_ctrl` (`compare_runs.py --kind cetak`, `eval_slant.py real`), "membantu" hanya bila SK 95%
+  bootstrap per halaman di bawah 0; (b) efek samping: q100 G1/G2 (di dalam ~1 poin), bentuk ejaan baku (`eval_spelling.py
+  real`, tidak boleh turun nyata), sintetis javatext 300 baris val (`scripts/eval_neighbor.py synthetic`, citra sama untuk
+  semua checkpoint): CER kondisi "bersih" dan "bersih rapat" tidak boleh naik di luar ~0,1 poin; (c) mekanisme, dilaporkan
+  dengan SK per halaman (`eval_neighbor.py real`, baris cetak): tanda atas dan tanda bawah yang DISISIPKAN keluaran per baris
+  (diharapkan turun), CER baris berpecahan (>= 2 komponen tinta yang menyentuh tepi atas/bawah dan lebih pendek dari 22%
+  tinggi potongan; ukuran kasar yang ikut menghitung tanda baris itu sendiri) lawan baris lain, dan CER sintetis kondisi
+  "pecahan rapat" (diharapkan turun); (d) tulisan tangan dan G3 keseluruhan dilaporkan terpisah sebagai arah; margin 0,06
+  dilaporkan seperti biasa; (e) derau antar-run: `fase11_ctrl` − `fase10_ctrl` (resep sama) dilaporkan dengan SK per
+  halaman untuk baris cetak dan semua baris; satu pasang ulangan hanya satu tarikan derau, jadi bila besarnya sebanding
+  dengan efek (a), kesimpulan (a) disebut rapuh; (f) dasar berikutnya dan usulan angka resmi dipilih dari (a)-(b), bukan
+  dari G3 atau tulisan tangan; mengganti angka resmi tetap keputusan user.
 - **OCR + VLM dan web UI (keputusan user 2026-09-24).**
   - **Dua pembaca, satu hakim:** CRNN tetap pembaca utama (offline, cepat) dan "hakim piksel"; VLM
     fine-tune = pembaca kedua yang menyumbang kandidat. Semua kandidat (greedy, N-best beam, VLM, LLM)
@@ -1179,7 +1223,7 @@ Detail lengkap di PLAN.md §7.
 | 3 | `src/dataset.py` + test shape | assert `model(dummy).shape[1] == W // DOWNSAMPLE` | **lolos**: 0/300 melanggar T≥1.5L |
 | 4 | `src/model.py`, `train.py`, `decode.py`, `infer.py` | 4a: CER<1% @32 → 4b: **CER<2% synthetic bersih** | 4a **lolos**: CER inference satu baris 0,07% (31/32 persis) dalam 375 langkah; 4b: berhenti di langkah 1500 karena val CER 0,376% < `--target-cer 0.005` (val = teks baru, font training); checkpoint tetap `out/checkpoints/base/best_4b_step1500.pt`; evaluasi test/G1–G3: `out/eval/base_*.json` |
 | 5 | `src/augment.py`, `scripts/ablation.py` | CER<5% synthetic augmentasi berat | tes cepat 100 baris (bukan angka resmi) `fase5_quick` langkah 500: G1 0,79%, G2 2,88%, G3 76,0% (spasi dibuang 57,5%); run 1500 langkah crash OOM di ~950; `fase5_fonts` (10 font: 2 inti + 8 tambahan) dilanjutkan dari langkah 500, berhenti di 1298 (batas 3 jam): G1 0,41%, G2 1,44%, **G3 39,1%** (margin 0,06: 35,2%; spasi dibuang 22,9%); **G3 resmi 745 baris: 37,2%** (margin 0,06: 34,9%; spasi dibuang 25,2% / 23,1%); pembanding font inti `fase5_core` (init, augmentasi, jadwal LR & langkah sama lewat `--steps 1500 --stop-step 1298`): G1 1,64%, G2 1,82%, G3 745 baris 66,6% (margin 0,06: 63,3%) → **font tambahan menurunkan G3 ~29 poin**, langkah tambahan saja ~8 poin (G3 q100 76,0% → 67,7%); **evaluasi resmi `fase5_fonts` 10.000 baris javatext: G1 0,34%, G2 2,01% → gerbang Fase 5 (G2 < 5%) LOLOS** (`out/eval/fonts_G1_10k.json`, `fonts_G2_10k.json`); **ablasi selesai 2026-09-15** (`out/ablation.md`; 12 run kumulatif dari 4b, 600 langkah, 10 font, drop-space 0,5, satu seed): val berat 65,1% → 12,0% lewat 7 op preset (blur −21, noise −10, rotate −7,5), lalu naik ke 19,3% dengan op pindaian; **G3 745 baris 75,1% → 44,1%** (tanpa spasi 69,8% → 30,0%): op preset hampir datar kecuali contrast −14,8; op pindaian **tight −14,6, stroke −10,5**, binarize −2,4, speckle −1,2; val bersih 0,34% → 0,43%. Batasan: G3 = test set (bias seleksi), satu seed (rotate +12,8 menunjukkan fluktuasi antar-run bisa besar), urutan kumulatif mencampur interaksi |
-| 6 | `src/real.py`, `--real-train` | CER<8% pada ≥200 baris nyata | test: `data/real/nusaaksara/labels.tsv` 745 baris (lisensi **non-komersial**, HANYA test); fine-tune: 43 baris papan Commons menunggu verifikasi pembaca aksara (`out/verifikasi_aksara.html` → `scripts/import_review.py`); **belum lolos**: terbaik sejauh ini `fase8_std` (masih sintetis saja; `fase7_track` + 1.500 langkah dengan ejaan baku di separuh baris) G3 **20,35%** (beam + LM berejaan baku 18,02%; kontrol `fase8_ctrl` 20,81%); sebelumnya `fase7_track` (`fase6_ctrl` + 1.500 langkah dengan jarak antar suku kata acak) G3 **21,46%** (pad 0,06: 19,99%; spasi dibuang 20,99%) dan `fase7_track_rare` 21,18% (tidak berbeda nyata); kontrol `fase7_ctrl` (langkah sama tanpa jarak) 30,75% → efek jarak −9,29 poin (SK halaman [−11,92; −6,83]); sebelumnya `fase6_ctrl` 32,17%, `fase6_rare` 34,06%, beam+LM atas `fase5_fonts` 33,83%. **Angka resmi sejak 2026-10-16 = `fase8_std`** (keputusan user): G1 0,24%, G2 0,98% (10.000 baris javatext), G3 20,35%; sebelumnya `fase7_track` 0,27% / 1,20% / 21,46% (2026-10-04 sampai 2026-10-16) dan `fase5_fonts` 0,34% / 2,01% / 37,25%. Fase 9 (render miring italic, `scripts/run_fase9.sh`) dijalankan 2026-10-16 malam |
+| 6 | `src/real.py`, `--real-train` | CER<8% pada ≥200 baris nyata | test: `data/real/nusaaksara/labels.tsv` 745 baris (lisensi **non-komersial**, HANYA test); fine-tune: 43 baris papan Commons menunggu verifikasi pembaca aksara (`out/verifikasi_aksara.html` → `scripts/import_review.py`); **belum lolos**: terbaik sejauh ini `fase8_std` (masih sintetis saja; `fase7_track` + 1.500 langkah dengan ejaan baku di separuh baris) G3 **20,35%** (beam + LM berejaan baku 18,02%; kontrol `fase8_ctrl` 20,81%); sebelumnya `fase7_track` (`fase6_ctrl` + 1.500 langkah dengan jarak antar suku kata acak) G3 **21,46%** (pad 0,06: 19,99%; spasi dibuang 20,99%) dan `fase7_track_rare` 21,18% (tidak berbeda nyata); kontrol `fase7_ctrl` (langkah sama tanpa jarak) 30,75% → efek jarak −9,29 poin (SK halaman [−11,92; −6,83]); sebelumnya `fase6_ctrl` 32,17%, `fase6_rare` 34,06%, beam+LM atas `fase5_fonts` 33,83%. **Angka resmi sejak 2026-10-16 = `fase8_std`** (keputusan user): G1 0,24%, G2 0,98% (10.000 baris javatext), G3 20,35%; sebelumnya `fase7_track` 0,27% / 1,20% / 21,46% (2026-10-04 sampai 2026-10-16) dan `fase5_fonts` 0,34% / 2,01% / 37,25%. Fase 9 (render miring italic, `scripts/run_fase9.sh`) dijalankan 2026-10-16 malam; fase 10 (sisipan aksara langka di atas `fase9_ctrl`) 2026-10-17, tidak memenuhi aturan; fase 11 (pecahan baris tetangga) menyusul, lihat catatan fase 10 dan 11 |
 
 **Fase 0 tidak bisa diotomatiskan.** Render PNG-nya, lalu **minta user membuka dan
 memeriksa sendiri**. Jangan menyatakan Fase 0 lulus berdasarkan "tidak ada error".

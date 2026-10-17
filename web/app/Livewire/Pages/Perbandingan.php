@@ -32,6 +32,8 @@ class Perbandingan extends Component
         'crnn_fase9_ctrl' => 'pembanding: langkah dan perbaikan font sama, tanpa render miring',
         'crnn_fase10_rare' => 'fase9_ctrl + 1.500 langkah dengan sisipan aksara langka tersaring',
         'crnn_fase10_ctrl' => 'pembanding: langkah sama tanpa sisipan aksara langka',
+        'crnn_fase11_neighbor' => 'fase9_ctrl + 1.500 langkah dengan pecahan baris tetangga di tepi atas dan bawah',
+        'crnn_fase11_ctrl' => 'pembanding: langkah sama tanpa pecahan baris tetangga (resep fase10_ctrl diulang)',
     ];
 
     public function render()
