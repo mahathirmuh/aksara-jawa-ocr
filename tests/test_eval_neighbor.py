@@ -37,6 +37,10 @@ def test_edge_fragments_counts_short_components_touching_an_edge():
     mask[0:21, 120:123] = True  # 21% dari 100: masih pecahan
     mask[0:23, 140:143] = True  # 23%: bukan
     assert en.edge_fragments(mask) == 4
+    # Dua potong yang hanya bersentuhan sudut = satu komponen (8-tetangga), tingginya 30%: bukan pecahan.
+    mask[0:10, 160:163] = True
+    mask[10:30, 163:166] = True
+    assert en.edge_fragments(mask) == 4
 
 
 def test_tight_crops_to_the_ink_box():
@@ -47,46 +51,52 @@ def test_tight_crops_to_the_ink_box():
     assert en.tight(blank).size == (50, 30)
 
 
-def _line_image(fragments: bool) -> Image.Image:
+def _line_image(fragments: int) -> Image.Image:
     img = Image.new("L", (200, 60), 255)
     draw = ImageDraw.Draw(img)
     draw.rectangle((10, 15, 189, 44), fill=0)
-    if fragments:
-        draw.rectangle((20, 0, 24, 5), fill=0)
-        draw.rectangle((60, 0, 70, 3), fill=0)
+    for x in (20, 60)[:fragments]:  # pecahan pendek di tepi atas
+        draw.rectangle((x, 0, x + 6, 4), fill=0)
     return img
 
 
 def test_real_report_on_printed_lines_without_label_text(tmp_path, monkeypatch):
     root = tmp_path
     (root / "img").mkdir()
-    for name, frag in (("a.png", True), ("b.png", False), ("c.png", True)):
+    for name, frag in (("a.png", 2), ("b.png", 0), ("c.png", 2), ("d.png", 1)):
         _line_image(frag).save(root / "img" / name)
     monkeypatch.setattr(en, "ROOT", root)
-    refs = {"a.png": "ꦏꦭ", "b.png": "ꦠꦤ", "c.png": "ꦧꦝ"}
-    pages = {"a.png": "nusaaksara_hal_0", "b.png": "nusaaksara_hal_2", "c.png": "nusaaksara_hal_1"}  # hal 1 = tulisan tangan
+    refs = {"a.png": "ꦏꦭ", "b.png": "ꦠꦤ", "c.png": "ꦧꦝ", "d.png": "ꦩꦤ"}
+    pages = {"a.png": "nusaaksara_hal_0", "b.png": "nusaaksara_hal_2", "c.png": "nusaaksara_hal_1",  # hal 1 = tulisan tangan
+             "d.png": "nusaaksara_hal_3"}
     results = root / "results"
     results.mkdir()
     (results / "lines.jsonl").write_text("".join(
         json.dumps({"id": k, "image": f"img/{k}", "reference": v, "source_id": pages[k]}) + "\n"
         for k, v in refs.items()), encoding="utf-8")
-    preds = {"x": {"a.png": "ꦏꦭ", "b.png": "ꦠꦤ", "c.png": "ꦧ"}, "y": {"a.png": "ꦏꦁꦭ", "b.png": "ꦠꦤꦸ", "c.png": ""}}
+    preds = {"x": {"a.png": "ꦏꦭ", "b.png": "ꦠꦤ", "c.png": "ꦧ", "d.png": "ꦩꦤ"},
+             "y": {"a.png": "ꦏꦁꦭ", "b.png": "ꦠꦤꦸꦸ", "c.png": "", "d.png": "ꦩꦤ"}}
     (results / "predictions.jsonl").write_text("".join(
         json.dumps({"line": line, "pipeline": key, "text": text}) + "\n" for key, rows in preds.items() for line, text in rows.items()),
         encoding="utf-8")
     report = en.real("x", "y", results, tmp_path / "out", resamples=200)
     g = report["groups"]
-    assert report["lines"] == 2 and report["kind"] == "cetak"  # baris tulisan tangan tidak dihitung
-    assert (g["cetak"]["chars"], g["cetak"]["cer_a"], g["cetak"]["cer_b"]) == (4, 0, pytest.approx(2 / 4))
+    assert report["lines"] == 3 and report["kind"] == "cetak"  # baris tulisan tangan tidak dihitung
+    assert (g["cetak"]["chars"], g["cetak"]["cer_a"], g["cetak"]["cer_b"]) == (6, 0, pytest.approx(3 / 6))
+    # Berpecahan = paling sedikit dua komponen pendek di tepi (d.png hanya satu).
     assert (g["cetak berpecahan"]["lines"], g["cetak berpecahan"]["cer_b"]) == (1, pytest.approx(1 / 2))
-    assert (g["cetak tanpa pecahan"]["lines"], g["cetak tanpa pecahan"]["pages"]) == (1, 1)
+    assert (g["cetak tanpa pecahan"]["lines"], g["cetak tanpa pecahan"]["pages"], g["cetak tanpa pecahan"]["cer_b"]) == (
+        2, 2, pytest.approx(2 / 4))
     marks = report["inserted_marks"]
-    assert (marks["tanda atas"]["total_a"], marks["tanda atas"]["total_b"], marks["tanda atas"]["b"]) == (0, 1, 0.5)
-    assert (marks["tanda bawah"]["total_a"], marks["tanda bawah"]["total_b"]) == (0, 1)
+    assert (marks["tanda atas"]["total_a"], marks["tanda atas"]["total_b"], marks["tanda atas"]["b"]) == (0, 1, pytest.approx(1 / 3))
+    assert (marks["tanda bawah"]["total_a"], marks["tanda bawah"]["total_b"], marks["tanda bawah"]["b"]) == (0, 2, pytest.approx(2 / 3))
     ci = report["ci95_pages"]
-    assert ci["cetak"] == [pytest.approx(-0.5)] * 2 and ci["pages"] == 2
-    low, high = ci["sisipan tanda atas per baris"]
-    assert -1 <= low <= high <= 0
+    assert ci["pages"] == 3 and ci["cetak berpecahan"] == [pytest.approx(-0.5)] * 2
+    assert ci["cetak tanpa pecahan"] == [pytest.approx(-1.0), pytest.approx(0.0)]
+    low, high = ci["cetak"]
+    assert -1.0 <= low < high <= 0
+    low, high = ci["sisipan tanda bawah per baris"]
+    assert -2 <= low < high <= 0
     written = (tmp_path / "out" / "neighbor_x_vs_y.json").read_text(encoding="utf-8")
     assert not any(ref in written for ref in refs.values())
     with pytest.raises(SystemExit, match="pipeline z tidak punya prediksi"):
