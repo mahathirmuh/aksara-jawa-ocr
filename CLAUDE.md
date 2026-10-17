@@ -575,10 +575,15 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   **Putaran sintetis dihentikan (2026-10-18):** fase 9-11 menggeser CER cetak paling banyak ~0,5 poin, dan tambahan langkah
   tidak menolong. Calon angka resmi = `fase9_ctrl` (cetak 12,34%, G3 20,31%), tetapi terhadap resmi `fase8_std` (cetak
   12,63%, G3 20,35%) tidak berbeda nyata: cetak −0,29 [−0,93; +0,28], semua −0,03 [−0,59; +0,48]; kelebihannya terutama
-  data latih yang lebih bersih (`--font-fixes`). Evaluasi G1/G2 10.000 baris dan beam + LM (kedua model bahasa, dev dari
-  resep checkpoint) untuk `fase9_ctrl` dijalankan tanpa mengganti angka resmi (log `out/candidate_eval.log`; nama laporan
-  sama dengan `make_official.sh`, jadi skrip itu melewatinya); pergantian tetap keputusan user. Tuas berikutnya butuh data
-  cetak nyata untuk latihan (43 baris Commons menunggu pembaca aksara) atau keputusan user.
+  data latih yang lebih bersih (`--font-fixes`). **Evaluasi calon** (2026-10-18 01:31-02:21, `out/candidate_eval.log`,
+  tanpa mengganti angka resmi; nama laporan sama dengan `make_official.sh`, jadi skrip itu melewatinya): **G1 0,233%**
+  (resmi 0,235%), **G2 0,719%** (resmi 0,977%), G3 20,31% (resmi 20,35%); beam + LM (`out/beam/fase9_ctrl_o5*.json`, dev
+  300 baris dirender dengan resep checkpoint itu): model bahasa berejaan baku menang di dev (greedy 1,28% → 1,00%, α 0,25,
+  β 0,5; model bahasa lama 1,12%), NusaAksara 20,31% → **17,68%** (resmi 18,02%; 329 baris membaik, 84 memburuk), render
+  bersih javatext 0,22% → 0,18%. Pergantian tetap keputusan user; bila disetujui: `OFFICIAL_RUN` dan `DEFAULT_CHECKPOINT`
+  = `fase9_ctrl`, `src/serve.py` α 0,25 / β 0,5 / model bahasa `o5_n300000_ds0.5_std0.5.pkl`, kasus `fase9_ctrl` di
+  `pairs()` `make_official.sh`, lalu `bash scripts/make_official.sh fase9_ctrl`. Tuas berikutnya butuh data cetak nyata
+  untuk latihan (43 baris Commons menunggu pembaca aksara) atau keputusan user.
 - **OCR + VLM dan web UI (keputusan user 2026-09-24).**
   - **Dua pembaca, satu hakim:** CRNN tetap pembaca utama (offline, cepat) dan "hakim piksel"; VLM
     fine-tune = pembaca kedua yang menyumbang kandidat. Semua kandidat (greedy, N-best beam, VLM, LLM)
