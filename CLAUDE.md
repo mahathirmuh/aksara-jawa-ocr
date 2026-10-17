@@ -508,7 +508,10 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   presisi aksara langka 48,1% (405 keluaran; da mahaprana 71 keluaran berpresisi 19,7%, pada isen-isen 33 palsu), pembuka
   palsu 10/239 (4,2%); **CER 133 baris cetak tanpa aksara langka 12,11% lawan 10,59%, +1,52 [+0,68; +2,33]** (fase 7: +0,87;
   efek samping nyata dan lebih besar); q100 G1/G2 di dalam 1 poin; bentuk ejaan baku 174/212 lawan 164/212 (+4,7 [+1,4;
-  +8,1], tidak turun). (c) Tulisan tangan 26,79% lawan 29,88% (−3,09 [−4,75; −1,80]); G3 −1,80 [−2,61; −1,03] (arah saja:
+  +8,1], tidak turun); evaluasi sintetis aksara langka (`out/compare/fase10/rare_synthetic.md`, javatext, 2.000 baris test):
+  teks biasa 0,27% lawan 0,27% (+0,00 [−0,02; +0,03]: tanpa efek samping di sintetis), kondisi bersisipan recall 44
+  codepoint 82,6% lawan 7,0% dengan presisi 92,8%, murda 82,7%, pembuka 100%; seperti fase 7, keluaran palsu hanya muncul
+  di cetakan nyata (celah bentuk huruf). (c) Tulisan tangan 26,79% lawan 29,88% (−3,09 [−4,75; −1,80]); G3 −1,80 [−2,61; −1,03] (arah saja:
   penurunan G3 terutama dari tulisan tangan). Tambahan 1.500 langkah TANPA sisipan tidak menolong: `fase10_ctrl` −
   `fase9_ctrl` cetak +0,39 [+0,00; +0,85], tulisan tangan +1,92 [+0,05; +3,98]; `fase10_rare` − `fase9_ctrl` cetak −0,05
   [−0,56; +0,50]. (d) Menurut aturan: sisipan aksara langka TIDAK dipakai untuk model cetak (manfaat CER tidak terbukti,
@@ -527,6 +530,13 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   sampai pecahan menyentuh tepi; peluang 0 tidak mengonsumsi angka acak); `fase11_ctrl` = sama tanpa pecahan, titik lanjut
   ditiru; kedua lengan berhenti dan lanjut di langkah 1.000. Peluang 0,5 mengikuti perlakuan lain (tidak disetel); rentang
   pita dan jarak dari lembar kontak potongan cetak nyata (data uji, dilihat, bukan disetel pada angka).
+  Kode (2026-10-17 16:30, sesudah `after_fase10.sh` selesai): `SyntheticLines(neighbor_prob)` dan `src.train
+  --neighbor-prob`; `tests/test_neighbor_option.py` memeriksa bahwa semua opsi bernilai 0 tidak memanggil random() sama
+  sekali (perbandingan dua dataset tidak bisa menangkap undian yang selalu terjadi di keduanya), pecahan ada di atas dan di
+  bawah pita tinta baris utama yang tetap utuh, baris tetangga diundi dari kumpulan baris latih tanpa spasi dengan font dan
+  ukuran baris utama, dan validasi tidak berubah. 10 mutan terhadap kode itu dan 22 mutan terhadap
+  `scripts/eval_neighbor.py` semuanya mati (dua yang lolos dari versi pertama test melahirkan dua test terakhir); 409 test
+  Python lolos.
   **Aturan analisis fase 11, ditetapkan 2026-10-17 SEBELUM ada angka:** (a) titik akhir utama = CER **308 baris cetak**
   `fase11_neighbor` − `fase11_ctrl` (`compare_runs.py --kind cetak`, `eval_slant.py real`), "membantu" hanya bila SK 95%
   bootstrap per halaman di bawah 0; (b) efek samping: q100 G1/G2 (di dalam ~1 poin), bentuk ejaan baku (`eval_spelling.py
@@ -941,7 +951,7 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     `phpunit.xml` memaksa SQLite in-memory (`force="true"`, jadi `DB_*` yang tertinggal di shell diabaikan) dan
     `tests/TestCase.php::createApplication` menolak database bernama `its_aksara` sebelum migrasi. Test memakai folder
     sementara untuk `storage/app/mt` (dulu `TranslationTest` menimpa hasil NLLB; dipulihkan dari DB lewat
-    `php artisan aksara:translate --dump`). 171 test lolos di SQLite dan PostgreSQL uji; 370 test Python (2026-10-16, sesudah fase 8 dan pergantian angka resmi).
+    `php artisan aksara:translate --dump`). 171 test lolos di SQLite dan PostgreSQL uji; 409 test Python (2026-10-17, sebelum fase 11).
     **Port:** Laravel 8010, layanan model 8011, layanan terjemahan 8012 — 8000/8001, 5173, dan 8020 dipakai proyek
     lain milik user di laptop yang sama (jangan dihentikan; cek dulu siapa yang mendengarkan sebelum memakai sebuah
     port, dan beri skrip sementara port 8030 ke atas). Test tetap bisa di SQLite in-memory

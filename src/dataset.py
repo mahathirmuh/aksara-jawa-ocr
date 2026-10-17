@@ -149,9 +149,11 @@ class SyntheticLines(Dataset):
         slant_prob: float = 0.0,
         slant_max: float = 0.0,
         avoid_conflicts: bool = False,
+        neighbor_prob: float = 0.0,
     ):
         if not font_paths:
             raise ValueError("Butuh minimal satu font")
+        self.neighbor_prob = neighbor_prob
         self.slant_prob = slant_prob
         self.slant_max = slant_max
         self.avoid_conflicts = avoid_conflicts
@@ -238,7 +240,29 @@ class SyntheticLines(Dataset):
         slant_prob = getattr(self, "slant_prob", 0.0)
         if slant_prob and rng.random() < slant_prob:
             img = oblique(img, rng.uniform(0.0, self.slant_max))
+        # Pecahan baris tetangga di tepi atas dan bawah (src/neighbors.py), diundi sesudah semua undian lain dan hanya
+        # bila aktif (render val/test dan run lama tidak berubah). Geometri halaman, jadi sebelum degradasi.
+        neighbor_prob = getattr(self, "neighbor_prob", 0.0)
+        if neighbor_prob and rng.random() < neighbor_prob:
+            img = self._with_neighbors(img, font, size, rng)
         return (self.augment(img, rng) if self.augment else img), text
+
+    def _with_neighbors(self, img: Image.Image, font: str, size: int, rng: random.Random) -> Image.Image:
+        """Pita bawah sebuah baris lain di atas citra dan pita atas baris lain di bawahnya (src/neighbors.py); tiap
+        sisi kosong dengan peluang 0,3. Baris tetangga diambil acak dari kumpulan baris yang sama dan dirender dengan font
+        dan ukuran yang sama, tanpa spasi (cetakan umumnya tanpa spasi). Label tetap teks baris ini."""
+        from src.neighbors import with_neighbors  # impor di sini: hanya dipakai bila opsi ini hidup
+
+        def neighbor() -> Image.Image | None:
+            if rng.random() < 0.3:
+                return None
+            other = self.lines[rng.randrange(len(self.lines))].replace(" ", "")
+            try:
+                return render_line(other, font, size)
+            except (RenderClipped, EmptyRender):
+                return None
+
+        return with_neighbors(img, neighbor(), neighbor(), rng)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor] | None:
         try:

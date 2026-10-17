@@ -78,6 +78,8 @@ def parse_args(argv=None) -> argparse.Namespace:
                         "nya di depan ca/ja, pa cerek, nga lelet, keret, angka diapit pada pangkat")
     p.add_argument("--slant-prob", type=float, default=0.0,
                    help="peluang baris sintetis dimiringkan ke kanan seperti huruf italic cetakan (fase 9)")
+    p.add_argument("--neighbor-prob", type=float, default=0.0,
+                   help="peluang pecahan baris tetangga di tepi atas/bawah citra latih (src/neighbors.py); 0 = mati")
     p.add_argument("--slant-max", type=float, default=0.6,
                    help="kemiringan terbesar (geser horizontal per tinggi baris), diundi seragam dari 0 per baris")
     p.add_argument("--font-fixes", action="store_true",
@@ -303,12 +305,14 @@ def build_datasets(args, tokenizer: Tokenizer):
             print(f"ejaan baku: p={args.standard_prob}")
         if args.slant_prob:
             print(f"kemiringan italic: p={args.slant_prob}, 0-{args.slant_max}")
+        if getattr(args, "neighbor_prob", 0.0):
+            print(f"pecahan baris tetangga: p={args.neighbor_prob}")
         synthetic = SyntheticLines(
             train_lines, tokenizer, train_fonts, augment=build_augment(args.augment),
             deterministic=bool(args.overfit), seed=args.seed, drop_space_prob=args.drop_space_prob,
             rare_text=rare_text, track_prob=args.track_prob, track_max=args.track_max,
             standard_prob=args.standard_prob, slant_prob=args.slant_prob, slant_max=args.slant_max,
-            avoid_conflicts=args.font_fixes,
+            avoid_conflicts=args.font_fixes, neighbor_prob=getattr(args, "neighbor_prob", 0.0),
         )
         parts.append((synthetic, 1))
     if args.real_train:
