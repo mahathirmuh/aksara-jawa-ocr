@@ -512,8 +512,16 @@ def run_export(args) -> None:
         if meta.get("model_served"):
             row["model_served"] = meta["model_served"]
         (arch_out if group == "arsitektur" else methods_out).append(row)
+    # Waktu baca model kita diukur terpisah lewat jalur layanan Demo (subperintah latency), bukan saat ekspor hasil.
+    latency_path = METHODS / "latency.json"
+    if latency_path.exists():
+        latency = json.loads(latency_path.read_text(encoding="utf-8"))
+        for row in methods_out:
+            pipeline = {"crnn_fase9_ctrl": "crnn_greedy", "crnn_fase9_ctrl_beam": "crnn_beam_lm"}.get(row["key"])
+            if pipeline in latency:
+                row["seconds_per_line"] = latency[pipeline]
     order = {"kita": 0, "vlm": 1, "umum": 2}
-    methods_out.sort(key=lambda r: (r["cetak"] is None, order.get(r["group"], 3), r["cetak"]["cer"] if r["cetak"] else 9))
+    methods_out.sort(key=lambda r: (r["cetak"] is None, order.get(r["group"], 3), r["cetak"]["ned"] if r["cetak"] else 9))
     for row in arch_out:
         for gate in ("G1", "G2"):
             path = ROOT / f"out/eval/{row['key']}_{gate}_2k.json"
