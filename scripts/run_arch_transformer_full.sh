@@ -15,19 +15,31 @@ LOG=out/archT_chain.log
 PY=.venv-xpu/Scripts/python.exe
 CPU=.venv/Scripts/python.exe
 say() { echo "$* $(date '+%Y-%m-%d %H:%M:%S')" >> "$LOG"; }
+# Worker render 2, bukan 4 seperti run CRNN: 2026-10-18 19:18 training macet (semua thread menunggu, 0 CPU) saat commit
+# memori sistem 74,2/75,5 GB; 2 worker cukup (render fase5 ~99 ms/sampel/inti, training ~4 sampel/dtk) dan menghemat ~5 GB.
+# Urutan batch sama (aturan seed sampler sama untuk semua worker > 0); render memang acak per worker.
 COMMON=(--arch transformer --augment fase5 --drop-space-prob 0.5 --train-lines 100000 --val-lines 500 --eval-every 500
-        --workers 4 --seed 0 --steps 1500 --device xpu --resume)
+        --workers 2 --seed 0 --steps 1500 --device xpu --resume)
 
-# seg RUN STOP ARGS... : satu proses training sampai langkah STOP (0 = sampai 1.500), dilewati bila penandanya ada.
+# seg RUN STOP ARGS... : satu proses training sampai langkah STOP (0 = sampai 1.500), dilewati bila penandanya ada. Proses
+# yang gagal atau dihentikan penjaga (scripts/arch_watchdog.sh, bila macet) dicoba ulang dari checkpoint terakhir, 3 kali.
 seg() {
   local run=$1 stop=$2; shift 2
   local mark="out/checkpoints/$run/DONE_${stop}"
   if [ -f "$mark" ]; then say "lewati $run sampai $stop (sudah)"; return 0; fi
-  say "mulai $run sampai ${stop/#0/1500}"
   local stoparg=(); [ "$stop" != 0 ] && stoparg=(--stop-step "$stop")
-  "$PY" -m src.train --run "$run" "${COMMON[@]}" "$@" "${stoparg[@]}" >> "$LOG" 2>&1 || { say "GAGAL $run"; exit 1; }
-  mkdir -p "out/checkpoints/$run" && touch "$mark"
-  say "selesai $run sampai ${stop/#0/1500}"
+  local attempt
+  for attempt in 1 2 3 4; do
+    say "mulai $run sampai ${stop/#0/1500} (percobaan $attempt)"
+    if "$PY" -m src.train --run "$run" "${COMMON[@]}" "$@" "${stoparg[@]}" >> "$LOG" 2>&1; then
+      mkdir -p "out/checkpoints/$run" && touch "$mark"
+      say "selesai $run sampai ${stop/#0/1500}"
+      return 0
+    fi
+    say "GAGAL-COBA $run percobaan $attempt; lanjut dari checkpoint terakhir"
+    sleep 30
+  done
+  say "GAGAL $run"; exit 1
 }
 
 # bacaan 745 baris nyata untuk tahap yang selesai (CPU, beberapa menit; di latar supaya training tahap berikutnya tidak
