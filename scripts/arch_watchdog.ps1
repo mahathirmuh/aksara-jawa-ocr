@@ -11,7 +11,9 @@ bisa menambahinya (Add-Content: "being used by another process"); log rantai han
 $repo = Split-Path $PSScriptRoot -Parent
 $log = Join-Path $repo 'out\archT_chain.log'
 $own = Join-Path $repo 'out\archT_watchdog.log'
-$limitMinutes = 25
+# 15 menit: jeda normal terpanjang log run ~12 menit (50 langkah + validasi 500 baris). Semula 25; diturunkan sesudah
+# macet kedua (2026-10-19 ~00:05, archT_fase7_track langkah 150) yang menghabiskan 25 menit menunggu.
+$limitMinutes = 15
 
 function Say([string]$message) {
     Add-Content -Path $own -Value ("penjaga: $message " + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Encoding utf8
