@@ -465,6 +465,8 @@ FACTS = {
     "tesseract_jav": ("umum", True, False, "Mesin OCR terbuka; tidak punya model aksara Jawa, jadi dipakai model bahasa "
                       "Jawa beraksara Latin ('jav'). Menunjukkan bahwa OCR umum tidak bisa dipakai."),
     "vlm_zeroshot": ("vlm", False, False, "Uji buta 2026-09-14 pada 50 baris (22 cetak), prompt dan versi model tidak tercatat."),
+    "arch_crnn_base": ("arsitektur", True, True, "BiLSTM 2 lapis dua arah; checkpoint run base (fase 4b)."),
+    "arch_transformer": ("arsitektur", True, True, "Encoder Transformer 4 lapis, 4 kepala, feed-forward 768, posisi sinusoidal."),
 }
 PRICES = {"gpt-4o": (2.50, 10.00)}  # USD per juta token masukan / keluaran, harga publik OpenAI
 

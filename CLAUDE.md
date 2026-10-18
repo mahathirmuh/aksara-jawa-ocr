@@ -118,6 +118,8 @@ cd web && php artisan aksara:import && php artisan serve --port=8010            
 cd web && php artisan aksara:dictionary                                               # kamus kata halaman Kamus (data jadi di web/database/dictionaries)
 cd web && php artisan aksara:datasets                                                 # kartu data halaman Dataset saja (aksara:import ikut mengimpornya bila berkasnya ada)
 cd web && php artisan aksara:methods                                                  # kartu metode halaman Metode saja (aksara:import ikut mengimpornya bila berkasnya ada)
+python scripts/method_matrix.py score; python scripts/method_matrix.py ablation; python scripts/method_matrix.py export   # matriks metode (lihat butir "Matriks perbandingan metode OCR")
+cd web && php artisan aksara:matrix                                                   # halaman Matriks metode
 ```
 
 ---
@@ -595,6 +597,41 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   tanpa efek, dan 0,06 hanya terlihat membantu di data uji; (3) sisipan aksara langka tidak dipakai di model resmi (aturan
   fase 10), jadi model resmi tidak membaca murda dan adeg-adeg. Tuas berikutnya butuh data cetak nyata untuk latihan (43
   baris Commons menunggu pembaca aksara).
+- **Matriks perbandingan metode OCR (permintaan user 2026-10-18, untuk presentasi malam itu; keputusan user: GPT boleh
+  dipakai dan citra NusaAksara boleh dikirim ke OpenAI, Sol dengan setelan bawaan pada 308 baris cetak, Transformer dicoba,
+  keluaran slide + halaman web).** `scripts/method_matrix.py`: semua metode dinilai dengan aturan yang sama pada potongan
+  NusaAksara yang sama (NFC, hanya baris baru/tab di ujung yang dibuang, jadi angka resmi model kita persis sama dengan G3);
+  keluaran tiap metode di `out/methods/<nama>.jsonl` + `.meta.json`; `score` -> `out/compare/method_matrix.json/.md`,
+  `ablation` -> `out/compare/ablation_matrix.json/.md` (13 pasangan lewat `eval_slant.real`, salinan sementara folder hasil
+  bila memakai metode di `out/methods`), `export` -> `out/results/matrix.json` (skema 1) -> `php artisan aksara:matrix` ->
+  halaman web **Matriks metode** (`/matriks`, tabel `method_matrices`, `MatrixImporter` memeriksa bentuk; 15 test).
+  **CER tidak berbatas atas** (keluaran kosong = 100%, sisipan tidak dibatasi; user bingung melihat 112%), jadi matriks
+  memakai **NED** (normalized edit distance, ICDAR 2019: jumlah suntingan / jumlah panjang terpanjang label-keluaran per
+  baris, selalu 0-100%) sebagai skala utama, CER di sampingnya (angka gerbang). Prompt VLM satu, dikunci sebelum ada hasil
+  (sidik `6e50187e14c8`). Hasil 308 baris cetak (NED / CER; selisih NED terhadap model resmi, SK 95% per halaman):
+  CRNN + beam + LM 10,68% / 10,77% (−1,53 [−1,96; −1,11]); **CRNN resmi greedy 12,22% / 12,34%**; Claude Opus 5.5
+  zero-shot 77,23% / 83,61% (+65,01; dibaca 8 subagen Claude Code dari citra bernama acak, beberapa membuka 4-5 citra
+  sekaligus); GPT-5.6 Sol 85,42% / 94,13% (+73,20; rata-rata 117 dtk dan 7.226 token keluaran per baris, total 2,2 juta
+  token); GPT-4o 85,99% / 111,97% (745 baris: CER 105,14%; ±US$2,2 per 1.000 baris); Tesseract 5.4 siap pakai 99,72% /
+  109,33% (tidak ada model aksara Jawa di tessdata; dipakai `jav` = bahasa Jawa beraksara Latin; 98 baris kosong). Ablasi
+  cara membaca (checkpoint resmi, cetak / 745): beam 16 tanpa LM −0,18 / −0,26 poin, + LM ejaan korpus −1,43 / −2,45, + LM
+  ejaan baku −1,56 / −2,63: hampir semua manfaat beam + LM datang dari model bahasa. Waktu baca CPU lewat jalur Demo:
+  greedy 0,22 dtk, beam + LM 0,27 dtk per baris (diukur saat iGPU melatih). **Patokan target (ditelusuri 2026-10-18):**
+  2% / 5% / 8% berasal dari PLAN.md §1.2 tanpa sumber atau penurunan; BUKAN standar. Rujukan yang bisa dikutip: makalah
+  NusaAksara Tabel 4 (OCR aksara Jawa: semua model CER > 1, termasuk PP-OCRv3 fine-tuned dan GPT-4o) dan Tabel 11
+  (kesepakatan anotator-validator transkripsi Jawa: CER 5,4%, WER 54,4%); Holley 2009 (D-Lib, OCR koran: baik 1-2%,
+  rata-rata 2-10%, buruk > 10%, dengan catatan batas "dapat diterima" belum disepakati); Transkribus (< 10% baik untuk
+  tulisan tangan). **Pembanding arsitektur:** `src.model.TransformerCTC` (CNN dan proyeksi sama dengan CRNN, BiLSTM diganti
+  encoder Transformer pre-LN 4 lapis, 4 kepala, FF 768, key padding mask; 4.571.709 parameter lawan 4.590.909), `src.train
+  --arch transformer`; checkpoint CRNN tetap berbentuk lama (`build_model`). Run `arch_transformer`
+  (`scripts/run_arch_transformer.sh`) = resep persis run `base` (1.500 langkah dari nol, 2 font, tanpa augmentasi, berhenti
+  dan lanjut di 1.000; worker render 4, bukan 2: render memang acak per worker), dibandingkan dengan `base`
+  (`best_4b_step1500.pt`). Hasil langkah 1.500 (selesai 14:27; CRNN / Transformer): val bersih font latih 0,38% / 5,84%;
+  G1 2.000 baris javatext 0,87% / 6,56%; G2 berat 54,4% / 72,7%; 308 baris cetak NED 64,6% / 74,5% (CER 82,2% / 80,2%;
+  keduanya belum mengenal cetakan karena tanpa augmentasi dan font tambahan). Transformer belajar lebih lambat (val langkah
+  500: 63,7% lawan 11,3%; 1.000: 31,1% lawan 41,5% saat CRNN melonjak). Kesimpulan: dengan anggaran yang sama BiLSTM jauh
+  lebih baik; berlaku untuk anggaran ini saja (Transformer umumnya butuh lebih banyak data/langkah), satu run per lengan.
+  Waktu baca di kolom `seconds` berkas arsitektur diukur dengan jumlah thread berbeda: jangan dibandingkan.
 - **OCR + VLM dan web UI (keputusan user 2026-09-24).**
   - **Dua pembaca, satu hakim:** CRNN tetap pembaca utama (offline, cepat) dan "hakim piksel"; VLM
     fine-tune = pembaca kedua yang menyumbang kandidat. Semua kandidat (greedy, N-best beam, VLM, LLM)
@@ -997,7 +1034,7 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     `phpunit.xml` memaksa SQLite in-memory (`force="true"`, jadi `DB_*` yang tertinggal di shell diabaikan) dan
     `tests/TestCase.php::createApplication` menolak database bernama `its_aksara` sebelum migrasi. Test memakai folder
     sementara untuk `storage/app/mt` (dulu `TranslationTest` menimpa hasil NLLB; dipulihkan dari DB lewat
-    `php artisan aksara:translate --dump`). 171 test lolos di SQLite dan PostgreSQL uji; 409 test Python (2026-10-17, sebelum fase 11).
+    `php artisan aksara:translate --dump`). 188 test web lolos di SQLite (2026-10-18; `MatrixPageTest` juga di PostgreSQL uji); 416 test Python.
     **Port:** Laravel 8010, layanan model 8011, layanan terjemahan 8012 — 8000/8001, 5173, dan 8020 dipakai proyek
     lain milik user di laptop yang sama (jangan dihentikan; cek dulu siapa yang mendengarkan sebelum memakai sebuah
     port, dan beri skrip sementara port 8030 ke atas). Test tetap bisa di SQLite in-memory

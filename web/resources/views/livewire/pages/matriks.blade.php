@@ -113,7 +113,7 @@
                     </div>
                     <div class="table-wrap">
                         <table class="data-table min-w-[44rem]">
-                            <thead><tr><th>Model</th><th class="r">Parameter</th><th class="r">Val bersih (font latih)</th><th class="r">G1 javatext bersih</th><th class="r">G2 javatext berat</th><th class="r">Cetak nyata</th></tr></thead>
+                            <thead><tr><th>Model</th><th class="r">Parameter</th><th class="r">Val bersih (font latih)</th><th class="r">G1 javatext bersih</th><th class="r">G2 javatext berat</th><th class="r">Cetak nyata, NED / CER</th></tr></thead>
                             <tbody>
                                 @foreach ($matrix['architecture'] as $r)
                                     <tr data-arch="{{ $r['key'] }}">
@@ -125,7 +125,7 @@
                                         <td class="r num">{{ pct($r['val_clean'] ?? null, 2) }}</td>
                                         <td class="r num">{{ pct($r['g1'] ?? null, 2) }}</td>
                                         <td class="r num">{{ pct($r['g2'] ?? null, 2) }}</td>
-                                        <td class="r num">{{ $r['cetak'] ? pct($r['cetak']['cer'], 1) : '–' }}</td>
+                                        <td class="r num">{{ $r['cetak'] ? pct($r['cetak']['ned'] ?? null, 1).' / '.pct($r['cetak']['cer'], 1) : '–' }}</td>
                                     </tr>
                                 @endforeach
                             </tbody>

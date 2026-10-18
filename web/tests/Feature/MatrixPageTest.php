@@ -71,7 +71,7 @@ class MatrixPageTest extends TestCase
                 $this->method('lama', 'vlm', null, null, ['partial' => ['lines' => 50, 'cer' => 0.9099, 'reference_cer' => 0.2299, 'ned' => 0.8, 'reference_ned' => 0.2]]),
             ],
             'architecture' => [['key' => 'arch_tr', 'label' => 'CNN + Transformer + CTC', 'params' => 4571709, 'val_clean' => 0.004,
-                'g1' => 0.006, 'g2' => 0.5, 'cetak' => ['cer' => 1.02, 'lines' => 308, 'pages' => 72]]],
+                'g1' => 0.006, 'g2' => 0.5, 'cetak' => ['cer' => 1.02, 'ned' => 0.9, 'lines' => 308, 'pages' => 72]]],
             'ablation' => [$this->pair('crnn_fonts', 'data', -0.2013), $this->pair('crnn_beam', 'baca', -0.0156), $this->pair('noise', 'rujukan', -0.0004)],
             'augment' => [['k' => 0, 'op' => '(kontrol)', 'clean' => 0.003, 'heavy' => 0.65, 'g3' => 0.75, 'g3_no_space' => 0.7],
                 ['k' => 1, 'op' => 'rotate', 'clean' => 0.003, 'heavy' => 0.576, 'g3' => 0.8785, 'g3_no_space' => 0.78]],
@@ -102,7 +102,7 @@ class MatrixPageTest extends TestCase
             .'(model resmi pada baris yang sama: NED 20,0%, CER 23,0%)', $this->part($html, 'data-method', 'lama'));
         $this->assertSame('Metode gpt tidak tidak 4.590.909 0,05 87 2,17', $this->part($html, 'data-practical', 'gpt'));
         $this->assertSame('Metode crnn_resmi ya ya 4.590.909 0,05 – –', $this->part($html, 'data-practical', 'crnn_resmi'));
-        $this->assertSame('CNN + Transformer + CTC 4.571.709 0,40% 0,60% 50,00% 102,0%', $this->part($html, 'data-arch', 'arch_tr'));
+        $this->assertSame('CNN + Transformer + CTC 4.571.709 0,40% 0,60% 50,00% 90,0% / 102,0%', $this->part($html, 'data-arch', 'arch_tr'));
         $this->assertSame('Komponen crnn_fonts fonts − fonts_ctrl −20,13 [−20,63; −19,63] −20,13 [−20,63; −19,63] −20,13 [−20,63; −19,63] dipakai',
             $this->part($html, 'data-pair', 'crnn_fonts'));
         $this->assertSame('1 rotate 57,6% 87,9% +12,85', $this->part($html, 'data-augment', '1'));
