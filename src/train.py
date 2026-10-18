@@ -24,7 +24,7 @@ from torch.utils.data import DataLoader
 from src.augment import build_augment
 from src.dataset import DOWNSAMPLE, H, TRAIN_FONTS, LengthBucketSampler, SyntheticLines, collate, shaping_ok
 from src.decode import cer, greedy_decode
-from src.model import CRNN
+from src.model import CRNN, build_model
 from src.real import ConcatLines, RealLines, read_labels
 from src.text_augment import RareText
 from src.tokenizer import BLANK, TOKENIZER_PATH, Tokenizer
@@ -51,6 +51,11 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--clip", type=float, default=5.0)
     p.add_argument("--channels", default="32,64,128,256")
     p.add_argument("--hidden", type=int, default=256)
+    p.add_argument("--arch", default="crnn", choices=["crnn", "transformer"],
+                   help="pemodel urutan sesudah CNN: BiLSTM (CRNN) atau encoder Transformer (pembanding arsitektur)")
+    p.add_argument("--layers", type=int, default=4, help="lapis encoder Transformer (--arch transformer)")
+    p.add_argument("--heads", type=int, default=4, help="kepala atensi (--arch transformer)")
+    p.add_argument("--ff", type=int, default=768, help="lebar feed-forward (--arch transformer)")
     # Tanpa packing, frame padding tidak pernah diawasi CTC dan model belajar
     # memancarkan simbol di sana; inference satu baris (tanpa padding) lalu
     # menghasilkan "pada lingsa" palsu di tepi kanan. Packing: ~20% lebih lambat di XPU.
@@ -216,6 +221,13 @@ def evaluate(model, loader, tokenizer, device, packed: bool, max_columns: int = 
     return cer(refs, hyps), list(zip(refs, hyps))
 
 
+def model_config(args, channels, tokenizer) -> dict:
+    config = {"n_classes": tokenizer.n_classes, "channels": list(channels), "hidden": args.hidden}
+    if args.arch != "crnn":  # checkpoint CRNN tetap berbentuk lama
+        config |= {"arch": args.arch, "layers": args.layers, "heads": args.heads, "ff": args.ff}
+    return config
+
+
 def checkpoint_payload(model, opt, sched, step, best_cer, args, channels, tokenizer) -> dict:
     return {
         "model": model.state_dict(),
@@ -224,7 +236,7 @@ def checkpoint_payload(model, opt, sched, step, best_cer, args, channels, tokeni
         "step": step,
         "best_cer": best_cer,
         "args": vars(args),
-        "model_config": {"n_classes": tokenizer.n_classes, "channels": list(channels), "hidden": args.hidden},
+        "model_config": model_config(args, channels, tokenizer),
         # Checkpoint membawa tokenizer supaya inference berjalan tanpa data/.
         "tokenizer": {
             "charset": [f"U+{ord(c):04X}" for c in tokenizer.charset],
@@ -354,7 +366,7 @@ def main(argv=None) -> None:
     val_loader = make_loader(val_ds, args.batch_size, False, args.workers, args.seed)
 
     channels = tuple(int(c) for c in args.channels.split(","))
-    model = CRNN(tokenizer.n_classes, channels=channels, hidden=args.hidden).to(device)
+    model = build_model(model_config(args, channels, tokenizer)).to(device)
     assert_downsample(model, device)
 
     steps_per_epoch = len(train_loader)

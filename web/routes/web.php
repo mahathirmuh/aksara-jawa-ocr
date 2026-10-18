@@ -12,6 +12,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('ringkasan', Pages\Ringkasan::class)->name('dashboard');
     Route::redirect('dashboard', '/ringkasan');
     Route::get('perbandingan', Pages\Perbandingan::class)->name('perbandingan');
+    Route::get('matriks', Pages\Matriks::class)->name('matriks');
     Route::get('ablasi', Pages\Ablasi::class)->name('ablasi');
     Route::get('dataset', Pages\Dataset::class)->name('dataset');
     Route::get('metode', Pages\Metode::class)->name('metode');

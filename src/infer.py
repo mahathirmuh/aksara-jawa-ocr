@@ -14,7 +14,7 @@ from PIL import Image, ImageOps
 
 from src.dataset import to_tensor
 from src.decode import greedy_decode
-from src.model import CRNN
+from src.model import CRNN, build_model
 from src.tokenizer import Tokenizer
 
 
@@ -24,8 +24,7 @@ def load_checkpoint(path, device: str | torch.device = "cpu") -> tuple[CRNN, Tok
         [chr(int(cp[2:], 16)) for cp in ckpt["tokenizer"]["charset"]],
         ckpt["tokenizer"]["reorder"],
     )
-    config = ckpt["model_config"]
-    model = CRNN(config["n_classes"], channels=tuple(config["channels"]), hidden=config["hidden"])
+    model = build_model(ckpt["model_config"])
     model.load_state_dict(ckpt["model"])
     return model.to(device).eval(), tokenizer
 

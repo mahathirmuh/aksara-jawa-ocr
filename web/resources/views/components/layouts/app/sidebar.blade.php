@@ -10,6 +10,7 @@
                 'Hasil' => [
                     ['dashboard', 'ti-chart-pie', 'Ringkasan'],
                     ['perbandingan', 'ti-chart-bar', 'Perbandingan'],
+                    ['matriks', 'ti-table', 'Matriks metode'],
                     ['ablasi', 'ti-flask', 'Ablasi'],
                     ['dataset', 'ti-database', 'Dataset'],
                     ['metode', 'ti-brain', 'Metode'],

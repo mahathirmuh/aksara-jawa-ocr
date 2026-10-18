@@ -5,6 +5,8 @@ sumbu waktu CTC dan tumpukan pasangan memadatkan banyak codepoint ke sedikit
 kolom (T >= L).
 """
 
+import math
+
 import torch
 from torch import nn
 
@@ -63,3 +65,62 @@ class CRNN(nn.Module):
         else:
             f, _ = self.rnn(f)
         return self.head(f)
+
+
+class TransformerCTC(CRNN):
+    """Pembanding arsitektur: CNN dan proyeksi sama persis dengan CRNN, BiLSTM diganti encoder Transformer.
+
+    Posisi sinusoidal (lebar baris tidak dibatasi), pre-LayerNorm, dan key padding mask dari `lengths`: frame valid
+    tidak pernah memperhatikan frame padding, setara dengan packing pada LSTM. Ukuran bawaan (4 lapis, 4 kepala,
+    feed-forward 768) membuat jumlah parameternya nyaris sama dengan BiLSTM 2 lapis.
+    """
+
+    def __init__(
+        self,
+        n_classes: int,
+        channels: tuple[int, int, int, int] = (32, 64, 128, 256),
+        hidden: int = 256,
+        height: int = H,
+        layers: int = 4,
+        heads: int = 4,
+        ff: int = 768,
+        dropout: float = 0.1,
+    ):
+        super().__init__(n_classes, channels, hidden, height)
+        del self.rnn
+        layer = nn.TransformerEncoderLayer(hidden, heads, ff, dropout, batch_first=True, norm_first=True)
+        self.encoder = nn.TransformerEncoder(layer, layers, norm=nn.LayerNorm(hidden), enable_nested_tensor=False)
+        self.head = nn.Linear(hidden, n_classes)
+
+    @staticmethod
+    def positions(t: int, dim: int, device) -> torch.Tensor:
+        pos = torch.arange(t, device=device, dtype=torch.float32).unsqueeze(1)
+        freq = torch.exp(torch.arange(0, dim, 2, device=device, dtype=torch.float32) * (-math.log(10_000.0) / dim))
+        table = torch.zeros(t, dim, device=device)
+        table[:, 0::2] = torch.sin(pos * freq)
+        table[:, 1::2] = torch.cos(pos * freq)
+        return table
+
+    def forward(self, x: torch.Tensor, lengths: torch.Tensor | None = None) -> torch.Tensor:
+        if x.shape[2] != self.height:
+            raise ValueError(f"Tinggi input {x.shape[2]}, harus {self.height}")
+        f = self.cnn(x)
+        b, c, h, t = f.shape
+        f = self.proj(f.permute(0, 3, 1, 2).reshape(b, t, c * h))
+        f = f + self.positions(t, f.shape[-1], f.device)
+        mask = None
+        if lengths is not None:
+            mask = torch.arange(t, device=f.device).unsqueeze(0) >= lengths.to(f.device).clamp(1, t).unsqueeze(1)
+        return self.head(self.encoder(f, src_key_padding_mask=mask))
+
+
+ARCHS = {"crnn": CRNN, "transformer": TransformerCTC}
+
+
+def build_model(config: dict) -> CRNN:
+    """Model dari `model_config` checkpoint; checkpoint lama tanpa kunci `arch` adalah CRNN."""
+    arch = config.get("arch", "crnn")
+    kwargs = {"channels": tuple(config["channels"]), "hidden": config["hidden"]}
+    if arch == "transformer":
+        kwargs |= {k: config[k] for k in ("layers", "heads", "ff") if k in config}
+    return ARCHS[arch](config["n_classes"], **kwargs)
