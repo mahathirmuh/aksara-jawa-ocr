@@ -32,6 +32,9 @@ pairs() {  # pembanding (scripts/compare_runs.py) yang buktinya dikutip kartu un
         fase7_track) echo "crnn_fase7_track:crnn_fase7_ctrl crnn_fase7_ctrl:crnn_fase6_ctrl" ;;
         fase8_std) echo "crnn_fase8_std:crnn_fase8_ctrl crnn_fase8_std:crnn_fase7_track crnn_fase8_ctrl:crnn_fase7_track" ;;
         fase9_slant) echo "crnn_fase9_slant:crnn_fase9_ctrl crnn_fase9_slant:crnn_fase8_std crnn_fase9_ctrl:crnn_fase8_std" ;;
+        # fase9_ctrl: pasangannya sendiri, lalu dua lanjutan model resmi yang diuji (fase 10 dan 11) dan pasangan di
+        # rantainya yang dikutip kartu (aksara langka fase 7; jarak antar suku kata).
+        fase9_ctrl) echo "crnn_fase9_slant:crnn_fase9_ctrl crnn_fase9_ctrl:crnn_fase8_std crnn_fase10_rare:crnn_fase10_ctrl crnn_fase11_neighbor:crnn_fase11_ctrl crnn_fase7_track_rare:crnn_fase7_track crnn_fase7_track:crnn_fase7_ctrl" ;;
     esac
 }
 

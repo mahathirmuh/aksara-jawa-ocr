@@ -154,9 +154,10 @@ EVAL_DIR = ROOT / "out/eval"
 # out/eval/ (LEGACY_REPORTS untuk run lama). Mengganti run resmi: buat dulu <run>_G1_10k.json dan <run>_G2_10k.json
 # (10.000 baris javatext; scripts/make_official.sh) di samping <run>_G3_full.json, lalu ubah konstanta ini dan
 # DEFAULT_CHECKPOINT di src/serve.py (Demo; tests/test_export_results.py menjaga keduanya sama).
-# Riwayat: fase5_fonts sampai 2026-10-04, fase7_track sampai 2026-10-16, lalu fase8_std (keputusan user; ejaan baku
-# membantu menurut aturan analisis fase 8 di CLAUDE.md).
-OFFICIAL_RUN = "fase8_std"
+# Riwayat: fase5_fonts sampai 2026-10-04, fase7_track sampai 2026-10-16, fase8_std sampai 2026-10-18 (ejaan baku
+# membantu menurut aturan analisis fase 8 di CLAUDE.md), lalu fase9_ctrl (keputusan user: perbaikan font, tanpa render
+# miring; G2 lebih baik, baris cetak tidak berbeda nyata dari fase8_std; putaran sintetis fase 9-11 di CLAUDE.md).
+OFFICIAL_RUN = "fase9_ctrl"
 OFFICIAL_LINES = 10_000  # baris sintetis per gerbang G1/G2; tes cepat 100 baris bukan angka resmi
 LEGACY_REPORTS = {"fase5_fonts": "fonts", "fase5_core": "core"}  # laporan run lama memakai awalan pendek
 TOL = 1e-9  # selisih CER terhadap laporan resmi yang masih dianggap sama
