@@ -21,6 +21,35 @@ use RuntimeException;
  */
 class ResultImporter
 {
+    /**
+     * Rincian gerbang per kelompok baris (kunci "parts" sejak 2026-10-18: G3 per jenis tulisan, dilaporkan di samping
+     * angka gerbang). Ekspor tanpa kunci itu = null. Rincian yang rusak menolak impor di dalam transaksi, bukan membuat
+     * Ringkasan gagal dirender; `chars` (untuk cek jumlah di Python) tidak disimpan.
+     */
+    private static function gateParts(array $gate): ?array
+    {
+        $parts = $gate['parts'] ?? null;
+        if ($parts === null) {
+            return null;
+        }
+        $valid = is_array($parts) && $parts !== [] && array_is_list($parts);
+        foreach ($valid ? $parts : [] as $part) {
+            $valid = $valid && is_array($part)
+                && is_string($part['key'] ?? null) && $part['key'] !== ''
+                && is_string($part['label'] ?? null) && $part['label'] !== ''
+                && (is_int($part['value'] ?? null) || is_float($part['value'] ?? null)) && $part['value'] >= 0
+                && is_int($part['lines'] ?? null) && $part['lines'] > 0
+                && is_int($part['pages'] ?? null) && $part['pages'] > 0;
+        }
+        if (! $valid) {
+            throw new RuntimeException("Rincian gerbang {$gate['code']} tidak sah: butuh daftar butir {key, label, value, lines, pages}.");
+        }
+
+        return array_map(fn (array $p) => [
+            'key' => $p['key'], 'label' => $p['label'], 'value' => (float) $p['value'], 'lines' => $p['lines'], 'pages' => $p['pages'],
+        ], $parts);
+    }
+
     public function import(string $dir): array
     {
         $manifest = $this->readJson($dir.'/manifest.json');
@@ -88,7 +117,11 @@ class ResultImporter
 
             Gate::query()->delete();
             foreach ($manifest['gates'] as $g) {
-                Gate::create($g);
+                Gate::create([
+                    'code' => $g['code'], 'name' => $g['name'], 'value' => $g['value'], 'target' => $g['target'],
+                    'passed' => $g['passed'], 'basis' => $g['basis'], 'source' => $g['source'],
+                    'parts' => self::gateParts($g),
+                ]);
             }
 
             AblationRun::query()->delete();

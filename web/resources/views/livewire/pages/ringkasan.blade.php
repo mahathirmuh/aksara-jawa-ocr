@@ -31,6 +31,16 @@
                             <span class="status {{ $gate->passed ? 'status-green' : 'status-red' }} shrink-0">{{ $gate->passed ? '✓ Lulus' : '✕ Belum' }}</span>
                             <span class="stat-hint min-w-0 pt-0.5">{{ $gate->basis }}</span>
                         </div>
+                        @if ($gate->parts)
+                            {{-- Rincian per kelompok baris (G3: baris cetak dan tulisan tangan), di samping angka gerbang, bukan
+                                 penggantinya (keputusan user 2026-10-18). --}}
+                            <div class="stat-hint" data-gate-parts="{{ $gate->code }}">
+                                @foreach ($gate->parts as $part)
+                                    <span class="whitespace-nowrap" data-gate-part="{{ $part['key'] }}">{{ $part['label'] }} {{ pct($part['value'], 1) }} ({{ $part['lines'] }} baris, {{ $part['pages'] }} halaman)</span>{{ $loop->last ? '' : ' · ' }}
+                                @endforeach
+                                <span class="block">Jenis tulisan per halaman: klasifikasi visual, belum diperiksa manusia.</span>
+                            </div>
+                        @endif
                         <div class="code mt-auto break-all">{{ $gate->source }}</div>
                     </div>
                 </div>

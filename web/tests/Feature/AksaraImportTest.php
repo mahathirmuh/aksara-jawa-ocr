@@ -79,6 +79,94 @@ class AksaraImportTest extends TestCase
         $this->assertSame(['crnn_core'], Pipeline::where('official', true)->pluck('key')->all());
     }
 
+    /** Salinan fixture dengan rincian G3 tertentu. */
+    private function fixtureWithParts(mixed $parts): string
+    {
+        return $this->fixtureWith(function (array $manifest) use ($parts) {
+            foreach ($manifest['gates'] as $i => $gate) {
+                if ($gate['code'] === 'G3') {
+                    $manifest['gates'][$i]['parts'] = $parts;
+                }
+            }
+
+            return $manifest;
+        });
+    }
+
+    public function test_g3_parts_are_imported_beside_the_gate_and_shown_on_the_summary(): void
+    {
+        // Ekspor lama tanpa rincian: kolomnya kosong dan Ringkasan tidak menampilkan rincian.
+        $this->artisan('aksara:import', ['--path' => $this->fixture()])->assertSuccessful();
+        $this->assertNull(Gate::where('code', 'G3')->first()->parts);
+        $this->actingAs(User::factory()->create());
+        $this->get('/ringkasan')->assertOk()->assertDontSee('data-gate-parts', false);
+
+        $this->artisan('aksara:import', ['--path' => $this->fixtureWithParts([
+            ['key' => 'cetak', 'label' => 'baris cetak', 'value' => 0.1234, 'lines' => 308, 'pages' => 72, 'chars' => 9979],
+            ['key' => 'tulisan_tangan', 'label' => 'tulisan tangan', 'value' => 0.2796, 'lines' => 437, 'pages' => 20, 'chars' => 10405],
+        ])])->assertSuccessful();
+        $gates = Gate::all()->keyBy('code');
+        $this->assertSame([
+            ['key' => 'cetak', 'label' => 'baris cetak', 'value' => 0.1234, 'lines' => 308, 'pages' => 72],
+            ['key' => 'tulisan_tangan', 'label' => 'tulisan tangan', 'value' => 0.2796, 'lines' => 437, 'pages' => 20],
+        ], $gates['G3']->parts);
+        $this->assertNull($gates['G1']->parts);
+        $this->assertNull($gates['G4']->parts);
+
+        // Ringkasan: rincian hanya di ubin G3, dan angka G3 tetap angka gerbang (fixture 37,2%).
+        $html = $this->get('/ringkasan')->assertOk()->assertSee('37,2%')->getContent();
+        $this->assertSame(1, substr_count($html, 'data-gate-parts='));
+        $dom = new \DOMDocument;
+        @$dom->loadHTML('<?xml encoding="utf-8"?>'.$html);
+        $xpath = new \DOMXPath($dom);
+        $box = $xpath->query('//*[@data-gate-parts="G3"]')->item(0);
+        $this->assertNotNull($box);
+        $parts = [];
+        foreach ($xpath->query('.//*[@data-gate-part]', $box) as $node) {
+            $parts[$node->getAttribute('data-gate-part')] = trim($node->textContent);
+        }
+        $this->assertSame([
+            'cetak' => 'baris cetak 12,3% (308 baris, 72 halaman)',
+            'tulisan_tangan' => 'tulisan tangan 28,0% (437 baris, 20 halaman)',
+        ], $parts);
+        $this->assertStringContainsString('belum diperiksa manusia', $box->textContent);
+        $this->assertStringContainsString('baris cetak 12,3% (308 baris, 72 halaman) · tulisan tangan', preg_replace('/\s+/', ' ', $box->textContent));
+    }
+
+    public function test_invalid_g3_parts_are_rejected_and_keep_the_old_results(): void
+    {
+        $this->artisan('aksara:import', ['--path' => $this->fixture()])->assertSuccessful();
+        $good = ['key' => 'cetak', 'label' => 'baris cetak', 'value' => 0.12, 'lines' => 308, 'pages' => 72];
+        foreach ([
+            'bukan daftar' => ['cetak' => $good],
+            'kosong' => [],
+            'butir bukan objek' => ['cetak'],
+            'tanpa kunci' => [array_diff_key($good, ['key' => 1])],
+            'kunci kosong' => [['key' => ''] + $good],
+            'tanpa label' => [array_diff_key($good, ['label' => 1])],
+            'label kosong' => [['label' => ''] + $good],
+            'nilai teks' => [['value' => '0.12'] + $good],  // teks berangka pun bukan bilangan JSON
+            'nilai negatif' => [['value' => -0.1] + $good],
+            'tanpa nilai' => [array_diff_key($good, ['value' => 1])],
+            'baris nol' => [['lines' => 0] + $good],
+            'baris pecahan' => [['lines' => 3.5] + $good],
+            'halaman nol' => [['pages' => 0] + $good],
+            'halaman teks' => [['pages' => '72'] + $good],
+            'butir kedua rusak' => [$good, ['lines' => -1] + $good],
+        ] as $case => $parts) {
+            $this->artisan('aksara:import', ['--path' => $this->fixtureWithParts($parts)])
+                ->expectsOutputToContain('Rincian gerbang G3 tidak sah')
+                ->assertFailed();
+            $this->assertNull(Gate::where('code', 'G3')->first()->parts, $case);
+            $this->assertSame(4, Gate::count(), $case);
+        }
+        // Nilai 0 (bilangan bulat di JSON) sah; json_encode menyimpannya tanpa ",0", tampilannya tetap "0,0%".
+        $this->artisan('aksara:import', ['--path' => $this->fixtureWithParts([['value' => 0] + $good])])->assertSuccessful();
+        $this->assertEquals(0, Gate::where('code', 'G3')->first()->parts[0]['value']);
+        $this->actingAs(User::factory()->create());
+        $this->get('/ringkasan')->assertOk()->assertSee('baris cetak 0,0% (308 baris, 72 halaman)');
+    }
+
     public function test_import_rejects_inconsistent_official_pipeline(): void
     {
         $unknown = $this->fixtureWith(fn (array $manifest) => ['official' => 'crnn_tidak_ada'] + $manifest);

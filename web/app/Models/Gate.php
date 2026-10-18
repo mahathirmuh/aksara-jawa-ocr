@@ -11,5 +11,6 @@ class Gate extends Model
 
     protected $guarded = [];
 
-    protected $casts = ['passed' => 'boolean', 'value' => 'float', 'target' => 'float'];
+    /** parts: rincian per kelompok baris (G3: baris cetak dan tulisan tangan), null pada ekspor lama. */
+    protected $casts = ['passed' => 'boolean', 'value' => 'float', 'target' => 'float', 'parts' => 'array'];
 }

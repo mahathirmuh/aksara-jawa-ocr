@@ -48,6 +48,7 @@ from src.decode import cer  # noqa: E402
 from src.evaluate import TARGETS  # noqa: E402
 from src.infer import load_checkpoint  # noqa: E402
 from src.tokenizer import nfc  # noqa: E402
+from eval_slant import KINDS, kind  # noqa: E402  (jenis tulisan per halaman: satu daftar untuk semua skrip)
 
 SCHEMA = 1
 LABELS = ROOT / "data/real/nusaaksara/labels.tsv"
@@ -176,6 +177,31 @@ def aggregate(refs: dict, hyps: dict, names: list[str]) -> dict:
     rr, hh = [refs[n] for n in names], [hyps[n] for n in names]
     return {"lines": len(names), "cer": cer(rr, hh), "cer_no_space": cer(rr, [h.replace(" ", "") for h in hh]),
             "exact": sum(a == b for a, b in zip(rr, hh)) / len(names)}
+
+
+def gate_parts(rows: list[dict], refs: dict[str, str], hyps: dict[str, str]) -> list[dict]:
+    """CER pipeline per jenis tulisan baris nyata, dilaporkan di samping G3 dan tidak menggantikannya (keputusan user
+    2026-10-18). Jenis menurut halaman (`eval_slant.kind`; halaman tulisan tangan = klasifikasi visual yang belum
+    diperiksa manusia); jenis tanpa baris tidak dicantumkan. `chars` = panjang referensi, untuk menjumlah ulang ke G3."""
+    parts = []
+    for name, key in zip(KINDS, ("cetak", "tulisan_tangan")):
+        sel = [r for r in rows if kind(r.get("source_id", "")) == name]
+        if not sel:
+            continue
+        names = [Path(r["image_path"]).name for r in sel]
+        parts.append({"key": key, "label": "baris cetak" if key == "cetak" else "tulisan tangan",
+                      "value": aggregate(refs, hyps, names)["cer"], "lines": len(names),
+                      "pages": len({r.get("source_id", "") for r in sel}), "chars": sum(len(refs[n]) for n in names)})
+    return parts
+
+
+def attach_gate_parts(gates: list[dict], parts: list[dict]) -> None:
+    """Pasang rincian `gate_parts` ke gerbang G3; berhenti bila rinciannya tidak menjumlah ke angka G3."""
+    g3 = next(g for g in gates if g["code"] == "G3")
+    whole = sum(p["value"] * p["chars"] for p in parts) / max(1, sum(p["chars"] for p in parts))
+    if abs(whole - g3["value"]) > TOL:
+        raise SystemExit(f"rincian G3 per jenis tulisan ({whole:.6f}) tidak menjumlah ke G3 ({g3['value']:.6f}); ekspor dihentikan")
+    g3["parts"] = parts
 
 
 def write_atomic(path: Path, text: str) -> None:
@@ -577,6 +603,8 @@ def main(argv=None) -> None:
     if not args.limit:  # angka 745 baris harus sama dengan laporan resmi (termasuk run lanjutan yang ikut)
         check_official(metrics, official)
         print(f"cek angka resmi: sama ({', '.join(official)})", flush=True)
+        # G3 tetap atas semua baris; rincian per jenis tulisan di sampingnya (hanya bila semua baris ikut).
+        attach_gate_parts(gates, gate_parts(rows, refs, hyps[official_key]))
 
     metrics += synth_metrics("crnn_fonts_beam", "crnn_fonts", read_json(ROOT / "out/beam/fonts_o5.json"))
     if extra_beam:

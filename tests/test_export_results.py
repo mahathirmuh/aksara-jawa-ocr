@@ -19,6 +19,9 @@ from export_results import (  # noqa: E402
     PIPELINES,
     TARGETS,
     add_optional,
+    aggregate,
+    attach_gate_parts,
+    gate_parts,
     check_official,
     check_optional_run,
     gate_problem,
@@ -774,3 +777,41 @@ def test_fase11_runs_are_told_apart_by_the_neighbor_fragments():
             (CTRL11, fase9_args("fase11_ctrl", standard=0.0), "run ejaan baku, tetapi standard_prob = 0")):
         with pytest.raises(SystemExit, match=message):
             check_optional_run(spec, 1500, args)
+
+
+def test_gate_parts_split_g3_by_kind_of_writing_and_add_up_to_it():
+    rows = [{"image_path": "img/a.png", "source_id": "nusaaksara_hal_0"},
+            {"image_path": "img/b.png", "source_id": "nusaaksara_hal_1"},  # halaman tulisan tangan
+            {"image_path": "img/c.png", "source_id": "nusaaksara_hal_2"},
+            {"image_path": "img/d.png", "source_id": "nusaaksara_hal_0"}]  # halaman yang sama dengan a.png
+    refs = {"a.png": "ꦏꦭ", "b.png": "ꦠꦤꦩ", "c.png": "ꦧꦝ", "d.png": "ꦩꦤ"}
+    hyps = {"a.png": "ꦏ", "b.png": "ꦠꦤ", "c.png": "ꦧꦝꦁ", "d.png": "ꦩ"}  # CER cetak dan tulisan tangan berbeda
+    parts = gate_parts(rows, refs, hyps)
+    assert [p["key"] for p in parts] == ["cetak", "tulisan_tangan"]
+    printed, hand = parts
+    assert (printed["label"], printed["lines"], printed["pages"], printed["chars"]) == ("baris cetak", 3, 2, 6)
+    assert printed["value"] == pytest.approx(3 / 6)
+    assert (hand["label"], hand["lines"], hand["pages"], hand["chars"]) == ("tulisan tangan", 1, 1, 3)
+    assert hand["value"] == pytest.approx(1 / 3)
+    assert [p["key"] for p in gate_parts(rows[:1] + rows[2:], refs, hyps)] == ["cetak"]  # tanpa tulisan tangan
+    # Rincian dipasang ke G3 hanya bila menjumlah ke angka G3.
+    whole = aggregate(refs, hyps, ["a.png", "b.png", "c.png", "d.png"])["cer"]
+    gates = [{"code": "G1", "value": 0.002}, {"code": "G3", "value": whole}, {"code": "G4", "value": 1.0}]
+    attach_gate_parts(gates, parts)
+    assert gates[1]["parts"] == parts and "parts" not in gates[0] and "parts" not in gates[2]
+    gates[1]["value"] = whole + 1e-6
+    with pytest.raises(SystemExit, match="tidak menjumlah ke G3"):
+        attach_gate_parts(gates, parts)
+
+
+def test_main_attaches_the_g3_parts_of_the_official_pipeline_only_for_a_full_export():
+    # main() butuh model dan data nyata: pemasangan rincian G3 dijaga lewat sumbernya (sesudah cek angka resmi, hanya
+    # pada ekspor semua baris, dari prediksi pipeline resmi).
+    import inspect
+
+    import export_results as er
+
+    source = inspect.getsource(er.main)
+    at = source.index("attach_gate_parts(gates, gate_parts(rows, refs, hyps[official_key]))")
+    full = source.rindex("if not args.limit:", 0, at)
+    assert full < source.index("check_official(metrics, official)") < at
