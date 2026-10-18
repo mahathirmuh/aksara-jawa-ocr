@@ -117,7 +117,9 @@ class MatrixImporter
     private static function cell(mixed $c, bool $withDelta): bool
     {
         return is_array($c) && self::number($c['cer'] ?? null) && $c['cer'] >= 0 && self::count($c['lines'] ?? null)
-            && (! $withDelta || (self::number($c['delta'] ?? null) && self::interval($c['ci95'] ?? null)));
+            && self::number($c['ned'] ?? null) && $c['ned'] >= 0 && $c['ned'] <= 1
+            && (! $withDelta || (self::number($c['delta'] ?? null) && self::interval($c['ci95'] ?? null)
+                && self::number($c['ned_delta'] ?? null) && self::interval($c['ned_ci95'] ?? null)));
     }
 
     private static function number(mixed $x): bool

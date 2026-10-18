@@ -34,8 +34,10 @@ class Matriks extends Component
             'methods' => $m['methods'],
             'chart' => [
                 'labels' => array_map(fn ($r) => $r['label'], $scored),
-                'values' => array_map(fn ($r) => round($r['cetak']['cer'], 5), $scored),
+                'values' => array_map(fn ($r) => round($r['cetak']['ned'], 5), $scored),
                 'configs' => array_map(fn ($r) => self::GROUP_LABELS[$r['group']], $scored),
+                // NED selalu 0-100%; sumbu tetap dibulatkan ke atas per 20 poin bila nilai lain dipakai.
+                'max' => max(1.0, ceil(max([0, ...array_map(fn ($r) => $r['cetak']['ned'], $scored)]) * 5) / 5),
             ],
             'ablation' => collect($m['ablation'])->groupBy('group')->all(),
         ];

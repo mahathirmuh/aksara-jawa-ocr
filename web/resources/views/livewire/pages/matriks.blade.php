@@ -19,17 +19,20 @@
                 <div class="mb-3">
                     <h2 class="section-title">Perbandingan metode OCR</h2>
                     <p class="card-subtitle max-w-4xl">
-                        CER pada potongan baris NusaAksara yang sama ({{ $matrix['subsets']['cetak']['lines'] }} baris cetak dari
+                        Potongan baris NusaAksara yang sama untuk semua metode ({{ $matrix['subsets']['cetak']['lines'] }} baris cetak dari
                         {{ $matrix['subsets']['cetak']['pages'] }} halaman sebagai ukuran utama; {{ $matrix['subsets']['semua']['lines'] }}
-                        baris = G3). Semua keluaran dinilai dengan aturan yang sama: {{ $matrix['rules'] }}. Selisih terhadap model resmi
-                        dengan selang kepercayaan 95% bootstrap per halaman; negatif = lebih baik.
+                        baris = G3). Semua keluaran dinilai dengan aturan yang sama: {{ $matrix['rules'] }}.
+                        <b>NED</b> (normalized edit distance, ICDAR 2019) = suntingan dibagi panjang terpanjang label/keluaran, selalu 0–100%;
+                        <b>CER</b> = suntingan dibagi panjang label, angka gerbang resmi, bisa lewat 100% (100% = keluaran kosong). Selisih
+                        terhadap model resmi dengan selang kepercayaan 95% bootstrap per halaman; negatif = lebih baik.
                     </p>
                 </div>
                 <div class="table-wrap">
-                    <table class="data-table min-w-[56rem]">
+                    <table class="data-table min-w-[72rem]">
                         <thead><tr>
-                            <th class="w-[30%]">Metode</th><th>Kelompok</th><th class="r">Cetak</th><th class="r">Δ cetak, SK 95%</th>
-                            <th class="r">Tulisan tangan</th><th class="r">Semua (G3)</th><th class="r">Baris persis</th><th class="r">Runtuh ≥100%</th>
+                            <th class="w-[24%]">Metode</th><th>Kelompok</th><th class="r">NED cetak</th><th class="r">Δ NED cetak, SK 95%</th>
+                            <th class="r">CER cetak</th><th class="r">Δ CER cetak, SK 95%</th><th class="r">CER tulisan tangan</th>
+                            <th class="r">CER semua (G3)</th><th class="r">Baris persis</th>
                         </tr></thead>
                         <tbody>
                             @foreach ($methods as $r)
@@ -40,7 +43,12 @@
                                     </td>
                                     <td><span class="status {{ \App\Livewire\Pages\Matriks::GROUP_STATUS[$r['group']] }}">{{ \App\Livewire\Pages\Matriks::GROUP_LABELS[$r['group']] }}</span></td>
                                     @if ($r['cetak'])
-                                        <td class="r num text-sm font-semibold" data-cell="cetak">{{ pct($r['cetak']['cer'], 2) }}</td>
+                                        <td class="r num text-sm font-semibold" data-cell="ned">{{ pct($r['cetak']['ned'], 2) }}</td>
+                                        <td class="r num whitespace-nowrap" data-cell="ned_delta">
+                                            @if (isset($r['cetak']['ned_delta'])) {{ $pp($r['cetak']['ned_delta']) }} <span class="text-muted">{{ $ci($r['cetak']['ned_ci95']) }}</span>
+                                            @else <span class="text-muted">pembanding</span> @endif
+                                        </td>
+                                        <td class="r num" data-cell="cetak">{{ pct($r['cetak']['cer'], 2) }}</td>
                                         <td class="r num whitespace-nowrap" data-cell="delta">
                                             @if (isset($r['cetak']['delta'])) {{ $pp($r['cetak']['delta']) }} <span class="text-muted">{{ $ci($r['cetak']['ci95']) }}</span>
                                             @else <span class="text-muted">pembanding</span> @endif
@@ -48,11 +56,10 @@
                                         <td class="r num" data-cell="tulisan_tangan">{{ $r['tulisan_tangan'] ? pct($r['tulisan_tangan']['cer'], 2) : '–' }}</td>
                                         <td class="r num" data-cell="semua">{{ $r['semua'] ? pct($r['semua']['cer'], 2) : '–' }}</td>
                                         <td class="r num">{{ pct($r['cetak']['exact'], 1) }}</td>
-                                        <td class="r num">{{ pct($r['cetak']['collapsed'], 1) }}</td>
                                     @else
-                                        <td colspan="6" class="text-muted" data-cell="partial">
-                                            hanya {{ $r['partial']['lines'] }} baris dibaca: CER {{ pct($r['partial']['cer'], 1) }}
-                                            (model resmi pada baris yang sama {{ pct($r['partial']['reference_cer'], 1) }})
+                                        <td colspan="7" class="text-muted" data-cell="partial">
+                                            hanya {{ $r['partial']['lines'] }} baris dibaca: NED {{ pct($r['partial']['ned'] ?? null, 1) }}, CER {{ pct($r['partial']['cer'], 1) }}
+                                            (model resmi pada baris yang sama: NED {{ pct($r['partial']['reference_ned'] ?? null, 1) }}, CER {{ pct($r['partial']['reference_cer'], 1) }})
                                         </td>
                                     @endif
                                 </tr>
@@ -61,7 +68,7 @@
                     </table>
                 </div>
                 <div class="relative mt-4" style="height: {{ max(12, 3 + 2 * count($chart['labels'])) }}rem" x-data="chart('bars', @js($chart))" wire:ignore>
-                    <canvas x-ref="canvas" role="img" aria-label="CER baris cetak per metode"></canvas>
+                    <canvas x-ref="canvas" role="img" aria-label="NED baris cetak per metode"></canvas>
                 </div>
             </div>
         </section>

@@ -33,7 +33,10 @@ class MatrixPageTest extends TestCase
 
     private function cell(float $cer, int $lines, ?float $delta = null, array $extra = []): array
     {
-        return $extra + ['cer' => $cer, 'lines' => $lines, 'pages' => 7] + ($delta === null ? [] : ['delta' => $delta, 'ci95' => [$delta - 0.01, $delta + 0.01]]);
+        // NED dibuat 0,9 x CER yang dipotong di 100%, selisihnya 0,8 x selisih CER: angka berbeda supaya kolomnya tidak tertukar.
+        return $extra + ['cer' => $cer, 'ned' => round(min($cer, 1.0) * 0.9, 5), 'lines' => $lines, 'pages' => 7]
+            + ($delta === null ? [] : ['delta' => $delta, 'ci95' => [$delta - 0.01, $delta + 0.01],
+                'ned_delta' => $delta * 0.8, 'ned_ci95' => [$delta * 0.8 - 0.01, $delta * 0.8 + 0.01]]);
     }
 
     private function method(string $key, string $group, ?float $cetak, ?float $delta = null, array $extra = []): array
@@ -65,7 +68,7 @@ class MatrixPageTest extends TestCase
                 $this->method('crnn_resmi', 'kita', 0.1234),
                 $this->method('gpt', 'vlm', 1.1197, 0.9963, ['offline' => false, 'output_tokens_per_line' => 87.0, 'usd_per_1000_lines' => 2.17]),
                 $this->method('tess', 'umum', 1.0933, 0.9699),
-                $this->method('lama', 'vlm', null, null, ['partial' => ['lines' => 50, 'cer' => 0.9099, 'reference_cer' => 0.2299]]),
+                $this->method('lama', 'vlm', null, null, ['partial' => ['lines' => 50, 'cer' => 0.9099, 'reference_cer' => 0.2299, 'ned' => 0.8, 'reference_ned' => 0.2]]),
             ],
             'architecture' => [['key' => 'arch_tr', 'label' => 'CNN + Transformer + CTC', 'params' => 4571709, 'val_clean' => 0.004,
                 'g1' => 0.006, 'g2' => 0.5, 'cetak' => ['cer' => 1.02, 'lines' => 308, 'pages' => 72]]],
@@ -90,13 +93,13 @@ class MatrixPageTest extends TestCase
         $this->actingAs(User::factory()->create());
         $html = $this->get(route('matriks'))->assertOk()->getContent();
 
-        $this->assertSame('Metode crnn_resmi catatan crnn_resmi Metode kita 12,34% pembanding 22,34% – 25,0% 50,0%',
+        $this->assertSame('Metode crnn_resmi catatan crnn_resmi Metode kita 11,11% pembanding 12,34% pembanding 22,34% – 25,0%',
             $this->part($html, 'data-method', 'crnn_resmi'));
-        $this->assertSame('Metode gpt catatan gpt VLM zero-shot 111,97% +99,63 [+98,63; +100,63] 121,97% – 25,0% 50,0%',
+        $this->assertSame('Metode gpt catatan gpt VLM zero-shot 90,00% +79,70 [+78,70; +80,70] 111,97% +99,63 [+98,63; +100,63] 121,97% – 25,0%',
             $this->part($html, 'data-method', 'gpt'));
-        $this->assertStringContainsString('OCR umum 109,33%', $this->part($html, 'data-method', 'tess'));
-        $this->assertSame('Metode lama catatan lama VLM zero-shot hanya 50 baris dibaca: CER 91,0% (model resmi pada baris yang sama 23,0%)',
-            $this->part($html, 'data-method', 'lama'));
+        $this->assertStringContainsString('OCR umum 90,00% +77,59', $this->part($html, 'data-method', 'tess'));
+        $this->assertSame('Metode lama catatan lama VLM zero-shot hanya 50 baris dibaca: NED 80,0%, CER 91,0% '
+            .'(model resmi pada baris yang sama: NED 20,0%, CER 23,0%)', $this->part($html, 'data-method', 'lama'));
         $this->assertSame('Metode gpt tidak tidak 4.590.909 0,05 87 2,17', $this->part($html, 'data-practical', 'gpt'));
         $this->assertSame('Metode crnn_resmi ya ya 4.590.909 0,05 – –', $this->part($html, 'data-practical', 'crnn_resmi'));
         $this->assertSame('CNN + Transformer + CTC 4.571.709 0,40% 0,60% 50,00% 102,0%', $this->part($html, 'data-arch', 'arch_tr'));
@@ -104,6 +107,9 @@ class MatrixPageTest extends TestCase
             $this->part($html, 'data-pair', 'crnn_fonts'));
         $this->assertSame('1 rotate 57,6% 87,9% +12,85', $this->part($html, 'data-augment', '1'));
         $this->assertStringContainsString('abc123', $html);
+        $this->assertSame(['labels' => ['Metode crnn_resmi', 'Metode gpt', 'Metode tess'], 'values' => [0.11106, 0.9, 0.9],
+            'configs' => ['Metode kita', 'VLM zero-shot', 'OCR umum'], 'max' => 1.0],
+            \App\Livewire\Pages\Matriks::viewData($this->matrix())['chart']);
 
         $highlighted = $this->xpath($html)->query("//tr[contains(@class, 'is-highlight')]/@data-method");
         $this->assertSame(['crnn_resmi'], array_map(fn ($n) => $n->value, iterator_to_array($highlighted)));
@@ -137,6 +143,16 @@ class MatrixPageTest extends TestCase
 
                 return $m;
             }, 'methods.1.cetak'],
+            'NED di atas 100%' => [function ($m) {
+                $m['methods'][0]['cetak']['ned'] = 1.2;
+
+                return $m;
+            }, 'methods.0.cetak'],
+            'selisih NED tanpa SK' => [function ($m) {
+                unset($m['methods'][2]['cetak']['ned_ci95']);
+
+                return $m;
+            }, 'methods.2.cetak'],
             'CER negatif' => [function ($m) {
                 $m['methods'][0]['cetak']['cer'] = -0.1;
 

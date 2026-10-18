@@ -103,7 +103,7 @@ const builders = {
                 indexAxis: 'y',
                 maintainAspectRatio: false,
                 layout: { padding: { top: 18 } },
-                scales: { x: percentAxis(c), y: { grid: { display: false }, ticks: { color: c.text } } },
+                scales: { x: percentAxis(c, p.max ?? 1), y: { grid: { display: false }, ticks: { color: c.text } } },
                 plugins: {
                     legend: { display: false },
                     tooltip: { callbacks: { label: (item) => `CER ${pct(item.raw, 2)} · ${p.configs[item.dataIndex]}` } },

@@ -4,6 +4,8 @@ Semua metode dinilai dengan aturan yang sama: keluaran dinormalkan NFC dan baris
 (spasi tetap dihitung, sama dengan evaluasi resmi G3), lalu CER (jarak Levenshtein per karakter) dihitung terhadap label
 pada urutan logis. Tidak ada pembersihan lain, jadi keluaran yang memuat huruf Latin atau penjelasan ikut dihitung salah. Ukuran utama = 308 baris cetak (scope repo); 745 baris
 (G3) dan tulisan tangan dilaporkan di sampingnya bila metodenya membaca semua baris.
+CER tidak berbatas atas (sisipan tidak dibatasi; keluaran kosong = 100%), jadi matriks juga melaporkan NED (normalized
+edit distance, ICDAR 2019): jumlah suntingan dibagi jumlah panjang terpanjang label/keluaran per baris, selalu 0-100%.
 
   python scripts/method_matrix.py tesseract [--lang jav]       Tesseract 5 siap pakai (tidak punya model aksara Jawa)
   python scripts/method_matrix.py crnn CKPT --name NAME         model kita (CRNN / Transformer), greedy, CPU
@@ -272,26 +274,26 @@ def stats(rows: list[dict]) -> dict:
     chars = sum(r["chars"] for r in rows)
     return {"lines": len(rows), "pages": len({r["page"] for r in rows}), "chars": chars,
             "cer": sum(r["edits"] for r in rows) / chars,
+            "ned": sum(r["edits"] for r in rows) / sum(r["norm"] for r in rows),
             "cer_no_space": sum(r["edits_ns"] for r in rows) / chars,
             "exact": sum(r["edits"] == 0 for r in rows) / len(rows),
             "collapsed": sum(r["edits"] >= r["chars"] for r in rows) / len(rows),
             "non_javanese": sum(not r["jv_only"] for r in rows) / len(rows)}
 
 
-def page_delta(a: list[dict], b: list[dict], resamples: int = 10_000, seed: int = 0) -> list[float]:
-    """SK 95% bootstrap per halaman untuk selisih CER a - b (baris yang sama di kedua sisi)."""
+def page_delta(a: list[dict], b: list[dict], den: str = "chars", resamples: int = 10_000, seed: int = 0) -> list[float]:
+    """SK 95% bootstrap per halaman untuk selisih a - b (baris yang sama di kedua sisi). den "chars" = CER (pembagi
+    panjang label, sama di kedua sisi); "norm" = NED (pembagi panjang terpanjang label/keluaran, milik tiap sisi)."""
     pages: dict[str, list[tuple]] = {}
     for ra, rb in zip(a, b):
-        pages.setdefault(ra["page"], []).append((ra["edits"], rb["edits"], ra["chars"]))
+        pages.setdefault(ra["page"], []).append((ra["edits"], ra[den], rb["edits"], rb[den]))
     names = sorted(pages)
     rng = random.Random(seed)
     diffs = []
     for _ in range(resamples):
         sample = [pages[rng.choice(names)] for _ in names]
-        ea = sum(x[0] for p in sample for x in p)
-        eb = sum(x[1] for p in sample for x in p)
-        chars = sum(x[2] for p in sample for x in p)
-        diffs.append((ea - eb) / chars)
+        ea, da, eb, db = (sum(x[k] for p in sample for x in p) for k in range(4))
+        diffs.append(ea / da - eb / db)
     diffs.sort()
     return [diffs[int(0.025 * (resamples - 1))], diffs[int(0.975 * (resamples - 1))]]
 
@@ -310,6 +312,7 @@ def run_score(args) -> None:
             ref = line["reference"]
             hyp = norm(text)
             rows.append({"line": line_id, "page": line["source_id"], "kind": line["kind"], "chars": len(ref),
+                         "norm": max(len(ref), len(hyp)),
                          "edits": Levenshtein.distance(ref, hyp), "edits_ns": Levenshtein.distance(ref, hyp.replace(" ", "")),
                          "jv_only": javanese_only(hyp)})
         scored[key] = {r["line"]: r for r in rows}
@@ -334,16 +337,21 @@ def run_score(args) -> None:
                 entry["subsets"][name]["delta_vs_reference"] = (
                     entry["subsets"][name]["cer"] - stats([ref_rows[i] for i in ids])["cer"])
                 entry["subsets"][name]["ci95_pages"] = page_delta(mine, [ref_rows[i] for i in ids])
+                entry["subsets"][name]["ned_delta_vs_reference"] = (
+                    entry["subsets"][name]["ned"] - stats([ref_rows[i] for i in ids])["ned"])
+                entry["subsets"][name]["ned_ci95_pages"] = page_delta(mine, [ref_rows[i] for i in ids], "norm")
         # Subset bersama untuk metode yang hanya membaca sebagian (mis. uji buta 50 baris).
         if not entry["subsets"]:
             ids = [i for i in (r["id"] for r in lines) if i in rows]
             entry["subsets"]["dibaca"] = stats([rows[i] for i in ids])
             entry["subsets"]["dibaca"]["reference_cer"] = stats([ref_rows[i] for i in ids])["cer"]
+            entry["subsets"]["dibaca"]["reference_ned"] = stats([ref_rows[i] for i in ids])["ned"]
         report["methods"][key] = entry
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "method_matrix.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
-    md = ["| Metode | Cetak (308) | Δ cetak, SK 95% | Tulisan tangan (437) | Semua (745) | Tanpa spasi (cetak) | "
-          "Baris persis (cetak) | Runtuh ≥100% (cetak) | Non-aksara (cetak) |", "|" + "---|" * 9]
+    md = ["| Metode | NED cetak | Δ NED cetak, SK 95% | CER cetak (308) | Δ CER cetak, SK 95% | Tulisan tangan (437) | "
+          "Semua (745) | Tanpa spasi (cetak) | Baris persis (cetak) | Runtuh ≥100% (cetak) | Non-aksara (cetak) |",
+          "|" + "---|" * 11]
 
     def pct(x):
         return "—" if x is None else f"{100 * x:.2f}%"
@@ -352,16 +360,18 @@ def run_score(args) -> None:
         if e["group"] in ("ablasi-baca", "arsitektur"):  # tabel sendiri (ablation, export)
             continue
         c, h, s = (e["subsets"].get(k) for k in ("cetak", "tulisan tangan", "semua"))
-        d = "—"
+        d = dn = "—"
         if c and "ci95_pages" in c:
             lo, hi = c["ci95_pages"]
             d = f"{100 * c['delta_vs_reference']:+.2f} [{100 * lo:+.2f}; {100 * hi:+.2f}]"
+            lo, hi = c["ned_ci95_pages"]
+            dn = f"{100 * c['ned_delta_vs_reference']:+.2f} [{100 * lo:+.2f}; {100 * hi:+.2f}]"
         if not c and "dibaca" in e["subsets"]:
             x = e["subsets"]["dibaca"]
             md.append(f"| {e['label']} | {pct(x['cer'])} pada {x['lines']} baris dibaca (resmi {pct(x['reference_cer'])}) "
-                      f"| — | — | — | — | — | — | — |")
+                      f"| — | — | — | — | — | — | — | — | — |")
             continue
-        md.append(f"| {e['label']} | {pct(c and c['cer'])} | {d} | {pct(h and h['cer'])} | {pct(s and s['cer'])} | "
+        md.append(f"| {e['label']} | {pct(c and c['ned'])} | {dn} | {pct(c and c['cer'])} | {d} | {pct(h and h['cer'])} | {pct(s and s['cer'])} | "
                   f"{pct(c and c['cer_no_space'])} | {pct(c and c['exact'])} | {pct(c and c['collapsed'])} | "
                   f"{pct(c and c['non_javanese'])} |")
     (OUT / "method_matrix.md").write_text("\n".join(md) + "\n", encoding="utf-8")
@@ -462,9 +472,10 @@ PRICES = {"gpt-4o": (2.50, 10.00)}  # USD per juta token masukan / keluaran, har
 def sub_cell(s: dict | None, full: bool = False) -> dict | None:
     if not s:
         return None
-    out = {"cer": s["cer"], "lines": s["lines"], "pages": s["pages"]}
+    out = {"cer": s["cer"], "ned": s["ned"], "lines": s["lines"], "pages": s["pages"]}
     if "delta_vs_reference" in s:
-        out |= {"delta": s["delta_vs_reference"], "ci95": s["ci95_pages"]}
+        out |= {"delta": s["delta_vs_reference"], "ci95": s["ci95_pages"],
+                "ned_delta": s["ned_delta_vs_reference"], "ned_ci95": s["ned_ci95_pages"]}
     if full:
         out |= {k: s[k] for k in ("cer_no_space", "exact", "collapsed", "non_javanese")}
     return out
@@ -491,7 +502,8 @@ def run_export(args) -> None:
                "semua": sub_cell(subsets.get("semua")), "partial": None}
         if "dibaca" in subsets:
             d = subsets["dibaca"]
-            row["partial"] = {"lines": d["lines"], "cer": d["cer"], "reference_cer": d["reference_cer"]}
+            row["partial"] = {"lines": d["lines"], "cer": d["cer"], "reference_cer": d["reference_cer"],
+                              "ned": d["ned"], "reference_ned": d["reference_ned"]}
         if meta.get("output_tokens") is not None and e["covered"]:
             row["output_tokens_per_line"] = meta["output_tokens"] / e["covered"]
             price = PRICES.get(meta.get("model_requested", ""))
