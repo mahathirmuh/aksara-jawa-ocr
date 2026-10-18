@@ -106,9 +106,9 @@
                     <div class="mb-3">
                         <h2 class="section-title">Arsitektur: BiLSTM lawan Transformer</h2>
                         <p class="card-subtitle max-w-4xl">
-                            CNN, data, langkah, dan jadwal belajar sama (resep run <span class="code">base</span>: 1.500 langkah dari nol, 2 font,
-                            tanpa augmentasi); yang beda hanya pemodel urutan sesudah CNN. Pada tahap ini kedua model belum mengenal
-                            cetakan nyata, jadi bandingkan kolom sintetis.
+                            CNN, data, langkah, dan jadwal belajar sama; yang beda hanya pemodel urutan sesudah CNN. Pasangan pertama
+                            memakai resep run <span class="code">base</span> (1.500 langkah dari nol, 2 font, tanpa augmentasi: belum mengenal
+                            cetakan nyata); pasangan resep penuh melatih Transformer ulang lewat rantai yang sama dengan model resmi.
                         </p>
                     </div>
                     <div class="table-wrap">
@@ -131,6 +131,26 @@
                             </tbody>
                         </table>
                     </div>
+                    @if ($stages)
+                        <h3 class="section-title mt-5 mb-2">Per tahap rantai model resmi</h3>
+                        <p class="card-subtitle mb-3 max-w-4xl">Transformer lawan CRNN sesudah tiap tahap yang sama. Selisih CER baris cetak (Transformer − CRNN) dengan SK 95% per halaman; positif = CRNN lebih baik.</p>
+                        <div class="table-wrap">
+                            <table class="data-table min-w-[48rem]">
+                                <thead><tr><th>Tahap</th><th class="r">Val bersih, Transformer / CRNN</th><th class="r">CER cetak, Transformer / CRNN</th><th class="r">Selisih CER cetak, SK 95%</th><th class="r">CER semua, Transformer / CRNN</th></tr></thead>
+                                <tbody>
+                                    @foreach ($stages as $s)
+                                        <tr data-stage="{{ $s['stage'] }}">
+                                            <td class="code">{{ $s['stage'] }}</td>
+                                            <td class="r num">{{ pct($s['val_transformer'] ?? null, 2) }} / {{ pct($s['val_crnn'] ?? null, 2) }}</td>
+                                            <td class="r num">{{ pct($s['cetak']['cer_t'], 1) }} / {{ pct($s['cetak']['cer_c'], 1) }}</td>
+                                            <td class="r num whitespace-nowrap">{{ $pp($s['cetak']['delta']) }} <span class="text-muted">{{ $ci($s['cetak']['ci95']) }}</span></td>
+                                            <td class="r num">{{ pct($s['semua']['cer_t'], 1) }} / {{ pct($s['semua']['cer_c'], 1) }}</td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                    @endif
                 </div>
             </section>
         @endif

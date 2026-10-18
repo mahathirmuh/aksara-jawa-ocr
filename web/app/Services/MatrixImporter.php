@@ -107,6 +107,20 @@ class MatrixImporter
                 $fail("augment.{$i} harus punya op, g3, dan heavy");
             }
         }
+        $stages = $data['architecture_stages'] ?? [];
+        if (! is_array($stages) || ! array_is_list($stages)) {
+            $fail('architecture_stages harus daftar');
+        }
+        foreach ($stages as $i => $s) {
+            $c = $s['cetak'] ?? null;
+            $ok = is_string($s['stage'] ?? null) && $s['stage'] !== '' && is_array($c)
+                && self::number($c['cer_t'] ?? null) && self::number($c['cer_c'] ?? null)
+                && self::number($c['delta'] ?? null) && self::interval($c['ci95'] ?? null)
+                && self::number($s['semua']['cer_t'] ?? null) && self::number($s['semua']['cer_c'] ?? null);
+            if (! $ok) {
+                $fail("architecture_stages.{$i} harus punya stage, cetak (cer_t, cer_c, delta, ci95), dan semua");
+            }
+        }
         foreach ($data['architecture'] as $i => $r) {
             if (! is_string($r['label'] ?? null) || ! self::count($r['params'] ?? null)) {
                 $fail("architecture.{$i} harus punya label dan params");

@@ -40,6 +40,7 @@ class Matriks extends Component
                 'max' => max(1.0, ceil(max([0, ...array_map(fn ($r) => $r['cetak']['ned'], $scored)]) * 5) / 5),
             ],
             'ablation' => collect($m['ablation'])->groupBy('group')->all(),
+            'stages' => $m['architecture_stages'] ?? [],
         ];
     }
 

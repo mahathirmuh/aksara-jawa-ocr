@@ -72,6 +72,10 @@ class MatrixPageTest extends TestCase
             ],
             'architecture' => [['key' => 'arch_tr', 'label' => 'CNN + Transformer + CTC', 'params' => 4571709, 'val_clean' => 0.004,
                 'g1' => 0.006, 'g2' => 0.5, 'cetak' => ['cer' => 1.02, 'ned' => 0.9, 'lines' => 308, 'pages' => 72]]],
+            'architecture_stages' => [['stage' => 'fase7_track', 'transformer' => 'archT_fase7_track', 'crnn' => 'crnn_fase7_track',
+                'val_transformer' => 0.0037, 'val_crnn' => 0.00234,
+                'cetak' => ['cer_t' => 0.1619, 'cer_c' => 0.138, 'ned_t' => 0.16, 'ned_c' => 0.1369, 'delta' => 0.0239, 'ci95' => [0.0155, 0.0318]],
+                'semua' => ['cer_t' => 0.2434, 'cer_c' => 0.2146]]],
             'ablation' => [$this->pair('crnn_fonts', 'data', -0.2013), $this->pair('crnn_beam', 'baca', -0.0156), $this->pair('noise', 'rujukan', -0.0004)],
             'augment' => [['k' => 0, 'op' => '(kontrol)', 'clean' => 0.003, 'heavy' => 0.65, 'g3' => 0.75, 'g3_no_space' => 0.7],
                 ['k' => 1, 'op' => 'rotate', 'clean' => 0.003, 'heavy' => 0.576, 'g3' => 0.8785, 'g3_no_space' => 0.78]],
@@ -106,6 +110,8 @@ class MatrixPageTest extends TestCase
         $this->assertSame('Komponen crnn_fonts fonts − fonts_ctrl −20,13 [−20,63; −19,63] −20,13 [−20,63; −19,63] −20,13 [−20,63; −19,63] dipakai',
             $this->part($html, 'data-pair', 'crnn_fonts'));
         $this->assertSame('1 rotate 57,6% 87,9% +12,85', $this->part($html, 'data-augment', '1'));
+        $this->assertSame('fase7_track 0,37% / 0,23% 16,2% / 13,8% +2,39 [+1,55; +3,18] 24,3% / 21,5%',
+            $this->part($html, 'data-stage', 'fase7_track'));
         $this->assertStringContainsString('abc123', $html);
         $this->assertSame(['labels' => ['Metode crnn_resmi', 'Metode gpt', 'Metode tess'], 'values' => [0.11106, 0.9, 0.9],
             'configs' => ['Metode kita', 'VLM zero-shot', 'OCR umum'], 'max' => 1.0],
@@ -173,6 +179,12 @@ class MatrixPageTest extends TestCase
 
                 return $m;
             }, 'augment.1'],
+            'tahap arsitektur tanpa SK' => [function ($m) {
+                unset($m['architecture_stages'][0]['cetak']['ci95']);
+
+                return $m;
+            }, 'architecture_stages.0'],
+            'tahap arsitektur bukan daftar' => [fn ($m) => ['architecture_stages' => ['fase7' => []]] + $m, 'architecture_stages harus daftar'],
             'subset tanpa halaman' => [function ($m) {
                 $m['subsets']['cetak']['pages'] = 0;
 

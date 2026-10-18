@@ -467,7 +467,11 @@ FACTS = {
     "vlm_zeroshot": ("vlm", False, False, "Uji buta 2026-09-14 pada 50 baris (22 cetak), prompt dan versi model tidak tercatat."),
     "arch_crnn_base": ("arsitektur", True, True, "BiLSTM 2 lapis dua arah; checkpoint run base (fase 4b)."),
     "arch_transformer": ("arsitektur", True, True, "Encoder Transformer 4 lapis, 4 kepala, feed-forward 768, posisi sinusoidal."),
+    "arch_crnn_full": ("arsitektur", True, True, "BiLSTM; model resmi (rantai base sampai fase9_ctrl)."),
+    "archT_fase9_ctrl": ("arsitektur", True, True, "Transformer dilatih ulang lewat rantai yang sama dengan model resmi."),
 }
+# Tabel arsitektur utama: pasangan tahap awal (resep base) dan pasangan resep penuh; tahap antara di architecture_stages.
+ARCH_MAIN = ["arch_crnn_base", "arch_transformer", "arch_crnn_full", "archT_fase9_ctrl"]
 PRICES = {"gpt-4o": (2.50, 10.00)}  # USD per juta token masukan / keluaran, harga publik OpenAI
 
 
@@ -481,6 +485,71 @@ def sub_cell(s: dict | None, full: bool = False) -> dict | None:
     if full:
         out |= {k: s[k] for k in ("cer_no_space", "exact", "collapsed", "non_javanese")}
     return out
+
+
+# Pembanding arsitektur per tahap rantai model resmi: (tahap, bacaan Transformer, bacaan CRNN, folder run Transformer,
+# folder run CRNN). Bacaan Transformer dari out/methods (scripts/run_arch_transformer_full.sh); CRNN dari ekspor hasil,
+# kecuali tahap base (out/methods/arch_crnn_base). Val = validasi bersih terakhir di log run (font latih).
+STAGES = [
+    ("base", "arch_transformer", "arch_crnn_base", "arch_transformer", "base"),
+    ("fase5_fonts", "archT_fase5_fonts", "crnn_fonts", "archT_fase5_fonts", "fase5_fonts"),
+    ("fase6_ctrl", "archT_fase6_ctrl", "crnn_fase6_ctrl", "archT_fase6_ctrl", "fase6_ctrl"),
+    ("fase7_track", "archT_fase7_track", "crnn_fase7_track", "archT_fase7_track", "fase7_track"),
+    ("fase8_std", "archT_fase8_std", "crnn_fase8_std", "archT_fase8_std", "fase8_std"),
+    ("fase9_ctrl", "archT_fase9_ctrl", "crnn_fase9_ctrl", "archT_fase9_ctrl", "fase9_ctrl"),
+]
+
+
+def last_val(run: str) -> float | None:
+    log = ROOT / "out/checkpoints" / run / "log.jsonl"
+    if not log.exists():
+        return None
+    vals = [json.loads(x)["val_cer"] for x in log.read_text(encoding="utf-8").splitlines() if '"val_cer"' in x]
+    return vals[-1] if vals else None
+
+
+def arch_stages(lines: list[dict]) -> list[dict]:
+    """Transformer lawan CRNN di tiap tahap rantai yang sudah dibaca: CER/NED baris cetak dan semua, selisih CER cetak
+    dengan SK 95% per halaman, dan val bersih terakhir masing-masing."""
+    exported: dict[str, dict] = {}
+    for x in (RESULTS / "predictions.jsonl").read_text(encoding="utf-8").splitlines():
+        if x.strip():
+            r = json.loads(x)
+            exported.setdefault(r["pipeline"], {})[r["line"]] = r["text"]
+
+    def texts(name: str) -> dict | None:
+        path = METHODS / f"{name}.jsonl"
+        if path.exists():
+            return {r["line"]: r.get("raw", r["text"]) for r in
+                    (json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x.strip())}
+        return exported.get(name)
+
+    def rows(t: dict) -> list[dict]:
+        out = []
+        for line in lines:
+            ref, hyp = line["reference"], norm(t[line["id"]])
+            out.append({"page": line["source_id"], "kind": line["kind"], "chars": len(ref),
+                        "norm": max(len(ref), len(hyp)), "edits": Levenshtein.distance(ref, hyp)})
+        return out
+
+    def rate(sel: list[dict], den: str) -> float:
+        return sum(r["edits"] for r in sel) / sum(r[den] for r in sel)
+
+    stages = []
+    for stage, t_name, c_name, t_run, c_run in STAGES:
+        t, c = texts(t_name), texts(c_name)
+        if t is None or c is None or len(t) < len(lines) or len(c) < len(lines):
+            continue
+        a, b = rows(t), rows(c)
+        pa = [r for r in a if r["kind"] == "cetak"]
+        pb = [r for r in b if r["kind"] == "cetak"]
+        stages.append({"stage": stage, "transformer": t_name, "crnn": c_name,
+                       "val_transformer": last_val(t_run), "val_crnn": last_val(c_run),
+                       "cetak": {"cer_t": rate(pa, "chars"), "cer_c": rate(pb, "chars"), "ned_t": rate(pa, "norm"),
+                                 "ned_c": rate(pb, "norm"), "delta": rate(pa, "chars") - rate(pb, "chars"),
+                                 "ci95": page_delta(pa, pb)},
+                       "semua": {"cer_t": rate(a, "chars"), "cer_c": rate(b, "chars")}})
+    return stages
 
 
 def run_export(args) -> None:
@@ -513,7 +582,10 @@ def run_export(args) -> None:
                 row["usd_per_1000_lines"] = 1000 * (meta["input_tokens"] * price[0] + meta["output_tokens"] * price[1]) / 1e6 / e["covered"]
         if meta.get("model_served"):
             row["model_served"] = meta["model_served"]
-        (arch_out if group == "arsitektur" else methods_out).append(row)
+        if group != "arsitektur":
+            methods_out.append(row)
+        elif key in ARCH_MAIN:
+            arch_out.append(row)
     # Waktu baca model kita diukur terpisah lewat jalur layanan Demo (subperintah latency), bukan saat ekspor hasil.
     latency_path = METHODS / "latency.json"
     if latency_path.exists():
@@ -524,6 +596,7 @@ def run_export(args) -> None:
                 row["seconds_per_line"] = latency[pipeline]
     order = {"kita": 0, "vlm": 1, "umum": 2}
     methods_out.sort(key=lambda r: (r["cetak"] is None, order.get(r["group"], 3), r["cetak"]["ned"] if r["cetak"] else 9))
+    arch_out.sort(key=lambda r: ARCH_MAIN.index(r["key"]))
     for row in arch_out:
         for gate in ("G1", "G2"):
             path = ROOT / f"out/eval/{row['key']}_{gate}_2k.json"
@@ -542,10 +615,11 @@ def run_export(args) -> None:
               "prompt": PROMPT, "prompt_sha": PROMPT_SHA, "rules": mm["rules"],
               "subsets": {"cetak": kinds["cetak"], "tulisan_tangan": kinds["tulisan tangan"],
                           "semua": {"lines": len(lines), "pages": len({r["source_id"] for r in lines})}},
-              "methods": methods_out, "architecture": arch_out, "ablation": pairs, "augment": augment}
+              "methods": methods_out, "architecture": arch_out, "architecture_stages": arch_stages(lines),
+              "ablation": pairs, "augment": augment}
     (RESULTS / "matrix.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"ditulis: {RESULTS / 'matrix.json'} ({len(methods_out)} metode, {len(arch_out)} arsitektur, "
-          f"{len(pairs)} pasangan ablasi, {len(augment)} augmentasi)")
+          f"{len(report['architecture_stages'])} tahap arsitektur, {len(pairs)} pasangan ablasi, {len(augment)} augmentasi)")
 
 
 def main(argv=None) -> None:
