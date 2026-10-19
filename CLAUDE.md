@@ -630,7 +630,11 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   Lampiran H (Jawa: transkripsi CER 0,054, WER 0,544) dan Tabel 4 (OCR Jawa: keenam model ">1"). Paper
   (`docs/paper/main.tex`, paragraf "Origin of the thresholds" di Data and Gates) dan slide "patokan" dek menyebut target
   sebagai target rencana kerja yang ditetapkan sebelum eksperimen, lalu menempatkannya terhadap rujukan itu; jangan
-  menuliskannya seolah target itu diturunkan dari rujukan tersebut. **Pembanding arsitektur:** `src.model.TransformerCTC` (CNN dan proyeksi sama dengan CRNN, BiLSTM diganti
+  menuliskannya seolah target itu diturunkan dari rujukan tersebut. **Paper diperbarui 2026-10-19 (permintaan user)** ke
+  model resmi `fase9_ctrl`: cetak / tulisan tangan / semua, NED, rantai 7 run (9.298 langkah, 297.504 sampel, 64.595
+  baris), ejaan baku, perbaikan font, beam + LM resmi, pembanding metode dan arsitektur, hasil negatif fase 9-11, derau
+  antar-run; tabel `tab_*` dari `scripts/matrix_latex.py` di-`\input` langsung (bukan `matrix_section.tex`, supaya teksnya
+  tidak berulang dengan bagian Setup). 8 halaman; versi 2026-10-12 dicadangkan di `docs/paper/main.tex.bak-20261019`. **Pembanding arsitektur:** `src.model.TransformerCTC` (CNN dan proyeksi sama dengan CRNN, BiLSTM diganti
   encoder Transformer pre-LN 4 lapis, 4 kepala, FF 768, key padding mask; 4.571.709 parameter lawan 4.590.909), `src.train
   --arch transformer`; checkpoint CRNN tetap berbentuk lama (`build_model`). Run `arch_transformer`
   (`scripts/run_arch_transformer.sh`) = resep persis run `base` (1.500 langkah dari nol, 2 font, tanpa augmentasi, berhenti
