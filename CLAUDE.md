@@ -119,6 +119,7 @@ cd web && php artisan aksara:dictionary                                         
 cd web && php artisan aksara:datasets                                                 # kartu data halaman Dataset saja (aksara:import ikut mengimpornya bila berkasnya ada)
 cd web && php artisan aksara:methods                                                  # kartu metode halaman Metode saja (aksara:import ikut mengimpornya bila berkasnya ada)
 python scripts/method_matrix.py score; python scripts/method_matrix.py ablation; python scripts/method_matrix.py export   # matriks metode (lihat butir "Matriks perbandingan metode OCR")
+python scripts/matrix_latex.py                   # tabel LaTeX paper (IEEEtran, bahasa Inggris) dari out/results/matrix.json -> docs/paper/matrix/ (docs/ tidak di-commit)
 cd web && php artisan aksara:matrix                                                   # halaman Matriks metode
 ```
 
@@ -606,8 +607,10 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   bila memakai metode di `out/methods`), `export` -> `out/results/matrix.json` (skema 1) -> `php artisan aksara:matrix` ->
   halaman web **Matriks metode** (`/matriks`, tabel `method_matrices`, `MatrixImporter` memeriksa bentuk; 15 test).
   **CER tidak berbatas atas** (keluaran kosong = 100%, sisipan tidak dibatasi; user bingung melihat 112%), jadi matriks
-  memakai **NED** (normalized edit distance, ICDAR 2019: jumlah suntingan / jumlah panjang terpanjang label-keluaran per
-  baris, selalu 0-100%) sebagai skala utama, CER di sampingnya (angka gerbang). Prompt VLM satu, dikunci sebelum ada hasil
+  memakai **NED** (normalized edit distance tingkat korpus: jumlah suntingan / jumlah panjang terpanjang label-keluaran
+  per baris, selalu 0-100%; `src.decode.ned`. ICDAR 2019 (LSVT/ReCTS/ArT) merata-ratakan rasio yang sama PER BARIS, jadi
+  jangan sebut rumus ini "rumus ICDAR 2019"; dikoreksi 2026-10-19, angkanya tidak berubah) sebagai skala utama, CER di
+  sampingnya (angka gerbang). Prompt VLM satu, dikunci sebelum ada hasil
   (sidik `6e50187e14c8`). Hasil 308 baris cetak (NED / CER; selisih NED terhadap model resmi, SK 95% per halaman):
   CRNN + beam + LM 10,68% / 10,77% (−1,53 [−1,96; −1,11]); **CRNN resmi greedy 12,22% / 12,34%**; Claude Opus 5.5
   zero-shot 77,23% / 83,61% (+65,01; dibaca 8 subagen Claude Code dari citra bernama acak, beberapa membuka 4-5 citra
@@ -621,7 +624,13 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   NusaAksara Tabel 4 (OCR aksara Jawa: semua model CER > 1, termasuk PP-OCRv3 fine-tuned dan GPT-4o) dan Tabel 11
   (kesepakatan anotator-validator transkripsi Jawa: CER 5,4%, WER 54,4%); Holley 2009 (D-Lib, OCR koran: baik 1-2%,
   rata-rata 2-10%, buruk > 10%, dengan catatan batas "dapat diterima" belum disepakati); Transkribus (< 10% baik untuk
-  tulisan tangan). **Pembanding arsitektur:** `src.model.TransformerCTC` (CNN dan proyeksi sama dengan CRNN, BiLSTM diganti
+  tulisan tangan). Diverifikasi ulang 2026-10-19 dari sumbernya: Holley (D-Lib Magazine 15(3/4), doi
+  10.1045/march2009-holley) menulis pita itu sebagai "% of OCR incorrect" TANPA kesepakatan apakah per karakter atau
+  per kata, jadi baca sebagai CER hanya untuk perbandingan; NusaAksara (arXiv 2502.18148, ACL 2025) Tabel 11 di
+  Lampiran H (Jawa: transkripsi CER 0,054, WER 0,544) dan Tabel 4 (OCR Jawa: keenam model ">1"). Paper
+  (`docs/paper/main.tex`, paragraf "Origin of the thresholds" di Data and Gates) dan slide "patokan" dek menyebut target
+  sebagai target rencana kerja yang ditetapkan sebelum eksperimen, lalu menempatkannya terhadap rujukan itu; jangan
+  menuliskannya seolah target itu diturunkan dari rujukan tersebut. **Pembanding arsitektur:** `src.model.TransformerCTC` (CNN dan proyeksi sama dengan CRNN, BiLSTM diganti
   encoder Transformer pre-LN 4 lapis, 4 kepala, FF 768, key padding mask; 4.571.709 parameter lawan 4.590.909), `src.train
   --arch transformer`; checkpoint CRNN tetap berbentuk lama (`build_model`). Run `arch_transformer`
   (`scripts/run_arch_transformer.sh`) = resep persis run `base` (1.500 langkah dari nol, 2 font, tanpa augmentasi, berhenti
@@ -1052,7 +1061,7 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     `phpunit.xml` memaksa SQLite in-memory (`force="true"`, jadi `DB_*` yang tertinggal di shell diabaikan) dan
     `tests/TestCase.php::createApplication` menolak database bernama `its_aksara` sebelum migrasi. Test memakai folder
     sementara untuk `storage/app/mt` (dulu `TranslationTest` menimpa hasil NLLB; dipulihkan dari DB lewat
-    `php artisan aksara:translate --dump`). 188 test web lolos di SQLite (2026-10-18; `MatrixPageTest` juga di PostgreSQL uji); 416 test Python.
+    `php artisan aksara:translate --dump`). 196 test web lolos di SQLite (2026-10-19; `MatrixPageTest` dan `NedDisplayTest` juga di PostgreSQL uji); 433 test Python.
     **Port:** Laravel 8010, layanan model 8011, layanan terjemahan 8012 — 8000/8001, 5173, dan 8020 dipakai proyek
     lain milik user di laptop yang sama (jangan dihentikan; cek dulu siapa yang mendengarkan sebelum memakai sebuah
     port, dan beri skrip sementara port 8030 ke atas). Test tetap bisa di SQLite in-memory
@@ -1064,6 +1073,15 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
     gerbang, metrik, ablasi, kesalahan aksara), `lines.jsonl`, `predictions.jsonl` (teks, CER, segmen beda
     per suku kata dari `src/align.py`, kolom citra per suku kata dari alignment CTC). Skrip berhenti kalau
     angka 745 baris beda dari laporan resmi. Uji buta VLM tersimpan di `out/eval/vlm_blind_50.json`.
+    **NED di samping CER (permintaan user 2026-10-19: "jangan tembus 100%", CRNN 4b CER 104% di Perbandingan, CER baris
+    400% di Penjelajah; user memilih "NED utama, CER di samping"):** metrik pipeline membawa `ned` (`src.decode.ned`,
+    tingkat korpus) dan tiap prediksi `ned` baris (`src.align.line_ned`); kolom `metrics.ned` dan `predictions.ned`
+    (migrasi `2026_10_19_000001`, null = ekspor lama), `ResultImporter` menolak NED di luar 0-1. Perbandingan: kolom NED
+    di depan CER dan batang uji buta NED; Penjelajah: daftar, urutan "NED (run resmi)", dan lencana per pipeline memakai NED
+    baris (CER kecil di samping); ekspor lama tanpa NED tetap tampil dengan CER. Gerbang G1-G3, grafik "Jarak G3 ke
+    target" di Ringkasan, dan selisih beam (urutan perbaikan/kerusakan) tetap CER, karena targetnya CER dan selisih CER
+    pada baris yang sama sebanding dengan selisih suntingan. Grafik batang (`chart('bars')`) menerima `metric`: garis
+    target G3 8% hanya pada grafik CER (sebelumnya grafik NED Matriks ikut bergaris target CER).
   - **Angka resmi = satu run, ditetapkan di satu tempat (2026-10-04).** `OFFICIAL_RUN` di
     `scripts/export_results.py` menentukan pipeline resmi: gerbang G1–G3 di manifest dibaca dari laporan
     `out/eval/<run>_G1_10k.json`, `_G2_10k.json`, `_G3_full.json` (run lama `fase5_fonts` memakai awalan
