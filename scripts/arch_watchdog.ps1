@@ -25,8 +25,19 @@ function Stop-Tree([int]$id) {
 }
 
 Say 'mulai'
+# Laptop tidur (Sleep/Hibernate/Modern Standby) membekukan training DAN penjaga; sesudah bangun log run tampak basi
+# padahal training tidak macet (2026-10-19 07:17-08:16: penjaga menghentikan training yang hanya membeku). Jeda antar
+# putaran penjaga > 5 menit = laptop baru bangun: umur log dihitung ulang dari saat bangun.
+$last = Get-Date
+$resumedAt = Get-Date '2000-01-01'
 while ($true) {
     Start-Sleep -Seconds 60
+    $now = Get-Date
+    if (($now - $last).TotalMinutes -gt 5) {
+        $resumedAt = $now
+        Say ("jeda {0} menit sejak putaran sebelumnya (laptop tidur?); umur log dihitung dari sekarang" -f [int]($now - $last).TotalMinutes)
+    }
+    $last = $now
     $text = Get-Content $log -Raw -Encoding utf8
     if ($text -match '=== rantai selesai' -or $text -match '(?m)^GAGAL ') { Say 'selesai'; break }
     $procs = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match '-m src\.train --run (\S+)' })
@@ -34,10 +45,13 @@ while ($true) {
     $run = [regex]::Match($procs[0].CommandLine, '--run (\S+)').Groups[1].Value
     $runLog = Join-Path $repo "out\checkpoints\$run\log.jsonl"
     if (-not (Test-Path $runLog)) { continue }
-    $age = (Get-Date) - (Get-Item $runLog).LastWriteTime
+    $fresh = (Get-Item $runLog).LastWriteTime
+    if ($resumedAt -gt $fresh) { $fresh = $resumedAt }
+    $age = $now - $fresh
     if ($age.TotalMinutes -gt $limitMinutes) {
         Say ("log $run tidak bertambah {0} menit; training dihentikan supaya dilanjutkan dari checkpoint terakhir" -f [int]$age.TotalMinutes)
         $procs | ForEach-Object { Stop-Tree $_.ProcessId }
         Start-Sleep -Seconds 120
+        $last = Get-Date
     }
 }
