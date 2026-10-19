@@ -632,6 +632,24 @@ Ini keputusan desain yang sudah diargumentasikan di PLAN.md §3, bukan preferens
   500: 63,7% lawan 11,3%; 1.000: 31,1% lawan 41,5% saat CRNN melonjak). Kesimpulan: dengan anggaran yang sama BiLSTM jauh
   lebih baik; berlaku untuk anggaran ini saja (Transformer umumnya butuh lebih banyak data/langkah), satu run per lengan.
   Waktu baca di kolom `seconds` berkas arsitektur diukur dengan jumlah thread berbeda: jangan dibandingkan.
+  **Resep penuh (presentasi dipindah ke 2026-10-19 19:00, jadi ada waktu):** `scripts/run_arch_transformer_full.sh`
+  melatih ulang Transformer lewat rantai model resmi (fase5_quick 500, fase5_fonts 1.298, fase6_ctrl 500/884/1.500,
+  fase7_track, fase8_std, fase9_ctrl; argumen dari log run CRNN), 2026-10-18 16:21 sampai 2026-10-19 10:44, lalu
+  evaluasi otomatis. Per tahap (val bersih T / C; CER 308 baris cetak T / C; selisih, SK 95% per halaman): base 5,84% /
+  0,38%, 80,2% / 82,2%, −2,00 [−4,97; +1,03]; fase5_fonts 0,60% / 0,24%, 40,7% / 34,8%, +5,89 [+3,97; +7,96]; fase6_ctrl
+  0,41% / 0,22%, 37,3% / 27,5%, +9,75 [+7,82; +11,59]; fase7_track 0,37% / 0,23%, 16,2% / 13,8%, +2,40 [+1,55; +3,18];
+  fase8_std 0,35% / 0,17%, 14,2% / 12,6%, +1,58 [+0,55; +2,55]; **fase9_ctrl 0,28% / 0,17%, 14,1% / 12,3%, +1,77 [+1,14;
+  +2,35]** (NED cetak 13,87% / 12,22%; 745 baris 21,9% / 20,3%; G1 2.000 baris javatext 0,41% / 0,27%, G2 1,26% / 0,74%).
+  Kesimpulan: dengan riwayat latihan yang sama BiLSTM tetap lebih baik secara nyata, celahnya menyempit dari ~10 poin
+  (fase6) ke ~1,8; jarak antar suku kata menolong Transformer lebih besar (−21 lawan −14 poin cetak). Satu run per
+  lengan. Penyimpangan dari rantai CRNN: worker render 2 (bukan 4, urutan batch sama), kode render sekarang, dan titik
+  lanjut tambahan karena insiden. **Insiden selama rantai (jangan diulang):** (1) training MACET dua kali tanpa galat
+  (semua thread menunggu, 0 CPU): 2026-10-18 19:18 (archT_fase5_fonts, saat commit memori 74,2/75,5 GB) dan 2026-10-19
+  ~00:05 (archT_fase7_track langkah 150, memori lega); penyebab belum diketahui. `scripts/arch_watchdog.ps1` menghentikan
+  training yang log run-nya diam 15 menit dan skrip rantai mencoba ulang dari checkpoint (maks. 4 kali); penjaga sadar
+  laptop tidur (jeda putaran > 5 menit = baru bangun). (2) Laptop di-Sleep 07:17-08:16 lalu bangun TANPA charger
+  (baterai turun ~1%/menit dengan training; charger dicolok lagi pukul ~09:20 di 35%). (3) Pemantau `tail -F` meninggalkan
+  34 proses tail/grep yang mengunci log penjaga (lihat memori; pakai pemantau polling).
 - **OCR + VLM dan web UI (keputusan user 2026-09-24).**
   - **Dua pembaca, satu hakim:** CRNN tetap pembaca utama (offline, cepat) dan "hakim piksel"; VLM
     fine-tune = pembaca kedua yang menyumbang kandidat. Semua kandidat (greedy, N-best beam, VLM, LLM)
