@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from src.align import ctc_logp, greedy_path, line_cer, syllable_diff, syllable_spans
+from src.align import ctc_logp, greedy_path, line_cer, line_ned, syllable_diff, syllable_spans
 from src.tokenizer import TOKENIZER_PATH, Tokenizer, logical_syllables
 
 needs_tokenizer = pytest.mark.skipif(not TOKENIZER_PATH.exists(), reason="tokenizer belum dibangun")
@@ -42,6 +42,14 @@ def test_space_is_ok_only_where_label_has_space():
 def test_line_cer():
     assert line_cer("ꦲꦏꦸ", "ꦲꦏꦸ") == 0
     assert line_cer("ꦲꦏꦸ", "ꦲꦏ") == pytest.approx(1 / 3)
+
+
+def test_line_ned_divides_by_the_longer_side_so_it_never_exceeds_one():
+    assert line_ned("ꦲꦏꦸ", "ꦲꦏꦸ") == 0
+    assert line_ned("ꦲꦏꦸ", "ꦲꦏ") == pytest.approx(1 / 3)  # penghapusan: sama dengan CER
+    assert line_cer("ꦲ", "ꦲꦏꦏꦏ") == pytest.approx(3) and line_ned("ꦲ", "ꦲꦏꦏꦏ") == pytest.approx(3 / 4)
+    assert line_ned("ꦲꦏꦸ", "") == 1 and line_ned("", "ꦏ") == 1 and line_ned("", "") == 0
+    assert line_ned("é", "é") == 0  # NFC dulu, seperti CER
 
 
 def one_hot(ids, n_classes, repeat=2, blank_between=True):

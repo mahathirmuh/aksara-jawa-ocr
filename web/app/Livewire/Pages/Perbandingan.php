@@ -45,6 +45,8 @@ class Perbandingan extends Component
         $full = $order($metrics->get('nusaaksara_745', collect()));
         $blind = $order($metrics->get('blind_50', collect()));
         $official = Pipeline::official();
+        // Grafik uji buta memakai NED (0-100%) bila ekspornya menghitung NED untuk semua batang; ekspor lama: CER.
+        $blindMetric = $blind->isNotEmpty() && $blind->every(fn ($m) => $m->ned !== null) ? 'ned' : 'cer';
 
         return view('livewire.pages.perbandingan', [
             'hasData' => ResultImport::exists(),
@@ -59,10 +61,12 @@ class Perbandingan extends Component
             'followups' => $full->filter(fn ($m) => isset(self::FOLLOWUP_RUNS[$m->pipeline]) && $m->pipeline !== $official?->key)
                 ->map(fn ($m) => $pipelines[$m->pipeline]->label ?? $m->pipeline)->values(),
             'blind' => $blind,
+            'blindMetric' => strtoupper($blindMetric),
             'blindChart' => [
                 'labels' => $blind->map(fn ($m) => $pipelines[$m->pipeline]->label ?? $m->pipeline)->all(),
-                'values' => $blind->map(fn ($m) => round($m->cer, 5))->all(),
+                'values' => $blind->map(fn ($m) => round($m->{$blindMetric}, 5))->all(),
                 'configs' => $blind->map(fn ($m) => $pipelines[$m->pipeline]->config ?? '')->all(),
+                'metric' => strtoupper($blindMetric),
             ],
             'synth' => $metrics->only(['synth_dev', 'synth_heldout'])->map(fn ($rows) => $rows->keyBy('pipeline')),
             'beamPair' => Pipeline::beamPair(),

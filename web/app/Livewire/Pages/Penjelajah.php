@@ -28,11 +28,13 @@ class Penjelajah extends Component
 
     /**
      * Kunci = nilai di URL (?urut=). "fonts_*" bertahan dari saat pipeline resmi masih fase5_fonts; urutannya kini
-     * memakai CER pipeline resmi, dan ":resmi" diganti labelnya. Beam dibandingkan dengan greedy pasangannya (Pipeline::beamPair).
+     * memakai NED baris pipeline resmi (0-100%; seri dan ekspor lama tanpa NED: CER), ":resmi" diganti labelnya dan
+     * ":ukuran" ukuran yang dipakai. Beam dibandingkan dengan greedy pasangannya (Pipeline::beamPair) lewat selisih CER:
+     * pembaginya panjang label yang sama di kedua sisi, jadi selisihnya sebanding dengan selisih jumlah suntingan.
      */
     public const SORTS = [
-        'fonts_desc' => 'CER :resmi, terburuk dulu',
-        'fonts_asc' => 'CER :resmi, terbaik dulu',
+        'fonts_desc' => ':ukuran :resmi, terburuk dulu',
+        'fonts_asc' => ':ukuran :resmi, terbaik dulu',
         'gain' => 'Perbaikan beam terbesar',
         'loss' => 'Kerusakan beam terbesar',
         'name' => 'Nama berkas',
@@ -99,10 +101,10 @@ class Penjelajah extends Component
             : [...$this->pipes, $key];
     }
 
-    /** Subquery CER satu pipeline untuk baris yang sedang dipilih query utama. */
-    private function cerOf(string $pipeline): Builder
+    /** Subquery CER atau NED satu pipeline untuk baris yang sedang dipilih query utama. */
+    private function scoreOf(string $pipeline, string $column = 'cer'): Builder
     {
-        return Prediction::query()->select('cer')
+        return Prediction::query()->select($column)
             ->whereColumn('predictions.line_id', 'lines.id')
             ->where('pipeline', $pipeline)
             ->limit(1);
@@ -110,12 +112,15 @@ class Penjelajah extends Component
 
     private function lines(): Builder
     {
+        $official = Pipeline::official()?->key ?? Pipeline::DEFAULT_OFFICIAL;
         $inner = Line::query()->select('lines.*')
-            ->selectSub($this->cerOf(Pipeline::official()?->key ?? Pipeline::DEFAULT_OFFICIAL), 'official_cer')
+            ->selectSub($this->scoreOf($official, 'ned'), 'official_ned')
+            ->selectSub($this->scoreOf($official), 'official_cer')
             // Urutan "perbaikan/kerusakan beam" membandingkan pasangan yang sama dengan tag "beam membaik/memburuk".
-            ->selectSub($this->cerOf(Pipeline::beamPair()[0]), 'fonts_cer')
-            ->selectSub($this->cerOf(Pipeline::beamPair()[1]), 'beam_cer')
-            ->selectSub($this->cerOf('vlm_zeroshot'), 'vlm_cer');
+            ->selectSub($this->scoreOf(Pipeline::beamPair()[0]), 'fonts_cer')
+            ->selectSub($this->scoreOf(Pipeline::beamPair()[1]), 'beam_cer')
+            ->selectSub($this->scoreOf('vlm_zeroshot', 'ned'), 'vlm_ned')
+            ->selectSub($this->scoreOf('vlm_zeroshot'), 'vlm_cer');
         if (in_array($this->tag, self::TAGS, true)) {
             $inner->whereJsonContains('tags', $this->tag);
         } elseif ($this->tag === self::UNLABELED) {
@@ -125,11 +130,11 @@ class Penjelajah extends Component
         $query = Line::query()->fromSub($inner, 'lines');
 
         return match ($this->sort) {
-            'fonts_asc' => $query->orderBy('official_cer')->orderBy('external_id'),
+            'fonts_asc' => $query->orderBy('official_ned')->orderBy('official_cer')->orderBy('external_id'),
             'gain' => $query->orderByRaw('(fonts_cer - beam_cer) desc')->orderBy('external_id'),
             'loss' => $query->orderByRaw('(beam_cer - fonts_cer) desc')->orderBy('external_id'),
             'name' => $query->orderBy('external_id'),
-            default => $query->orderByDesc('official_cer')->orderBy('external_id'),
+            default => $query->orderByDesc('official_ned')->orderByDesc('official_cer')->orderBy('external_id'),
         };
     }
 
@@ -153,7 +158,9 @@ class Penjelajah extends Component
                 ? MachineTranslation::where('dataset', $current->dataset)->where('external_id', $current->external_id)->get()->keyBy('source')
                 : collect(),
             'pipelines' => $pipelines,
-            'sorts' => array_map(fn ($name) => str_replace(':resmi', $officialName, $name), self::SORTS),
+            'sorts' => array_map(fn ($name) => str_replace([':resmi', ':ukuran'], [$officialName,
+                Prediction::where('pipeline', $official?->key ?? Pipeline::DEFAULT_OFFICIAL)->whereNotNull('ned')->exists() ? 'NED' : 'CER'], $name),
+                self::SORTS),
             'shown' => $done->filter(fn ($p) => $predictions->has($p->key))->values(),
             'missing' => $done->filter(fn ($p) => in_array($p->key, $this->pipes, true) && ! $predictions->has($p->key))->values(),
             'predictions' => $predictions,

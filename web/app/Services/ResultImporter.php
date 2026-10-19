@@ -50,6 +50,23 @@ class ResultImporter
         ], $parts);
     }
 
+    /**
+     * NED baris atau pipeline (kunci "ned" sejak 2026-10-19). Ekspor lama tanpa kunci itu = null; nilai di luar 0-1
+     * berarti ekspor rusak (NED dibagi panjang terpanjang label/keluaran, jadi tidak pernah lewat 1) dan ditolak.
+     */
+    private static function ned(array $row, string $what): ?float
+    {
+        $ned = $row['ned'] ?? null;
+        if ($ned === null) {
+            return null;
+        }
+        if (! (is_int($ned) || is_float($ned)) || $ned < 0 || $ned > 1) {
+            throw new RuntimeException("NED {$what} harus bilangan 0 sampai 1, bukan ".json_encode($ned).'.');
+        }
+
+        return (float) $ned;
+    }
+
     public function import(string $dir): array
     {
         $manifest = $this->readJson($dir.'/manifest.json');
@@ -100,7 +117,8 @@ class ResultImporter
                 }
                 $rows[] = [
                     'line_id' => $ids[$p['line']], 'pipeline' => $p['pipeline'], 'text' => $p['text'],
-                    'cer' => $p['cer'], 'segments' => json_encode($p['segments'], JSON_UNESCAPED_UNICODE),
+                    'cer' => $p['cer'], 'ned' => self::ned($p, "prediksi {$p['pipeline']} {$p['line']}"),
+                    'segments' => json_encode($p['segments'], JSON_UNESCAPED_UNICODE),
                     'spans' => isset($p['spans']) ? json_encode($p['spans']) : null,
                     'confidence' => $p['confidence'] ?? null,
                 ];
@@ -112,7 +130,8 @@ class ResultImporter
             Metric::where('scope', '!=', 'translit_draft')->delete();
             foreach ($manifest['metrics'] as $m) {
                 Metric::create(array_intersect_key($m, array_flip(
-                    ['scope', 'pipeline', 'lines', 'cer', 'cer_no_space', 'exact', 'better', 'worse'])));
+                    ['scope', 'pipeline', 'lines', 'cer', 'cer_no_space', 'exact', 'better', 'worse']))
+                    + ['ned' => self::ned($m, 'metrik '.($m['scope'] ?? '?').' '.($m['pipeline'] ?? '?'))]);
             }
 
             Gate::query()->delete();

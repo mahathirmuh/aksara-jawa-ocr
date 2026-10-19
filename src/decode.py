@@ -39,3 +39,17 @@ def cer(references: Sequence[str], hypotheses: Sequence[str]) -> float:
         edits += Levenshtein.distance(ref, hyp)
         total += len(ref)
     return edits / max(1, total)
+
+
+def ned(references: Sequence[str], hypotheses: Sequence[str]) -> float:
+    """NED tingkat korpus: total edit distance / total max(panjang referensi, panjang hipotesis) per baris.
+
+    Selalu 0-1, sedangkan CER tidak berbatas atas (sisipan dibagi panjang referensi saja; keluaran kosong = 1).
+    Pembagi dijumlah dulu seperti `cer`; kompetisi ICDAR 2019 (LSVT, ReCTS, ArT) memakai rata-rata rasio per baris.
+    """
+    edits = total = 0
+    for ref, hyp in zip(references, hypotheses, strict=True):
+        ref, hyp = nfc(ref), nfc(hyp)
+        edits += Levenshtein.distance(ref, hyp)
+        total += max(len(ref), len(hyp))
+    return edits / max(1, total)

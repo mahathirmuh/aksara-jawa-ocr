@@ -10,18 +10,20 @@
                 <div class="mb-3">
                     <h2 class="section-title">745 baris nyata (G3 penuh)</h2>
                     <p class="card-subtitle max-w-4xl">Tiap baris = satu checkpoint dengan satu cara membaca (tertulis di bawah namanya), diukur pada baris yang sama. Tiap baris beam + LM membaca checkpoint yang tertulis di konfigurasinya, sama dengan baris greedy checkpoint itu; bobot LM-nya disetel per checkpoint di dev sintetis, bukan di NusaAksara.</p>
+                    <p class="card-subtitle mt-1 max-w-4xl"><b>NED</b> = jumlah suntingan dibagi jumlah panjang terpanjang label/keluaran tiap baris, selalu 0–100%. <b>CER</b> = suntingan dibagi panjang label, angka gerbang G3; bisa lewat 100% bila keluaran memuat banyak sisipan.</p>
                 </div>
-                {{-- Kolom pipeline dan catatan diberi lebar tetap; di ponsel kolom pipeline dipersempit supaya CER
+                {{-- Kolom pipeline dan catatan diberi lebar tetap; di ponsel kolom pipeline dipersempit supaya NED
                      ikut terlihat tanpa menggeser tabel. Baris pipeline resmi disorot (.is-highlight). --}}
                 <div class="table-wrap">
-                    <table class="data-table min-w-[50rem]">
-                        <thead><tr><th class="w-[14.5rem] sm:w-[44%]">Pipeline</th><th class="r">CER</th><th class="r">CER tanpa spasi</th><th class="r">Baris persis</th><th class="sm:w-[28%]">Catatan</th></tr></thead>
+                    <table class="data-table min-w-[54rem]">
+                        <thead><tr><th class="w-[14.5rem] sm:w-[40%]">Pipeline</th><th class="r">NED</th><th class="r">CER</th><th class="r">CER tanpa spasi</th><th class="r">Baris persis</th><th class="sm:w-[26%]">Catatan</th></tr></thead>
                         <tbody>
                             @foreach ($full as $m)
                                 @php($p = $pipelines[$m->pipeline] ?? null)
-                                <tr @class(['is-highlight' => $m->pipeline === $official?->key])>
+                                <tr @class(['is-highlight' => $m->pipeline === $official?->key]) data-metric="{{ $m->pipeline }}">
                                     <td><div class="text-sm font-semibold">{{ $p?->label ?? $m->pipeline }}</div><div class="code mt-0.5">{{ $p?->config }}</div></td>
-                                    <td class="r num text-sm font-semibold">{{ pct($m->cer, 2) }}</td>
+                                    <td class="r num text-sm font-semibold">{{ pct($m->ned, 2) }}</td>
+                                    <td class="r num">{{ pct($m->cer, 2) }}</td>
                                     <td class="r num">{{ pct($m->cer_no_space, 2) }}</td>
                                     <td class="r num">{{ pct($m->exact, 1) }}</td>
                                     <td class="text-muted">
@@ -91,19 +93,24 @@
                 <div class="card-body">
                     <div class="mb-3">
                         <h2 class="section-title">50 baris uji buta</h2>
-                        <p class="card-subtitle">Satu-satunya subset yang juga dibaca VLM. CER, makin pendek makin baik.</p>
+                        <p class="card-subtitle">Satu-satunya subset yang juga dibaca VLM. Batang = {{ $blindMetric }}{{ $blindMetric === 'NED' ? ' (0–100%)' : '' }}, makin pendek makin baik.</p>
                     </div>
                     {{-- Tinggi ikut jumlah batang supaya kerapatannya tetap: tiap run lanjutan yang diekspor menambah satu
                          batang. Paling kecil 16rem (h-64 semula, cukup untuk 7 batang). --}}
                     <div class="relative" style="height: {{ max(16, 3 + 1.75 * $blind->count()) }}rem" x-data="chart('bars', @js($blindChart))" wire:ignore>
-                        <canvas x-ref="canvas" role="img" aria-label="CER per pipeline pada 50 baris uji buta"></canvas>
+                        <canvas x-ref="canvas" role="img" aria-label="{{ $blindMetric }} per pipeline pada 50 baris uji buta"></canvas>
                     </div>
                     <div class="table-wrap mt-4">
                         <table class="data-table">
-                            <thead><tr><th>Pipeline</th><th class="r">CER</th><th class="r">Tanpa spasi</th></tr></thead>
+                            <thead><tr><th>Pipeline</th><th class="r">NED</th><th class="r">CER</th><th class="r">CER tanpa spasi</th></tr></thead>
                             <tbody>
                                 @foreach ($blind as $m)
-                                    <tr @class(['is-highlight' => $m->pipeline === $official?->key])><td>{{ $pipelines[$m->pipeline]->label ?? $m->pipeline }}</td><td class="r num">{{ pct($m->cer) }}</td><td class="r num">{{ pct($m->cer_no_space) }}</td></tr>
+                                    <tr @class(['is-highlight' => $m->pipeline === $official?->key]) data-blind="{{ $m->pipeline }}">
+                                        <td>{{ $pipelines[$m->pipeline]->label ?? $m->pipeline }}</td>
+                                        <td class="r num font-semibold">{{ pct($m->ned) }}</td>
+                                        <td class="r num">{{ pct($m->cer) }}</td>
+                                        <td class="r num">{{ pct($m->cer_no_space) }}</td>
+                                    </tr>
                                 @endforeach
                             </tbody>
                         </table>
@@ -137,7 +144,7 @@
                         </div>
                         <div class="table-wrap">
                             <table class="data-table">
-                                <thead><tr><th>Set</th><th class="r">Greedy</th><th class="r">Beam + LM</th></tr></thead>
+                                <thead><tr><th>Set</th><th class="r">CER greedy</th><th class="r">CER beam + LM</th></tr></thead>
                                 <tbody>
                                     @foreach (['synth_dev' => 'Dev sintetis (aug fase5)', 'synth_heldout' => 'Font held-out bersih'] as $scope => $name)
                                         @if ($synth->has($scope))

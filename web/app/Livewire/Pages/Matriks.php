@@ -36,6 +36,7 @@ class Matriks extends Component
                 'labels' => array_map(fn ($r) => $r['label'], $scored),
                 'values' => array_map(fn ($r) => round($r['cetak']['ned'], 5), $scored),
                 'configs' => array_map(fn ($r) => self::GROUP_LABELS[$r['group']], $scored),
+                'metric' => 'NED',  // tooltip "NED"; tanpa garis target G3 (target itu CER)
                 // NED selalu 0-100%; sumbu tetap dibulatkan ke atas per 20 poin bila nilai lain dipakai.
                 'max' => max(1.0, ceil(max([0, ...array_map(fn ($r) => $r['cetak']['ned'], $scored)]) * 5) / 5),
             ],

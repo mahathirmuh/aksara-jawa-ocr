@@ -22,7 +22,8 @@
                         Potongan baris NusaAksara yang sama untuk semua metode ({{ $matrix['subsets']['cetak']['lines'] }} baris cetak dari
                         {{ $matrix['subsets']['cetak']['pages'] }} halaman sebagai ukuran utama; {{ $matrix['subsets']['semua']['lines'] }}
                         baris = G3). Semua keluaran dinilai dengan aturan yang sama: {{ $matrix['rules'] }}.
-                        <b>NED</b> (normalized edit distance, ICDAR 2019) = suntingan dibagi panjang terpanjang label/keluaran, selalu 0–100%;
+                        <b>NED</b> (normalized edit distance) = jumlah suntingan dibagi jumlah panjang terpanjang label/keluaran tiap baris,
+                        selalu 0–100% (kompetisi ICDAR 2019 merata-ratakan rasio yang sama per baris);
                         <b>CER</b> = suntingan dibagi panjang label, angka gerbang resmi, bisa lewat 100% (100% = keluaran kosong). Selisih
                         terhadap model resmi dengan selang kepercayaan 95% bootstrap per halaman; negatif = lebih baik.
                     </p>

@@ -50,12 +50,19 @@
         <div class="grid items-start gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
             {{-- Daftar --}}
             <div class="flex flex-col gap-2">
+                {{-- Angka di daftar = NED baris (0-100%); ekspor lama tanpa NED: CER, dan keterangannya ikut. --}}
+                @php($listNed = $page->contains(fn ($l) => $l->official_ned !== null))
+                <p class="text-[11px] text-zinc-500 dark:text-zinc-400" data-list-metric="{{ $listNed ? 'ned' : 'cer' }}">
+                    @if ($listNed)Angka = NED baris (0–100%): suntingan dibagi panjang terpanjang label/keluaran.@else Angka = CER baris.@endif
+                </p>
                 <div class="card explorer-list" role="listbox" aria-label="Daftar baris">
                     @forelse ($page as $l)
+                        @php($crnnScore = $listNed ? $l->official_ned : $l->official_cer)
+                        @php($vlmScore = $listNed ? $l->vlm_ned : $l->vlm_cer)
                         <button type="button" wire:key="li-{{ $l->id }}" wire:click="select(@js($l->external_id))" role="option" aria-selected="{{ $current?->id === $l->id ? 'true' : 'false' }}"
-                                class="explorer-row">
+                                class="explorer-row" data-line="{{ $l->external_id }}">
                             <span class="font-mono text-xs">{{ $l->label() }}</span>
-                            <span class="num text-right text-xs text-zinc-500 dark:text-zinc-400">CRNN {{ pct($l->official_cer, 0) }}@if ($l->vlm_cer !== null) · VLM {{ pct($l->vlm_cer, 0) }}@endif</span>
+                            <span class="num text-right text-xs text-zinc-500 dark:text-zinc-400">CRNN {{ pct($crnnScore, 0) }}@if ($vlmScore !== null) · VLM {{ pct($vlmScore, 0) }}@endif</span>
                             <span class="col-span-2 truncate text-[11px] text-zinc-500 dark:text-zinc-400">{{ collect($l->tags)->reject(fn ($t) => $t === 'label tanpa spasi')->join(' · ') ?: ' ' }}</span>
                         </button>
                     @empty
@@ -152,14 +159,16 @@
                                 </div>
                             </div>
 
-                            {{-- Keluaran pipeline --}}
-                            @php($best = $predictions->min('cer'))
+                            {{-- Keluaran pipeline: lencana = NED baris (0-100%), CER kecil di sampingnya; ekspor lama tanpa NED: CER saja. --}}
+                            @php($score = $predictions->isNotEmpty() && $predictions->every(fn ($pr) => $pr->ned !== null) ? 'ned' : 'cer')
+                            @php($best = $predictions->min($score))
                             @foreach ($shown as $p)
                                 @php($pred = $predictions[$p->key])
-                                <div class="{{ $row }}" wire:key="row-{{ $current->id }}-{{ $p->key }}">
+                                <div class="{{ $row }}" wire:key="row-{{ $current->id }}-{{ $p->key }}" data-pred="{{ $p->key }}">
                                     <div class="flex flex-col gap-1">
                                         <div class="detail-name flex flex-wrap items-center gap-1.5">{{ $p->label }}
-                                            <span class="status {{ $pred->cer == $best ? 'status-blue' : 'status-gray' }} num">CER {{ pct($pred->cer, 0) }}</span>
+                                            <span class="status {{ $pred->{$score} == $best ? 'status-blue' : 'status-gray' }} num">{{ strtoupper($score) }} {{ pct($pred->{$score}, 0) }}</span>
+                                            @if ($score === 'ned')<span class="num text-[11px] font-normal text-zinc-500 dark:text-zinc-400">CER {{ pct($pred->cer, 0) }}</span>@endif
                                         </div>
                                         <div class="code">{{ $p->config }}@if ($pred->confidence) · keyakinan {{ $pred->confidence }}@endif</div>
                                     </div>

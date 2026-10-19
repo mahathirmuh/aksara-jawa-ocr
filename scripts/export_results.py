@@ -41,10 +41,10 @@ from rapidfuzz.distance import Levenshtein
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.align import greedy_path, line_cer, syllable_diff, syllable_spans  # noqa: E402
+from src.align import greedy_path, line_cer, line_ned, syllable_diff, syllable_spans  # noqa: E402
 from src.beam import line_log_probs, prefix_beam_search  # noqa: E402
 from src.charlm import CharLM  # noqa: E402
-from src.decode import cer  # noqa: E402
+from src.decode import cer, ned  # noqa: E402
 from src.evaluate import TARGETS  # noqa: E402
 from src.infer import load_checkpoint  # noqa: E402
 from src.tokenizer import nfc  # noqa: E402
@@ -174,8 +174,11 @@ def read_json(path: Path) -> dict:
 
 
 def aggregate(refs: dict, hyps: dict, names: list[str]) -> dict:
+    """CER (angka gerbang) dan NED tingkat korpus (skala 0-1 yang ditampilkan web di depan CER, permintaan user
+    2026-10-19: CER bisa lewat 100%)."""
     rr, hh = [refs[n] for n in names], [hyps[n] for n in names]
-    return {"lines": len(names), "cer": cer(rr, hh), "cer_no_space": cer(rr, [h.replace(" ", "") for h in hh]),
+    return {"lines": len(names), "cer": cer(rr, hh), "ned": ned(rr, hh),
+            "cer_no_space": cer(rr, [h.replace(" ", "") for h in hh]),
             "exact": sum(a == b for a, b in zip(rr, hh)) / len(names)}
 
 
@@ -659,7 +662,7 @@ def main(argv=None) -> None:
         for key, hh in hyps.items():
             if n not in hh:
                 continue
-            item = {"line": n, "pipeline": key, "text": hh[n], "cer": line_cer(ref, hh[n]),
+            item = {"line": n, "pipeline": key, "text": hh[n], "cer": line_cer(ref, hh[n]), "ned": line_ned(ref, hh[n]),
                     "segments": syllable_diff(ref, hh[n]), "spans": spans.get(key, {}).get(n)}
             if key == "vlm_zeroshot":
                 item["confidence"] = vlm[n].get("confidence")

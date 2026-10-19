@@ -114,7 +114,7 @@ class MatrixPageTest extends TestCase
             $this->part($html, 'data-stage', 'fase7_track'));
         $this->assertStringContainsString('abc123', $html);
         $this->assertSame(['labels' => ['Metode crnn_resmi', 'Metode gpt', 'Metode tess'], 'values' => [0.11106, 0.9, 0.9],
-            'configs' => ['Metode kita', 'VLM zero-shot', 'OCR umum'], 'max' => 1.0],
+            'configs' => ['Metode kita', 'VLM zero-shot', 'OCR umum'], 'metric' => 'NED', 'max' => 1.0],
             \App\Livewire\Pages\Matriks::viewData($this->matrix())['chart']);
 
         $highlighted = $this->xpath($html)->query("//tr[contains(@class, 'is-highlight')]/@data-method");

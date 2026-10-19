@@ -5,7 +5,9 @@ Semua metode dinilai dengan aturan yang sama: keluaran dinormalkan NFC dan baris
 pada urutan logis. Tidak ada pembersihan lain, jadi keluaran yang memuat huruf Latin atau penjelasan ikut dihitung salah. Ukuran utama = 308 baris cetak (scope repo); 745 baris
 (G3) dan tulisan tangan dilaporkan di sampingnya bila metodenya membaca semua baris.
 CER tidak berbatas atas (sisipan tidak dibatasi; keluaran kosong = 100%), jadi matriks juga melaporkan NED (normalized
-edit distance, ICDAR 2019): jumlah suntingan dibagi jumlah panjang terpanjang label/keluaran per baris, selalu 0-100%.
+edit distance tingkat korpus): jumlah suntingan dibagi jumlah panjang terpanjang label/keluaran per baris, selalu 0-100%,
+sama dengan `src.decode.ned`. Kompetisi ICDAR 2019 (LSVT, ReCTS, ArT) merata-ratakan rasio itu per baris; di sini
+pembaginya dijumlah dulu, seperti CER tingkat korpus.
 
   python scripts/method_matrix.py tesseract [--lang jav]       Tesseract 5 siap pakai (tidak punya model aksara Jawa)
   python scripts/method_matrix.py crnn CKPT --name NAME         model kita (CRNN / Transformer), greedy, CPU

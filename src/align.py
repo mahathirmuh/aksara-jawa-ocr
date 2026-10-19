@@ -22,6 +22,12 @@ def line_cer(reference: str, hypothesis: str) -> float:
     return Levenshtein.distance(reference, hypothesis) / max(1, len(reference))
 
 
+def line_ned(reference: str, hypothesis: str) -> float:
+    """NED satu baris (0-1): edit distance / max(panjang label, panjang keluaran), NFC, urutan logis."""
+    reference, hypothesis = nfc(reference), nfc(hypothesis)
+    return Levenshtein.distance(reference, hypothesis) / max(1, len(reference), len(hypothesis))
+
+
 def syllable_diff(reference: str, hypothesis: str) -> list[dict]:
     """Segmen hipotesis per suku kata logis.
 

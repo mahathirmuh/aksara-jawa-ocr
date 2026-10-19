@@ -804,6 +804,24 @@ def test_gate_parts_split_g3_by_kind_of_writing_and_add_up_to_it():
         attach_gate_parts(gates, parts)
 
 
+def test_aggregate_reports_corpus_ned_beside_cer():
+    # NED = jumlah suntingan / jumlah max(panjang label, panjang keluaran): tetap di bawah 100% walau CER lewat 100%.
+    refs = {"a.png": "ꦏ", "b.png": "ꦠꦤꦩ", "c.png": ""}
+    hyps = {"a.png": "ꦏꦭꦩꦤꦒ", "b.png": "ꦠꦤꦩ", "c.png": "ꦧ"}  # suntingan 4 / 0 / 1, pembagi NED 5 / 3 / 1
+    row = aggregate(refs, hyps, ["a.png", "b.png", "c.png"])
+    assert row["cer"] == pytest.approx(5 / 4)
+    assert row["ned"] == pytest.approx(5 / 9)  # dijumlah dulu, bukan rata-rata per baris (0,6)
+    assert (row["lines"], row["exact"]) == (3, pytest.approx(1 / 3))
+
+
+def test_main_writes_line_ned_beside_line_cer():
+    import inspect
+
+    import export_results as er
+
+    assert '"cer": line_cer(ref, hh[n]), "ned": line_ned(ref, hh[n])' in inspect.getsource(er.main)
+
+
 def test_main_attaches_the_g3_parts_of_the_official_pipeline_only_for_a_full_export():
     # main() butuh model dan data nyata: pemasangan rincian G3 dijaga lewat sumbernya (sesudah cek angka resmi, hanya
     # pada ekspor semua baris, dari prediksi pipeline resmi).

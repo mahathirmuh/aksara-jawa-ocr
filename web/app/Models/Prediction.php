@@ -5,14 +5,14 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-/** Keluaran satu pipeline untuk satu baris. CER & segmen beda dihitung di Python. */
+/** Keluaran satu pipeline untuk satu baris. CER, NED & segmen beda dihitung di Python. */
 class Prediction extends Model
 {
     public $timestamps = false;
 
     protected $guarded = [];
 
-    protected $casts = ['segments' => 'array', 'spans' => 'array', 'cer' => 'float'];
+    protected $casts = ['segments' => 'array', 'spans' => 'array', 'cer' => 'float', 'ned' => 'float'];
 
     public function line(): BelongsTo
     {

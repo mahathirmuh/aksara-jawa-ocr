@@ -94,8 +94,10 @@ const builders = {
         };
     },
 
-    /* Batang horizontal CER per pipeline, dengan garis target G3. */
+    /* Batang horizontal galat per pipeline. p.metric = nama ukuran (bawaan CER); garis target G3 hanya pada grafik CER,
+       karena targetnya (8%) ditetapkan dalam CER, bukan NED. */
     bars(p, c) {
+        const metric = p.metric ?? 'CER';
         return {
             type: 'bar',
             data: { labels: p.labels, datasets: [{ data: p.values, backgroundColor: c.s1, borderRadius: 4, barThickness: 16 }] },
@@ -106,8 +108,8 @@ const builders = {
                 scales: { x: percentAxis(c, p.max ?? 1), y: { grid: { display: false }, ticks: { color: c.text } } },
                 plugins: {
                     legend: { display: false },
-                    tooltip: { callbacks: { label: (item) => `CER ${pct(item.raw, 2)} · ${p.configs[item.dataIndex]}` } },
-                    target: { value: 0.08, color: c.good, label: 'target G3 8%' },
+                    tooltip: { callbacks: { label: (item) => `${metric} ${pct(item.raw, 2)} · ${p.configs[item.dataIndex]}` } },
+                    target: metric === 'CER' ? { value: 0.08, color: c.good, label: 'target G3 8%' } : {},
                 },
             },
             plugins: [targetPlugin],
